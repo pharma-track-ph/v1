@@ -7,7 +7,7 @@
 const CONFIG = {
     API_BASE:      window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
         ? 'http://localhost:5000/api'
-        : 'https://pharma-track-v2.onrender.com/api',
+        : '/api',
     TOKEN_KEY: 'pharmatrack_token',
     USER_KEY: 'pharmatrack_user',
     TOAST_TIMEOUT: 4000
