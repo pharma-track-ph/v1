@@ -40,6 +40,7 @@ app.use(cors({
         'http://127.0.0.1:5500',
         'http://localhost',
         'https://pharma-track-v2.onrender.com',
+        'https://pharma-track-ph.onrender.com',
         'null'
     ],
     credentials: true,
