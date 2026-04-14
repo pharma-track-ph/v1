@@ -9,6 +9,11 @@ const mysql = require('mysql2/promise');
 const fs = require('fs').promises;
 const path = require('path');
 
+// ============================================================
+// SECURITY: Disable multipleStatements in production
+// ============================================================
+const isProduction = process.env.NODE_ENV === 'production';
+
 const pool = mysql.createPool({
     host: process.env.DB_HOST,
     port: parseInt(process.env.DB_PORT),
@@ -19,7 +24,7 @@ const pool = mysql.createPool({
     connectionLimit: parseInt(process.env.DB_POOL_LIMIT || '10'),
     queueLimit: 0,
     timezone: '+08:00',
-    multipleStatements: true,  // Required for running full schema
+    multipleStatements: !isProduction,  // DISABLED in production for safety
     ssl: {
         rejectUnauthorized: false  // Required for Aiven self-signed certificate chain
     }
@@ -32,6 +37,12 @@ pool.on('connection', (connection) => {
 // Auto-initialize schema if tables don't exist
 async function initSchema() {
     try {
+        // PRODUCTION SAFETY: Skip auto-init if explicitly disabled
+        if (isProduction && process.env.SKIP_SCHEMA_INIT === 'true') {
+            console.log('🔐 [PRODUCTION] Schema initialization DISABLED — using existing database');
+            return;
+        }
+
         // Check for multiple critical tables to ensure schema completeness
         const criticalTables = ['users', 'products', 'orders', 'order_items'];
         const placeholders = criticalTables.map(() => '?').join(',');
@@ -45,6 +56,14 @@ async function initSchema() {
         const missingTables = criticalTables.filter(table => !existingTables.includes(table));
 
         if (missingTables.length > 0) {
+            // PRODUCTION SAFETY: Prevent schema init in production without explicit permission
+            if (isProduction) {
+                console.error('❌ [PRODUCTION] CRITICAL: Missing tables detected in production database!');
+                console.error('   Missing tables:', missingTables.join(', '));
+                console.error('   To initialize schema in production, set: SKIP_SCHEMA_INIT=false');
+                throw new Error('Cannot auto-initialize schema in production without explicit permission');
+            }
+
             console.log(`📦  Missing tables detected: ${missingTables.join(', ')} — importing schema...`);
 
             const schemaPaths = [
@@ -80,7 +99,11 @@ async function initSchema() {
                 console.warn('⚠️  Schema file not found — skipping auto-init.');
             }
         } else {
-            console.log('✅  Database schema is complete — skipping schema import.');
+            if (isProduction) {
+                console.log('✅ [PRODUCTION] Database schema is complete — Aiven data is PROTECTED');
+            } else {
+                console.log('✅  Database schema is complete — skipping schema import.');
+            }
         }
     } catch (err) {
         console.error('❌  Schema init failed:', err.message);
@@ -93,14 +116,33 @@ async function initializeDatabase() {
     let connection = null;
     try {
         connection = await pool.getConnection();
-        console.log(`✅  MySQL connected: ${process.env.DB_NAME || 'pharmatrack'}@${process.env.DB_HOST || 'localhost'}`);
+        const envLabel = isProduction ? '[PRODUCTION]' : '[DEVELOPMENT]';
+        console.log(`${envLabel} ✅ MySQL connected: ${process.env.DB_NAME || 'pharmatrack'}@${process.env.DB_HOST || 'localhost'}`);
 
+        // Verify database connectivity and permissions
         await connection.query('SELECT 1');
-        console.log('✅  Database permissions verified');
+        console.log(`${envLabel} ✅ Database permissions verified`);
+
+        // For production, verify critical tables exist BEFORE initialization
+        if (isProduction) {
+            const criticalTables = ['users', 'products', 'orders', 'order_items'];
+            const [tableCheck] = await connection.query(
+                `SELECT COUNT(*) as count FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name IN (${criticalTables.map(() => '?').join(',')})`
+                , criticalTables
+            );
+            const existingTableCount = tableCheck[0].count;
+            if (existingTableCount < criticalTables.length) {
+                throw new Error(`PRODUCTION SAFETY: Only ${existingTableCount}/${criticalTables.length} critical tables found. Missing tables will NOT be auto-created to protect existing data.`);
+            }
+            console.log(`${envLabel} 🔐 All ${criticalTables.length} critical tables verified — data is SAFE`);
+        }
 
         await initSchema();
 
-        console.log('✅  Database initialization completed successfully');
+        const completionMsg = isProduction
+            ? '✅ [PRODUCTION] Database initialization completed — Aiven data is PROTECTED'
+            : '✅  Database initialization completed successfully';
+        console.log(completionMsg);
     } catch (err) {
         if (err.code === 'ECONNREFUSED') {
             console.error('❌  MySQL connection failed: Database server is not running');
