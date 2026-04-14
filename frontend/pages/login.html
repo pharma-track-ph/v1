@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PharmaTrack – Login</title>
+    <link rel="stylesheet" href="../css/global.css">
+    <style>
+        /* Extra login-page polish */
+        .login-card .form-control {
+            height: 44px;
+            font-size: 0.95rem;
+        }
+
+        .login-card .btn-primary {
+            width: 100%;
+            height: 44px;
+            font-size: 0.95rem;
+            font-weight: 600;
+        }
+
+        .error-msg {
+            color: var(--danger);
+            font-size: 0.83rem;
+            margin-top: 8px;
+            text-align: center;
+            min-height: 20px;
+        }
+
+        .demo-accounts {
+            margin-top: 20px;
+            background: var(--light-blue);
+            border-radius: var(--border-radius);
+            padding: 14px 16px;
+            font-size: 0.78rem;
+        }
+
+        .demo-accounts h4 {
+            font-size: 0.8rem;
+            font-weight: 700;
+            color: var(--gray-700);
+            margin-bottom: 8px;
+        }
+
+        .demo-row {
+            display: flex;
+            justify-content: space-between;
+            padding: 3px 0;
+            color: var(--secondary);
+        }
+
+        .demo-row strong {
+            color: var(--dark);
+        }
+    </style>
+</head>
+
+<body>
+    <div class="login-page">
+        <div class="login-card">
+            <div class="login-logo">
+                <div class="logo-icon">💊</div>
+                <h1>PharmaTrack</h1>
+                <p>Pharmacy Inventory &amp; POS System</p>
+            </div>
+
+            <form id="login-form">
+                <div class="form-group">
+                    <label class="form-label" for="email">Email Address</label>
+                    <input type="email" id="email" name="email" class="form-control" placeholder="your@email.com"
+                        autocomplete="email" required>
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label" for="password">Password</label>
+                    <input type="password" id="password" name="password" class="form-control" placeholder="••••••••"
+                        autocomplete="current-password" required>
+                </div>
+
+                <p class="error-msg" id="login-error" aria-live="polite"></p>
+
+                <button type="submit" class="btn btn-primary" id="login-btn">
+                    Sign In
+                </button>
+            </form>
+
+            <!-- Demo accounts for academic defense -->
+            <div class="demo-accounts">
+                <h4>🔑 Demo Accounts</h4>
+                <div class="demo-row"><strong>Super Admin</strong><span>superadmin@pharmatrack.ph</span></div>
+                <div class="demo-row"><strong>Admin</strong><span>admin@pharmatrack.ph</span></div>
+                <div class="demo-row"><strong>Cashier</strong><span>cashier@pharmatrack.ph</span></div>
+                <div class="demo-row" style="margin-top:4px"><strong>Password (all)</strong><span>password123</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="toast-container" class="toast-container"></div>
+
+    <script>
+        // ── Redirect if already logged in ────────────────────────
+        const CONFIG = {
+            API_BASE: 'https://pharma-track-v2.onrender.com/api',
+            TOKEN_KEY: 'pharmatrack_token',
+            USER_KEY: 'pharmatrack_user', TOAST_TIMEOUT: 4000
+        };
+
+        const API = {
+            async request(endpoint, options = {}) {
+                const config = { ...options, headers: { 'Content-Type': 'application/json', ...(options.headers || {}) } };
+                const res = await fetch(`${CONFIG.API_BASE}${endpoint}`, config);
+                return res.json();
+            },
+            post(endpoint, body) { return this.request(endpoint, { method: 'POST', body: JSON.stringify(body) }); }
+        };
+
+        const Auth = {
+            getToken() { return localStorage.getItem(CONFIG.TOKEN_KEY); },
+            saveSession(token, user) {
+                localStorage.setItem(CONFIG.TOKEN_KEY, token);
+                localStorage.setItem(CONFIG.USER_KEY, JSON.stringify(user));
+            }
+        };
+
+        const Toast = {
+            show(msg, type = 'info') {
+                const c = document.getElementById('toast-container');
+                const t = document.createElement('div');
+                t.className = `toast ${type}`;
+                t.innerHTML = `<span>${type === 'error' ? '❌' : 'ℹ️'}</span><div><div class="toast-title">${type}</div><div class="toast-message">${msg}</div></div>`;
+                c.appendChild(t);
+                setTimeout(() => t.remove(), 4000);
+            }
+        };
+
+        // If already authenticated, redirect appropriately
+        if (Auth.getToken()) {
+            const user = JSON.parse(localStorage.getItem(CONFIG.USER_KEY) || '{}');
+            window.location.href = user.role === 'cashier' ? '/frontend/pages/pos.html' : '/frontend/pages/dashboard.html';
+        }
+
+        // ── Login Form ────────────────────────────────────────────
+        document.getElementById('login-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+
+            const email = document.getElementById('email').value.trim();
+            const password = document.getElementById('password').value;
+            const errorEl = document.getElementById('login-error');
+            const btn = document.getElementById('login-btn');
+
+            btn.disabled = true;
+            btn.textContent = 'Signing in…';
+            errorEl.textContent = '';
+
+            try {
+                const result = await API.post('/auth/login', { email, password });
+
+                if (result.success) {
+                    Auth.saveSession(result.token, result.user);
+
+                    // Role-based redirect
+                    const role = result.user.role;
+                    if (role === 'cashier') {
+                        window.location.href = '/frontend/pages/pos.html';
+                    } else {
+                        window.location.href = '/frontend/pages/dashboard.html';
+                    }
+                } else {
+                    errorEl.textContent = result.message || 'Login failed.';
+                    btn.disabled = false;
+                    btn.textContent = 'Sign In';
+                }
+            } catch (err) {
+                errorEl.textContent = 'Connection error. Is the server running?';
+                btn.disabled = false;
+                btn.textContent = 'Sign In';
+            }
+        });
+    </script>
+</body>
+
+</html>

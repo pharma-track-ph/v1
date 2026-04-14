@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dashboard – PharmaTrack</title>
+    <link rel="stylesheet" href="../css/global.css">
+    <link rel="stylesheet" href="../css/dashboard.css">
+    <!-- Chart.js CDN -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+</head>
+<body>
+<div class="app-container">
+
+    <!-- ── Sidebar ──────────────────────────────────────────── -->
+    <aside class="sidebar" id="sidebar">
+        <div class="sidebar-brand">
+            <div class="brand-icon">💊</div>
+            <div class="brand-text">
+                <h1>PharmaTrack</h1>
+                <p>Management System</p>
+            </div>
+        </div>
+
+        <nav class="sidebar-nav">
+            <p class="nav-section-label">Main</p>
+            <ul>
+                <li class="nav-item" data-roles="admin,super_admin,cashier">
+                    <a href="dashboard.html"><span class="nav-icon">📊</span> Dashboard</a>
+                </li>
+                <li class="nav-item" data-roles="admin,super_admin,cashier">
+                    <a href="pos.html"><span class="nav-icon">🛒</span> Point of Sale</a>
+                </li>
+            </ul>
+
+            <p class="nav-section-label">Management</p>
+            <ul>
+                <li class="nav-item" data-roles="admin,super_admin">
+                    <a href="inventory.html"><span class="nav-icon">📦</span> Inventory</a>
+                </li>
+                <li class="nav-item" data-roles="admin,super_admin">
+                    <a href="reports.html"><span class="nav-icon">📋</span> Reports</a>
+                </li>
+                <li class="nav-item" data-roles="admin,super_admin">
+                    <a href="forecasting.html"><span class="nav-icon">📈</span> Forecasting</a>
+                </li>
+            </ul>
+
+            <p class="nav-section-label">Admin</p>
+            <ul>
+                <li class="nav-item" data-roles="admin,super_admin">
+                    <a href="users.html"><span class="nav-icon">👥</span> Users</a>
+                </li>
+                <li class="nav-item" data-roles="super_admin">
+                    <a href="audit.html"><span class="nav-icon">🔍</span> Audit Logs</a>
+                </li>
+            </ul>
+
+            <ul style="margin-top:auto">
+                <li class="nav-item">
+                    <a href="#" data-action="logout"><span class="nav-icon">🚪</span> Sign Out</a>
+                </li>
+            </ul>
+        </nav>
+
+        <div class="sidebar-footer">
+            <div id="sidebar-user-name" class="fw-600">—</div>
+            <div id="sidebar-user-role" style="font-size:0.7rem;opacity:0.7">—</div>
+        </div>
+    </aside>
+
+    <div class="sidebar-overlay" id="sidebar-overlay"></div>
+
+    <!-- ── Main Wrapper ─────────────────────────────────────── -->
+    <div class="main-wrapper">
+        <header class="top-header">
+            <div class="header-left">
+                <button class="btn-menu-toggle" id="btn-menu-toggle">☰</button>
+                <div>
+                    <div class="header-title">Dashboard</div>
+                </div>
+            </div>
+            <div class="header-right">
+                <!-- Low Stock Alert -->
+                <div class="header-alert-btn">
+                    📦 Low Stock
+                    <span class="alert-badge" id="badge-low-stock" style="display:none">0</span>
+                </div>
+                <!-- Near Expiry Alert -->
+                <div class="header-alert-btn">
+                    ⚠️ Near Expiry
+                    <span class="alert-badge amber" id="badge-near-expiry" style="display:none">0</span>
+                </div>
+                <div class="header-user">
+                    <div class="user-avatar" id="header-avatar">?</div>
+                    <div class="user-info">
+                        <div class="user-name" id="header-user-name">Loading…</div>
+                        <div class="user-role" id="header-user-role">—</div>
+                    </div>
+                </div>
+            </div>
+        </header>
+
+        <main class="page-content">
+            <div class="page-header">
+                <div>
+                    <h2>Dashboard</h2>
+                    <p>Welcome back! Here's your pharmacy at a glance.</p>
+                </div>
+            </div>
+
+            <!-- ── KPI Cards ──────────────────────────────────── -->
+            <div class="kpi-grid">
+                <div class="kpi-card">
+                    <div class="kpi-icon blue">💰</div>
+                    <div class="kpi-info">
+                        <div class="kpi-label">Sales Today</div>
+                        <div class="kpi-value" id="kpi-sales-today">₱—</div>
+                        <div class="kpi-sub" id="kpi-txn-count">— transactions</div>
+                    </div>
+                </div>
+                <div class="kpi-card">
+                    <div class="kpi-icon green">📈</div>
+                    <div class="kpi-info">
+                        <div class="kpi-label">Profit Today</div>
+                        <div class="kpi-value" id="kpi-profit-today">₱—</div>
+                        <div class="kpi-sub">Sales − Cost</div>
+                    </div>
+                </div>
+                <div class="kpi-card">
+                    <div class="kpi-icon yellow">📦</div>
+                    <div class="kpi-info">
+                        <div class="kpi-label">Low Stock Items</div>
+                        <div class="kpi-value" id="kpi-low-stock">—</div>
+                        <div class="kpi-sub">Below threshold</div>
+                    </div>
+                </div>
+                <div class="kpi-card">
+                    <div class="kpi-icon red">⚠️</div>
+                    <div class="kpi-info">
+                        <div class="kpi-label">Near Expiry</div>
+                        <div class="kpi-value" id="kpi-near-expiry">—</div>
+                        <div class="kpi-sub">Within 30 days</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- ── Charts ─────────────────────────────────────── -->
+            <div class="charts-grid">
+                <div class="chart-card">
+                    <h3>📊 Monthly Revenue (Last 12 Months)</h3>
+                    <div class="chart-container">
+                        <canvas id="chart-monthly-revenue"></canvas>
+                    </div>
+                </div>
+                <div class="chart-card">
+                    <h3>🏆 Top 5 Products</h3>
+                    <div class="chart-container">
+                        <canvas id="chart-top-products"></canvas>
+                    </div>
+                </div>
+            </div>
+
+            <!-- ── Recent Transactions ────────────────────────── -->
+            <div class="recent-table-card">
+                <h3>🧾 Recent Transactions</h3>
+                <div class="table-container">
+                    <table class="table">
+                        <thead>
+                            <tr>
+                                <th>Order #</th>
+                                <th>Cashier</th>
+                                <th>Items</th>
+                                <th>Total</th>
+                                <th>Date/Time</th>
+                            </tr>
+                        </thead>
+                        <tbody id="recent-txn-tbody">
+                            <tr><td colspan="5" class="text-center text-muted" style="padding:24px">
+                                <div class="spinner"></div>
+                            </td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </main>
+    </div>
+</div>
+
+<div id="toast-container" class="toast-container"></div>
+
+<script src="../js/main.js"></script>
+<script src="../js/analytics.js"></script>
+</body>
+</html>

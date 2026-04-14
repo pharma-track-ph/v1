@@ -1,0 +1,284 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Demand Forecasting – PharmaTrack</title>
+    <link rel="stylesheet" href="../css/global.css">
+    <link rel="stylesheet" href="../css/forecasting.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+</head>
+<body>
+<div class="app-container">
+    <aside class="sidebar" id="sidebar">
+        <div class="sidebar-brand">
+            <div class="brand-icon">💊</div>
+            <div class="brand-text"><h1>PharmaTrack</h1><p>Management System</p></div>
+        </div>
+        <nav class="sidebar-nav">
+            <p class="nav-section-label">Main</p>
+            <ul>
+                <li class="nav-item" data-roles="admin,super_admin,cashier"><a href="dashboard.html"><span class="nav-icon">📊</span> Dashboard</a></li>
+                <li class="nav-item" data-roles="admin,super_admin,cashier"><a href="pos.html"><span class="nav-icon">🛒</span> Point of Sale</a></li>
+            </ul>
+            <p class="nav-section-label">Management</p>
+            <ul>
+                <li class="nav-item" data-roles="admin,super_admin"><a href="inventory.html"><span class="nav-icon">📦</span> Inventory</a></li>
+                <li class="nav-item" data-roles="admin,super_admin"><a href="reports.html"><span class="nav-icon">📋</span> Reports</a></li>
+                <li class="nav-item active" data-roles="admin,super_admin"><a href="forecasting.html"><span class="nav-icon">🔮</span> Forecasting</a></li>
+            </ul>
+            <p class="nav-section-label">Admin</p>
+            <ul>
+                <li class="nav-item" data-roles="admin,super_admin"><a href="users.html"><span class="nav-icon">👥</span> Users</a></li>
+                <li class="nav-item" data-roles="super_admin"><a href="audit.html"><span class="nav-icon">🔍</span> Audit Logs</a></li>
+                <li class="nav-item"><a href="#" data-action="logout"><span class="nav-icon">🚪</span> Sign Out</a></li>
+            </ul>
+        </nav>
+        <div class="sidebar-footer">
+            <div id="sidebar-user-name" class="fw-600">—</div>
+            <div id="sidebar-user-role" style="font-size:0.7rem;opacity:0.7">—</div>
+        </div>
+    </aside>
+    <div class="sidebar-overlay" id="sidebar-overlay"></div>
+
+    <div class="main-wrapper">
+        <header class="top-header">
+            <div class="header-left">
+                <button class="btn-menu-toggle" id="btn-menu-toggle">☰</button>
+                <div class="header-title">🔮 Demand Forecasting & Trends</div>
+            </div>
+            <div class="header-right">
+                <div class="header-alert-btn">📦 Low Stock <span class="alert-badge" id="badge-low-stock" style="display:none">0</span></div>
+                <div class="header-alert-btn">⚠️ Near Expiry <span class="alert-badge amber" id="badge-near-expiry" style="display:none">0</span></div>
+                <div class="header-user">
+                    <div class="user-avatar" id="header-avatar">?</div>
+                    <div class="user-info">
+                        <div class="user-name" id="header-user-name">—</div>
+                        <div class="user-role" id="header-user-role">—</div>
+                    </div>
+                </div>
+            </div>
+        </header>
+
+        <main class="page-content">
+
+            <!-- ── TRENDING PRODUCTS ─────────────────────────── -->
+            <div class="trending-section">
+                <div class="section-header">
+                    <h3>📈 Trending Products <span style="font-weight:400;font-size:0.85rem">(Last 4 weeks vs previous 4 weeks)</span></h3>
+                    <p class="section-hint">Click any card to view its detailed forecast</p>
+                </div>
+                <div class="trending-grid" id="trending-grid">
+                    <div class="loading-placeholder">Loading trending products…</div>
+                </div>
+            </div>
+
+            <!-- ── RESTOCK SUGGESTIONS ───────────────────────── -->
+            <div class="restock-suggestions" id="restock-section" style="display:none">
+                <h4>🔄 What to Restock This Week</h4>
+                <div class="restock-grid" id="restock-grid"></div>
+            </div>
+
+            <!-- ── PRODUCT SELECTOR & ALGORITHM ─────────────── -->
+            <div class="forecast-panel">
+                <div class="panel-header">
+                    <h3>🔍 Detailed Demand Forecast</h3>
+                </div>
+
+                <div class="selector-row">
+                    <div class="product-selector-wrapper">
+                        <label class="input-label">🏷️ Select Medicine</label>
+                        <div class="searchable-select">
+                            <input type="text" id="product-search" class="form-control"
+                                   placeholder="🔍 Search by name or category…">
+                            <select id="forecast-product" class="form-control">
+                                <option value="">— Choose a product —</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <div class="quick-filters">
+                        <label class="input-label">⚡ Quick Filters</label>
+                        <div class="filter-buttons">
+                            <button class="btn-filter active" data-filter="all">📋 All</button>
+                            <button class="btn-filter" data-filter="trending">📈 Trending</button>
+                            <button class="btn-filter" data-filter="lowstock">⚠️ Low Stock</button>
+                            <button class="btn-filter" data-filter="expiring">⏰ Expiring Soon</button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Algorithm Cards -->
+                <div class="algorithm-selector">
+                    <label class="input-label">🧠 Forecasting Method</label>
+                    <div class="algorithm-cards">
+                        <div class="algo-card" data-algo="moving-average">
+                            <div class="algo-icon">📊</div>
+                            <div class="algo-name">Moving Average</div>
+                            <div class="algo-desc">Simple · 4-week average</div>
+                            <div class="algo-badge">Stable Products</div>
+                        </div>
+                        <div class="algo-card" data-algo="exponential">
+                            <div class="algo-icon">📉</div>
+                            <div class="algo-name">Exponential Smoothing</div>
+                            <div class="algo-desc">Reactive · Recent data weighted</div>
+                            <div class="algo-badge">No Seasonality</div>
+                        </div>
+                        <div class="algo-card active" data-algo="holt-winters">
+                            <div class="algo-icon">🌟</div>
+                            <div class="algo-name">Holt-Winters</div>
+                            <div class="algo-desc">Seasonal · Level + Trend + Season</div>
+                            <div class="algo-badge highlight">Best for Pharma</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Advanced parameters (Holt-Winters only) -->
+                <details id="hw-params" style="margin-bottom:20px">
+                    <summary style="cursor:pointer;font-weight:600;color:var(--primary);">
+                        ⚙️ Advanced Parameters (α, β, γ) — Holt-Winters only
+                    </summary>
+                    <div style="display:flex;gap:16px;margin-top:16px;padding:16px;background:var(--gray-100);border-radius:8px;flex-wrap:wrap;">
+                        <div class="form-group">
+                            <label class="form-label">α Level — <span id="alpha-value">0.3</span></label>
+                            <input type="range" id="forecast-alpha" min="0.01" max="0.99" step="0.01" value="0.3" style="width:140px">
+                            <div class="alpha-hint">Higher = more reactive to recent demand</div>
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">β Trend — <span id="beta-value">0.1</span></label>
+                            <input type="range" id="forecast-beta" min="0.01" max="0.99" step="0.01" value="0.1" style="width:140px">
+                            <div class="alpha-hint">Higher = faster trend adaptation</div>
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">γ Seasonal — <span id="gamma-value">0.3</span></label>
+                            <input type="range" id="forecast-gamma" min="0.01" max="0.99" step="0.01" value="0.3" style="width:140px">
+                            <div class="alpha-hint">Higher = stronger seasonal response</div>
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">Seasonal Period (s)</label>
+                            <select id="forecast-season-length" class="form-control" style="max-width:120px">
+                                <option value="4" selected>4 — Quarterly</option>
+                                <option value="12">12 — Monthly</option>
+                                <option value="52">52 — Weekly</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">Forecast Periods</label>
+                            <input type="number" id="forecast-periods" class="form-control"
+                                   value="4" min="1" max="12" style="max-width:80px">
+                        </div>
+                    </div>
+                </details>
+
+                <div class="action-row">
+                    <button class="btn btn-primary btn-lg" id="btn-run-forecast">
+                        🔮 Generate Forecast
+                    </button>
+                    <button class="btn btn-outline" id="btn-compare-all">
+                        📊 Compare All Methods
+                    </button>
+                </div>
+            </div>
+
+            <!-- ── FORECAST RESULTS ──────────────────────────── -->
+            <div id="forecast-results" class="hidden">
+
+                <!-- Product header -->
+                <div class="product-forecast-header">
+                    <div class="product-title-section">
+                        <h2 id="forecast-product-name">—</h2>
+                        <span class="product-category" id="forecast-product-category">—</span>
+                    </div>
+                    <div class="product-quick-stats">
+                        <div class="quick-stat">
+                            <span class="stat-label">📦 Current Stock</span>
+                            <span class="stat-value" id="quick-stock">—</span>
+                        </div>
+                        <div class="quick-stat warning">
+                            <span class="stat-label">⚠️ Reorder Level</span>
+                            <span class="stat-value" id="quick-reorder">—</span>
+                        </div>
+                        <div class="quick-stat">
+                            <span class="stat-label">💰 Unit Price</span>
+                            <span class="stat-value" id="quick-price">—</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Pattern detection -->
+                <div class="pattern-detection-card">
+                    <h4>🔍 Historical Pattern Detected</h4>
+                    <div class="pattern-insights" id="pattern-insights"></div>
+                </div>
+
+                <!-- Chart -->
+                <div class="forecast-chart-card">
+                    <div class="chart-header">
+                        <h4>📈 <span id="chart-title">Historical Sales & Demand Forecast</span></h4>
+                        <div class="chart-legend">
+                            <span class="legend-item"><span class="legend-color blue"></span> Actual Sales</span>
+                            <span class="legend-item"><span class="legend-color green"></span> Fitted Values</span>
+                            <span class="legend-item"><span class="legend-color red"></span> Forecast</span>
+                            <span class="legend-item"><span class="legend-color yellow"></span> Confidence Range</span>
+                        </div>
+                    </div>
+                    <div class="forecast-chart-container">
+                        <canvas id="forecast-chart"></canvas>
+                    </div>
+                </div>
+
+                <!-- Weekly predictions -->
+                <div class="predictions-section">
+                    <h4>📅 Weekly Demand Predictions</h4>
+                    <div class="predictions-grid" id="predictions-grid"></div>
+                </div>
+
+                <!-- Smart restock recommendation -->
+                <div class="recommendation-card" id="recommendation-card">
+                    <div class="rec-header">
+                        <span class="rec-icon">📦</span>
+                        <h4>Smart Restock Recommendation</h4>
+                    </div>
+                    <div class="rec-body" id="recommendation-body"></div>
+                </div>
+
+                <!-- Historical data table (collapsible) -->
+                <details class="data-details">
+                    <summary>📋 View Historical Data & Holt-Winters Component Analysis</summary>
+                    <div class="table-responsive">
+                        <table class="data-table" id="components-table">
+                            <thead>
+                                <tr>
+                                    <th>Week</th>
+                                    <th>Actual Sales</th>
+                                    <th>Level (Lₜ)</th>
+                                    <th>Trend (Tₜ)</th>
+                                    <th>Seasonal (Sₜ)</th>
+                                    <th>Fitted</th>
+                                </tr>
+                            </thead>
+                            <tbody id="components-tbody"></tbody>
+                        </table>
+                    </div>
+                </details>
+            </div>
+
+            <!-- ── COMPARISON MODAL ──────────────────────────── -->
+            <div class="modal-overlay hidden" id="comparison-modal">
+                <div class="modal-content modal-lg">
+                    <div class="modal-header">
+                        <h3>📊 Algorithm Comparison</h3>
+                        <button class="modal-close" id="close-modal">&times;</button>
+                    </div>
+                    <div class="modal-body" id="comparison-body"></div>
+                </div>
+            </div>
+
+        </main>
+    </div>
+</div>
+
+<script src="../js/main.js"></script>
+<script src="../js/forecasting.js"></script>
+</body>
+</html>

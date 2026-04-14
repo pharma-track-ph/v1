@@ -1,0 +1,64 @@
+/* ============================================================
+   Inventory Module Styles
+   ============================================================ */
+
+.inv-toolbar {
+    display:     flex;
+    align-items: center;
+    gap:         10px;
+    flex-wrap:   wrap;
+    margin-bottom: 16px;
+}
+
+.inv-toolbar .search-wrap {
+    position:    relative;
+    flex:        1;
+    min-width:   180px;
+}
+
+.inv-toolbar .search-wrap input {
+    padding-left: 36px;
+}
+
+.inv-toolbar .search-wrap .search-icon {
+    position:    absolute;
+    left:        10px;
+    top:         50%;
+    transform:   translateY(-50%);
+    color:       var(--secondary);
+    font-size:   0.9rem;
+    pointer-events: none;
+}
+
+.inv-toolbar select { width: auto; }
+
+.expiry-cell {
+    display:     flex;
+    align-items: center;
+    gap:         6px;
+    font-size:   0.83rem;
+}
+
+.expiry-dot {
+    width:         8px;
+    height:        8px;
+    border-radius: 50%;
+    flex-shrink:   0;
+}
+
+.expiry-dot.red    { background: var(--danger); }
+.expiry-dot.amber  { background: var(--warning); }
+.expiry-dot.green  { background: var(--success); }
+
+.import-hint {
+    font-size:  0.75rem;
+    color:      var(--secondary);
+    margin-top: 8px;
+}
+
+/* CSV template comment block for reference */
+/*
+ * Expected CSV format for Import:
+ * batch_number,name,generic_name,category,supplier,barcode,price,cost,stock_quantity,low_stock_threshold,expiry_date
+ * BATCH-X-001,Vitamin C 500mg,Ascorbic Acid,Vitamins,Supplier Name,4800001099001,15.00,7.00,100,20,2025-12-31
+ */

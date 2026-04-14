@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Inventory – PharmaTrack</title>
+    <link rel="stylesheet" href="../css/global.css">
+    <link rel="stylesheet" href="../css/inventory.css">
+</head>
+<body>
+<div class="app-container">
+
+    <!-- Sidebar (same structure, active link changes) -->
+    <aside class="sidebar" id="sidebar">
+        <div class="sidebar-brand">
+            <div class="brand-icon">💊</div>
+            <div class="brand-text"><h1>PharmaTrack</h1><p>Management System</p></div>
+        </div>
+        <nav class="sidebar-nav">
+            <p class="nav-section-label">Main</p>
+            <ul>
+                <li class="nav-item" data-roles="admin,super_admin,cashier"><a href="dashboard.html"><span class="nav-icon">📊</span> Dashboard</a></li>
+                <li class="nav-item" data-roles="admin,super_admin,cashier"><a href="pos.html"><span class="nav-icon">🛒</span> Point of Sale</a></li>
+            </ul>
+            <p class="nav-section-label">Management</p>
+            <ul>
+                <li class="nav-item active" data-roles="admin,super_admin"><a href="inventory.html"><span class="nav-icon">📦</span> Inventory</a></li>
+                <li class="nav-item" data-roles="admin,super_admin"><a href="reports.html"><span class="nav-icon">📋</span> Reports</a></li>
+                <li class="nav-item" data-roles="admin,super_admin"><a href="forecasting.html"><span class="nav-icon">📈</span> Forecasting</a></li>
+            </ul>
+            <p class="nav-section-label">Admin</p>
+            <ul>
+                <li class="nav-item" data-roles="admin,super_admin"><a href="users.html"><span class="nav-icon">👥</span> Users</a></li>
+                <li class="nav-item" data-roles="super_admin"><a href="audit.html"><span class="nav-icon">🔍</span> Audit Logs</a></li>
+                <li class="nav-item"><a href="#" data-action="logout"><span class="nav-icon">🚪</span> Sign Out</a></li>
+            </ul>
+        </nav>
+        <div class="sidebar-footer">
+            <div id="sidebar-user-name" class="fw-600">—</div>
+            <div id="sidebar-user-role" style="font-size:0.7rem;opacity:0.7">—</div>
+        </div>
+    </aside>
+    <div class="sidebar-overlay" id="sidebar-overlay"></div>
+
+    <div class="main-wrapper">
+        <header class="top-header">
+            <div class="header-left">
+                <button class="btn-menu-toggle" id="btn-menu-toggle">☰</button>
+                <div class="header-title">Inventory Management</div>
+            </div>
+            <div class="header-right">
+                <div class="header-alert-btn">📦 Low Stock <span class="alert-badge" id="badge-low-stock" style="display:none">0</span></div>
+                <div class="header-alert-btn">⚠️ Near Expiry <span class="alert-badge amber" id="badge-near-expiry" style="display:none">0</span></div>
+                <div class="header-user">
+                    <div class="user-avatar" id="header-avatar">?</div>
+                    <div class="user-info">
+                        <div class="user-name" id="header-user-name">—</div>
+                        <div class="user-role" id="header-user-role">—</div>
+                    </div>
+                </div>
+            </div>
+        </header>
+
+        <main class="page-content">
+            <div class="page-header">
+                <div>
+                    <h2>📦 Inventory</h2>
+                    <p>Manage medicines, stock levels, and expiry dates.</p>
+                </div>
+                <div class="d-flex gap-8">
+                    <button class="btn btn-outline" id="btn-import-csv">
+                        📤 Import CSV
+                    </button>
+                    <button class="btn btn-primary" id="btn-add-product">
+                        ＋ Add Product
+                    </button>
+                    <!-- Hidden file input for CSV -->
+                    <input type="file" id="csv-import-input" accept=".csv" style="display:none">
+                </div>
+            </div>
+
+            <p class="import-hint">
+                CSV template: <code>batch_number,name,generic_name,category,supplier,barcode,price,cost,stock_quantity,low_stock_threshold,expiry_date</code>
+            </p>
+
+            <!-- ── Toolbar / Filters ─────────────────────────── -->
+            <div class="inv-toolbar">
+                <div class="search-wrap">
+                    <span class="search-icon">🔍</span>
+                    <input type="text" id="inv-search" class="form-control"
+                           placeholder="Search by name, batch, barcode…">
+                </div>
+                <select id="inv-filter-cat" class="form-control" style="width:auto">
+                    <option value="">All Categories</option>
+                </select>
+                <select id="inv-filter-expiring" class="form-control" style="width:auto">
+                    <option value="">All Status</option>
+                    <option value="true">Expiring This Month</option>
+                </select>
+                <span class="text-muted" style="font-size:0.83rem">
+                    <strong id="inv-total-count">—</strong> products
+                </span>
+            </div>
+
+            <!-- ── Inventory Table ───────────────────────────── -->
+            <div class="card" style="padding:0">
+                <div class="table-container">
+                    <table class="table">
+                        <thead>
+                            <tr>
+                                <th>Batch No.</th>
+                                <th>Product Name</th>
+                                <th>Category</th>
+                                <th>Stock</th>
+                                <th>Price</th>
+                                <th>Expiry Date</th>
+                                <th>Status</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="inv-tbody">
+                            <tr><td colspan="8" class="text-center" style="padding:40px">
+                                <div class="spinner" style="margin:0 auto"></div>
+                            </td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </main>
+    </div>
+</div>
+
+<!-- ── Add/Edit Product Modal ───────────────────────────────── -->
+<div class="modal-overlay" id="product-modal">
+    <div class="modal">
+        <div class="modal-header">
+            <h3 id="modal-title">Add New Product</h3>
+            <button class="btn-close btn-close-modal">✕</button>
+        </div>
+        <div class="modal-body">
+            <form id="product-form">
+                <div class="form-row">
+                    <div class="form-group">
+                        <label class="form-label">Batch Number *</label>
+                        <input type="text" id="field-batch_number" name="batch_number" class="form-control" required placeholder="BATCH-XXX-001">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Barcode</label>
+                        <input type="text" id="field-barcode" name="barcode" class="form-control" placeholder="4800001000000">
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label class="form-label">Product Name *</label>
+                        <input type="text" id="field-name" name="name" class="form-control" required placeholder="Paracetamol 500mg">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Generic Name</label>
+                        <input type="text" id="field-generic_name" name="generic_name" class="form-control" placeholder="Paracetamol">
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label class="form-label">Category *</label>
+                        <input type="text" id="field-category" name="category" class="form-control" required placeholder="Analgesic">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Supplier</label>
+                        <input type="text" id="field-supplier" name="supplier" class="form-control" placeholder="Unilab Inc.">
+                    </div>
+                </div>
+                <div class="form-row-3">
+                    <div class="form-group">
+                        <label class="form-label">Selling Price (₱) *</label>
+                        <input type="number" id="field-price" name="price" class="form-control" required step="0.01" min="0" placeholder="0.00">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Cost (₱) *</label>
+                        <input type="number" id="field-cost" name="cost" class="form-control" required step="0.01" min="0" placeholder="0.00">
+                    </div>
+                    <div class="form-group" id="field-stock-add">
+                        <label class="form-label">Stock Qty *</label>
+                        <input type="number" id="field-stock_quantity" name="stock_quantity" class="form-control" required min="0" placeholder="0">
+                    </div>
+                    <div class="form-group hidden" id="field-stock-edit">
+                        <label class="form-label">Stock Qty</label>
+                        <input type="number" id="field-stock_quantity_edit" name="stock_quantity" class="form-control" min="0">
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label class="form-label">Low Stock Threshold</label>
+                        <input type="number" id="field-low_stock_threshold" name="low_stock_threshold" class="form-control" min="1" value="10">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Expiry Date *</label>
+                        <input type="date" id="field-expiry_date" name="expiry_date" class="form-control" required>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Description</label>
+                    <textarea id="field-description" name="description" class="form-control" rows="2" placeholder="Optional notes…"></textarea>
+                </div>
+            </form>
+        </div>
+        <div class="modal-footer">
+            <button class="btn btn-light btn-close-modal">Cancel</button>
+            <button class="btn btn-primary" type="submit" form="product-form">Add Product</button>
+        </div>
+    </div>
+</div>
+
+<div id="toast-container" class="toast-container"></div>
+<script src="../js/main.js"></script>
+<script src="../js/inventory.js"></script>
+</body>
+</html>

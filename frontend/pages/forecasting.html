@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Forecasting – PharmaTrack</title>
+    <link rel="stylesheet" href="../css/global.css">
+    <link rel="stylesheet" href="../css/forecasting.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+</head>
+<body>
+<div class="app-container">
+    <aside class="sidebar" id="sidebar">
+        <div class="sidebar-brand"><div class="brand-icon">💊</div><div class="brand-text"><h1>PharmaTrack</h1><p>Management System</p></div></div>
+        <nav class="sidebar-nav">
+            <p class="nav-section-label">Main</p>
+            <ul>
+                <li class="nav-item" data-roles="admin,super_admin,cashier"><a href="dashboard.html"><span class="nav-icon">📊</span> Dashboard</a></li>
+                <li class="nav-item" data-roles="admin,super_admin,cashier"><a href="pos.html"><span class="nav-icon">🛒</span> Point of Sale</a></li>
+            </ul>
+            <p class="nav-section-label">Management</p>
+            <ul>
+                <li class="nav-item" data-roles="admin,super_admin"><a href="inventory.html"><span class="nav-icon">📦</span> Inventory</a></li>
+                <li class="nav-item" data-roles="admin,super_admin"><a href="reports.html"><span class="nav-icon">📋</span> Reports</a></li>
+                <li class="nav-item active" data-roles="admin,super_admin"><a href="forecasting.html"><span class="nav-icon">📈</span> Forecasting</a></li>
+            </ul>
+            <p class="nav-section-label">Admin</p>
+            <ul>
+                <li class="nav-item" data-roles="admin,super_admin"><a href="users.html"><span class="nav-icon">👥</span> Users</a></li>
+                <li class="nav-item" data-roles="super_admin"><a href="audit.html"><span class="nav-icon">🔍</span> Audit Logs</a></li>
+                <li class="nav-item"><a href="#" data-action="logout"><span class="nav-icon">🚪</span> Sign Out</a></li>
+            </ul>
+        </nav>
+        <div class="sidebar-footer"><div id="sidebar-user-name" class="fw-600">—</div><div id="sidebar-user-role" style="font-size:0.7rem;opacity:0.7">—</div></div>
+    </aside>
+    <div class="sidebar-overlay" id="sidebar-overlay"></div>
+
+    <div class="main-wrapper">
+        <header class="top-header">
+            <div class="header-left">
+                <button class="btn-menu-toggle" id="btn-menu-toggle">☰</button>
+                <div class="header-title">Predictive Forecasting</div>
+            </div>
+            <div class="header-right">
+                <div class="header-alert-btn">📦 Low Stock <span class="alert-badge" id="badge-low-stock" style="display:none">0</span></div>
+                <div class="header-alert-btn">⚠️ Near Expiry <span class="alert-badge amber" id="badge-near-expiry" style="display:none">0</span></div>
+                <div class="header-user"><div class="user-avatar" id="header-avatar">?</div><div class="user-info"><div class="user-name" id="header-user-name">—</div><div class="user-role" id="header-user-role">—</div></div></div>
+            </div>
+        </header>
+
+        <main class="page-content">
+            <div class="page-header">
+                <div>
+                    <h2>📈 Demand Forecasting</h2>
+                    <p>Holt-Winters Triple Exponential Smoothing — Level, Trend & Seasonality</p>
+                </div>
+            </div>
+
+            <!-- ── HOLT-WINTERS EXPLAINER ──────────────────────── -->
+            <div class="forecast-explainer">
+                <h4>🔬 Algorithm: Holt-Winters Triple Exponential Smoothing</h4>
+                <p>
+                    <strong>Holt-Winters</strong> extends exponential smoothing to capture <strong>three components</strong> 
+                    of time series data: Level (baseline), Trend (growth/decline), and Seasonality (recurring patterns).
+                    This makes it ideal for pharmaceutical demand forecasting where medicines exhibit strong seasonal patterns 
+                    (e.g., flu season June–September, allergy season December–February).
+                </p>
+                
+                <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin: 16px 0;">
+                    <div style="background: rgba(13,110,253,0.08); padding: 12px; border-radius: 8px;">
+                        <strong style="color: #0d6efd;">📊 LEVEL (Lₜ)</strong>
+                        <p style="font-size: 0.8rem; margin-top: 4px;">Lₜ = α·(Yₜ/Sₜ₋ₛ) + (1-α)·(Lₜ₋₁ + Tₜ₋₁)<br>→ Baseline demand adjusted for season</p>
+                    </div>
+                    <div style="background: rgba(25,135,84,0.08); padding: 12px; border-radius: 8px;">
+                        <strong style="color: #198754;">📈 TREND (Tₜ)</strong>
+                        <p style="font-size: 0.8rem; margin-top: 4px;">Tₜ = β·(Lₜ - Lₜ₋₁) + (1-β)·Tₜ₋₁<br>→ Growth or decline rate</p>
+                    </div>
+                    <div style="background: rgba(220,53,69,0.08); padding: 12px; border-radius: 8px;">
+                        <strong style="color: #dc3545;">🔄 SEASONAL (Sₜ)</strong>
+                        <p style="font-size: 0.8rem; margin-top: 4px;">Sₜ = γ·(Yₜ/Lₜ) + (1-γ)·Sₜ₋ₛ<br>→ Recurring pattern multiplier</p>
+                    </div>
+                </div>
+                
+                <p style="margin-top: 8px;">
+                    <strong>Forecast Equation:</strong> Fₜ₊ₘ = (Lₜ + m·Tₜ) × Sₜ₋ₛ₊ₘ<br>
+                    <strong>Parameters:</strong> α (level), β (trend), γ (seasonal) — all between 0 and 1.<br>
+                    <strong>Seasonal Period (s):</strong> 4 for quarterly/monthly patterns (captures Philippine flu/allergy seasons).
+                </p>
+            </div>
+
+            <!-- ── CONTROLS ─────────────────────────────────── -->
+            <div class="forecast-controls">
+                <div class="form-group">
+                    <label class="form-label">Select Medicine</label>
+                    <select id="forecast-product" class="form-control">
+                        <option value="">— Choose a product —</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Seasonal Period (s)</label>
+                    <select id="forecast-season-length" class="form-control" style="max-width:100px">
+                        <option value="4" selected>4 (Quarterly)</option>
+                        <option value="12">12 (Monthly)</option>
+                        <option value="52">52 (Weekly)</option>
+                    </select>
+                    <div class="alpha-hint">4 = quarterly pattern (recommended)</div>
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Forecast Periods</label>
+                    <input type="number" id="forecast-periods" class="form-control" 
+                           value="4" min="1" max="12" style="max-width:80px">
+                </div>
+                <button class="btn btn-primary" id="btn-run-forecast">📊 Run Holt-Winters Forecast</button>
+            </div>
+
+            <!-- ── ADVANCED PARAMETERS (Collapsible) ──────────── -->
+            <details style="margin-bottom: 20px;">
+                <summary style="cursor: pointer; font-weight: 600; color: var(--primary);">
+                    ⚙️ Advanced Parameters (Alpha, Beta, Gamma)
+                </summary>
+                <div style="display: flex; gap: 16px; margin-top: 16px; padding: 16px; background: var(--gray-100); border-radius: 8px;">
+                    <div class="form-group">
+                        <label class="form-label">α (Level) — <span id="alpha-value">0.3</span></label>
+                        <input type="range" id="forecast-alpha" min="0.01" max="0.99" step="0.01" value="0.3" style="width:150px">
+                        <div class="alpha-hint">Higher = more reactive</div>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">β (Trend) — <span id="beta-value">0.1</span></label>
+                        <input type="range" id="forecast-beta" min="0.01" max="0.99" step="0.01" value="0.1" style="width:150px">
+                        <div class="alpha-hint">Higher = faster trend adaptation</div>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">γ (Seasonal) — <span id="gamma-value">0.3</span></label>
+                        <input type="range" id="forecast-gamma" min="0.01" max="0.99" step="0.01" value="0.3" style="width:150px">
+                        <div class="alpha-hint">Higher = stronger seasonal response</div>
+                    </div>
+                </div>
+            </details>
+
+            <!-- ── FORECAST RESULTS ───────────────────────────── -->
+            <div id="forecast-results" class="hidden">
+
+                <!-- Chart -->
+                <div class="forecast-chart-card">
+                    <h3>📉 <span id="forecast-product-name">Product</span> — Historical vs. Holt-Winters Forecast</h3>
+                    <p>🔵 Blue = Actual · 🟢 Green = HW Fitted · 🔴 Red = Forecast · <span style="color:#ffc107">⚠️ Band = 85% Confidence Interval</span></p>
+                    <div class="forecast-chart-container">
+                        <canvas id="forecast-chart"></canvas>
+                    </div>
+                </div>
+
+                <!-- Prediction Cards -->
+                <div class="forecast-prediction-grid" id="prediction-grid"></div>
+
+                <!-- Component Analysis Table -->
+                <div class="forecast-table-card">
+                    <h3>📊 Holt-Winters Component Analysis</h3>
+                    <div style="overflow-x: auto;">
+                        <table class="data-table" id="components-table">
+                            <thead>
+                                <tr>
+                                    <th>Period</th>
+                                    <th>Actual Sales</th>
+                                    <th>Level (Lₜ)</th>
+                                    <th>Trend (Tₜ)</th>
+                                    <th>Seasonal (Sₜ)</th>
+                                    <th>Fitted Value</th>
+                                </tr>
+                            </thead>
+                            <tbody id="components-tbody"></tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- Forecast Insights -->
+                <div class="forecast-table-card" style="margin-top: 20px;">
+                    <h3>💡 Forecast Insights & Recommendations</h3>
+                    <div id="forecast-insights"></div>
+                </div>
+            </div>
+        </main>
+    </div>
+</div>
+
+<script src="../js/main.js"></script>
+<script src="../js/forecasting.js"></script>
+</body>
+</html>

@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>POS – PharmaTrack</title>
+    <link rel="stylesheet" href="../css/global.css">
+    <link rel="stylesheet" href="../css/pos.css">
+</head>
+<body>
+<div class="app-container">
+
+    <aside class="sidebar" id="sidebar">
+        <div class="sidebar-brand">
+            <div class="brand-icon">💊</div>
+            <div class="brand-text"><h1>PharmaTrack</h1><p>Management System</p></div>
+        </div>
+        <nav class="sidebar-nav">
+            <p class="nav-section-label">Main</p>
+            <ul>
+                <li class="nav-item" data-roles="admin,super_admin,cashier"><a href="dashboard.html"><span class="nav-icon">📊</span> Dashboard</a></li>
+                <li class="nav-item active" data-roles="admin,super_admin,cashier"><a href="pos.html"><span class="nav-icon">🛒</span> Point of Sale</a></li>
+            </ul>
+            <p class="nav-section-label">Management</p>
+            <ul>
+                <li class="nav-item" data-roles="admin,super_admin"><a href="inventory.html"><span class="nav-icon">📦</span> Inventory</a></li>
+                <li class="nav-item" data-roles="admin,super_admin"><a href="reports.html"><span class="nav-icon">📋</span> Reports</a></li>
+                <li class="nav-item" data-roles="admin,super_admin"><a href="forecasting.html"><span class="nav-icon">📈</span> Forecasting</a></li>
+            </ul>
+            <p class="nav-section-label">Admin</p>
+            <ul>
+                <li class="nav-item" data-roles="admin,super_admin"><a href="users.html"><span class="nav-icon">👥</span> Users</a></li>
+                <li class="nav-item" data-roles="super_admin"><a href="audit.html"><span class="nav-icon">🔍</span> Audit Logs</a></li>
+                <li class="nav-item"><a href="#" data-action="logout"><span class="nav-icon">🚪</span> Sign Out</a></li>
+            </ul>
+        </nav>
+        <div class="sidebar-footer">
+            <div id="sidebar-user-name" class="fw-600">—</div>
+            <div id="sidebar-user-role" style="font-size:0.7rem;opacity:0.7">—</div>
+        </div>
+    </aside>
+    <div class="sidebar-overlay" id="sidebar-overlay"></div>
+
+    <div class="main-wrapper">
+        <header class="top-header">
+            <div class="header-left">
+                <button class="btn-menu-toggle" id="btn-menu-toggle">☰</button>
+                <div class="header-title">Point of Sale</div>
+            </div>
+            <div class="header-right">
+                <div class="header-alert-btn">📦 Low Stock <span class="alert-badge" id="badge-low-stock" style="display:none">0</span></div>
+                <div class="header-alert-btn">⚠️ Near Expiry <span class="alert-badge amber" id="badge-near-expiry" style="display:none">0</span></div>
+                <div class="header-user">
+                    <div class="user-avatar" id="header-avatar">?</div>
+                    <div class="user-info">
+                        <div class="user-name" id="header-user-name">—</div>
+                        <div class="user-role" id="header-user-role">—</div>
+                    </div>
+                </div>
+            </div>
+        </header>
+
+        <main class="page-content" style="padding-bottom:0">
+            <div class="pos-layout">
+
+                <!-- ── Left: Product Search & Grid ────────────── -->
+                <div class="pos-left">
+                    <div class="pos-search-bar">
+                        <div class="search-input-wrap">
+                            <span class="search-icon">🔍</span>
+                            <input type="text" id="pos-search" class="form-control"
+                                   placeholder="Search medicine name…" autocomplete="off">
+                        </div>
+                        <button class="btn-barcode" id="btn-barcode-scan">
+                            📷 Scan Barcode
+                        </button>
+                    </div>
+
+                    <!-- Barcode scanner simulation row -->
+                    <div class="barcode-input-row" id="barcode-input-row">
+                        <span>📷</span>
+                        <input type="text" id="barcode-input"
+                               placeholder="Scan or type barcode → Enter"
+                               autocomplete="off">
+                        <button class="btn btn-sm btn-light" onclick="document.getElementById('barcode-input-row').classList.remove('active')">✕</button>
+                    </div>
+
+                    <div class="product-grid" id="product-grid">
+                        <div class="loading-overlay" style="grid-column:1/-1">
+                            <div class="spinner"></div> Loading products…
+                        </div>
+                    </div>
+                </div>
+
+                <!-- ── Right: Cart Panel ───────────────────────── -->
+                <div class="pos-right">
+                    <div class="cart-header">
+                        <h3>🛒 Cart</h3>
+                        <span class="cart-item-count" id="cart-count">0</span>
+                    </div>
+
+                    <div class="cart-items" id="cart-items">
+                        <div class="cart-empty">
+                            <span class="empty-icon">🛒</span>
+                            <span>Cart is empty</span>
+                        </div>
+                    </div>
+
+                    <!-- AI Suggestion Section (Prototype) -->
+                    <div class="ai-suggestion-section">
+                        <h4>🤖 AI Suggestion <span class="prototype-badge">PROTOTYPE</span></h4>
+                        <div class="d-flex gap-8">
+                            <input type="text" id="ai-symptoms-input" class="form-control"
+                                   placeholder="Enter symptoms (e.g. headache, fever)…"
+                                   style="flex:1;height:36px;font-size:0.83rem">
+                            <button class="btn btn-primary btn-sm" id="btn-ai-suggest">Ask</button>
+                        </div>
+                        <div id="ai-result" class="ai-result"></div>
+                    </div>
+
+                    <!-- Payment method -->
+                    <div class="payment-section">
+                        <label>Payment Method</label>
+                        <div class="payment-methods">
+                            <button class="pay-method-btn active" data-method="cash">💵 Cash</button>
+                            <button class="pay-method-btn" data-method="card">💳 Card</button>
+                            <button class="pay-method-btn" data-method="gcash">📱 GCash</button>
+                            <button class="pay-method-btn" data-method="maya">🏦 Maya</button>
+                        </div>
+                        <div class="form-row" style="gap:8px">
+                            <div class="form-group" style="margin-bottom:0">
+                                <label class="form-label" style="font-size:0.75rem">Discount (₱)</label>
+                                <input type="number" id="discount-input" class="form-control"
+                                       value="0" min="0" step="0.01"
+                                       style="height:36px;font-size:0.875rem">
+                            </div>
+                            <div class="form-group" style="margin-bottom:0">
+                                <label class="form-label" style="font-size:0.75rem">Amount Tendered (₱)</label>
+                                <input type="number" id="amount-tendered" class="form-control"
+                                       placeholder="0.00" min="0" step="0.01"
+                                       style="height:36px;font-size:0.875rem">
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Totals -->
+                    <div class="cart-totals">
+                        <div class="totals-row"><span>Subtotal</span><span id="cart-subtotal">₱0.00</span></div>
+                        <div class="totals-row"><span>Discount</span><span id="cart-discount-display">₱0.00</span></div>
+                        <div class="totals-row total-final"><span>TOTAL</span><span id="cart-total">₱0.00</span></div>
+                        <div class="totals-row" style="margin-top:4px">
+                            <span>Change</span>
+                            <span id="change-display" style="font-weight:600">—</span>
+                        </div>
+                    </div>
+
+                    <!-- Action buttons -->
+                    <div class="cart-actions">
+                        <button class="btn btn-light" id="btn-clear-cart">🗑 Clear</button>
+                        <button class="btn btn-success btn-lg" id="btn-checkout">✅ Checkout</button>
+                    </div>
+                </div>
+
+            </div><!-- /.pos-layout -->
+        </main>
+    </div>
+</div>
+
+<!-- ── Receipt Modal ─────────────────────────────────────────── -->
+<div class="modal-overlay" id="receipt-modal">
+    <div class="modal" style="max-width:420px">
+        <div class="modal-header">
+            <h3>🧾 Transaction Receipt</h3>
+            <button class="btn-close" onclick="Modal.close('receipt-modal')">✕</button>
+        </div>
+        <div class="modal-body" id="receipt-body"></div>
+        <div class="modal-footer">
+            <button class="btn btn-light" onclick="Modal.close('receipt-modal')">Close</button>
+            <button class="btn btn-primary" onclick="window.print()">🖨 Print</button>
+        </div>
+    </div>
+</div>
+
+<div id="toast-container" class="toast-container"></div>
+<script src="../js/main.js"></script>
+<script src="../js/pos.js"></script>
+</body>
+</html>

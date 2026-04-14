@@ -1,0 +1,76 @@
+/* ============================================================
+   Reports Module Styles
+   ============================================================ */
+
+.report-tabs {
+    display:       flex;
+    gap:           4px;
+    border-bottom: 2px solid var(--gray-200);
+    margin-bottom: 20px;
+}
+
+.report-tab {
+    padding:       10px 20px;
+    font-size:     0.875rem;
+    font-weight:   600;
+    color:         var(--secondary);
+    cursor:        pointer;
+    border-bottom: 2px solid transparent;
+    margin-bottom: -2px;
+    transition:    var(--transition);
+    background:    none;
+    border-top:    none;
+    border-left:   none;
+    border-right:  none;
+    font-family:   var(--font-family);
+}
+
+.report-tab:hover  { color: var(--primary); }
+.report-tab.active { color: var(--primary); border-bottom-color: var(--primary); }
+
+.report-filters {
+    display:       flex;
+    gap:           10px;
+    align-items:   flex-end;
+    flex-wrap:     wrap;
+    margin-bottom: 16px;
+}
+
+.report-filters .form-group { margin-bottom: 0; }
+
+.export-btn-wrap { margin-left: auto; }
+
+.summary-chips {
+    display:       flex;
+    gap:           12px;
+    flex-wrap:     wrap;
+    margin-bottom: 16px;
+}
+
+.summary-chip {
+    background:    var(--white);
+    border:        1px solid var(--gray-200);
+    border-radius: var(--border-radius);
+    padding:       10px 16px;
+    box-shadow:    var(--shadow-sm);
+}
+
+.summary-chip .chip-label { font-size: 0.75rem; color: var(--secondary); }
+.summary-chip .chip-value { font-size: 1.2rem; font-weight: 700; color: var(--dark); }
+
+.expired-stats {
+    display:       grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap:           12px;
+    margin-bottom: 16px;
+}
+
+.expired-stat-card {
+    background:    var(--danger-light);
+    border:        1px solid #f5c6cb;
+    border-radius: var(--border-radius);
+    padding:       14px 18px;
+}
+
+.expired-stat-card .stat-label { font-size: 0.78rem; color: var(--danger); font-weight: 600; }
+.expired-stat-card .stat-value { font-size: 1.4rem; font-weight: 700; color: var(--danger); }
