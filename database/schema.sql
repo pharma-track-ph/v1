@@ -10,7 +10,7 @@ USE pharmatrack;
 -- USERS TABLE
 -- Roles: super_admin, admin, cashier
 -- ============================================================
-CREATE TABLE users (
+CREATE TABLE IF NOT EXISTS users (
     id          INT AUTO_INCREMENT PRIMARY KEY,
     name        VARCHAR(100)  NOT NULL,
     email       VARCHAR(150)  NOT NULL UNIQUE,
@@ -25,7 +25,7 @@ CREATE TABLE users (
 -- PRODUCTS TABLE
 -- Core inventory model with expiry / batch tracking
 -- ============================================================
-CREATE TABLE products (
+CREATE TABLE IF NOT EXISTS products (
     id               INT AUTO_INCREMENT PRIMARY KEY,
     batch_number     VARCHAR(50)   NOT NULL,
     name             VARCHAR(150)  NOT NULL,
@@ -52,7 +52,7 @@ CREATE TABLE products (
 -- ORDERS TABLE
 -- Each completed POS transaction
 -- ============================================================
-CREATE TABLE orders (
+CREATE TABLE IF NOT EXISTS orders (
     id              INT AUTO_INCREMENT PRIMARY KEY,
     order_number    VARCHAR(30)   NOT NULL UNIQUE,   -- e.g. ORD-20240315-001
     cashier_id      INT           NOT NULL,
@@ -73,7 +73,7 @@ CREATE TABLE orders (
 -- ORDER ITEMS TABLE
 -- Line items per order (tracks batch & price at time of sale)
 -- ============================================================
-CREATE TABLE order_items (
+CREATE TABLE IF NOT EXISTS order_items (
     id           INT AUTO_INCREMENT PRIMARY KEY,
     order_id     INT           NOT NULL,
     product_id   INT           NOT NULL,
@@ -93,7 +93,7 @@ CREATE TABLE order_items (
 -- AUDIT LOGS TABLE
 -- Super Admin oversight: every critical action is recorded
 -- ============================================================
-CREATE TABLE audit_logs (
+CREATE TABLE IF NOT EXISTS audit_logs (
     id          INT AUTO_INCREMENT PRIMARY KEY,
     user_id     INT          NOT NULL,
     action      VARCHAR(100) NOT NULL,   -- e.g. 'UPDATE_PRODUCT', 'DELETE_USER'
@@ -109,21 +109,16 @@ CREATE TABLE audit_logs (
 );
 
 -- ============================================================
--- SEED DATA
+-- SEED DATA (only inserts if no users exist yet)
 -- ============================================================
 
 -- Passwords are bcrypt of 'password123' (12 rounds)
-INSERT INTO users (name, email, password, role) VALUES
+INSERT IGNORE INTO users (name, email, password, role) VALUES
 ('Maria Santos',   'superadmin@pharmatrack.ph', '$2b$12$LQv3c1yqBWVHxkd0LHAkCOYz6TtxMKiQqTl.KRoUsQVyVXumCqJle', 'super_admin'),
 ('Juan Dela Cruz', 'admin@pharmatrack.ph',       '$2b$12$LQv3c1yqBWVHxkd0LHAkCOYz6TtxMKiQqTl.KRoUsQVyVXumCqJle', 'admin'),
 ('Ana Reyes',      'cashier@pharmatrack.ph',     '$2b$12$LQv3c1yqBWVHxkd0LHAkCOYz6TtxMKiQqTl.KRoUsQVyVXumCqJle', 'cashier');
 
--- NOTE: Replace expiry_date values with dates relative to your current date.
--- PARACETAMOL: expires ~30 days from now (near-expiry demo)
--- BIOGESIC:    expires ~1 year from now (normal stock)
--- LOSARTAN:    low stock demo
-
-INSERT INTO products (batch_number, name, generic_name, category, supplier, barcode, price, cost, stock_quantity, low_stock_threshold, expiry_date) VALUES
+INSERT IGNORE INTO products (batch_number, name, generic_name, category, supplier, barcode, price, cost, stock_quantity, low_stock_threshold, expiry_date) VALUES
 ('BATCH-PARA-001', 'Paracetamol 500mg',   'Paracetamol',   'Analgesic',        'Unilab Inc.',       '4800001001001', 8.50,  4.00,  120, 20, DATE_ADD(CURDATE(), INTERVAL 28  DAY)),
 ('BATCH-BIO-001',  'Biogesic 500mg',      'Paracetamol',   'Analgesic',        'Unilab Inc.',       '4800001002001', 12.00, 6.00,  200, 20, DATE_ADD(CURDATE(), INTERVAL 365 DAY)),
 ('BATCH-LOS-001',  'Losartan 50mg',       'Losartan',      'Antihypertensive', 'Novartis Pharma',   '4800001003001', 22.00, 11.00, 6,   20, DATE_ADD(CURDATE(), INTERVAL 180 DAY)),
@@ -135,15 +130,14 @@ INSERT INTO products (batch_number, name, generic_name, category, supplier, barc
 ('BATCH-ASA-001',  'Aspirin 80mg',        'Aspirin',       'Antiplatelet',     'Bayer Philippines', '4800001009001', 6.50,  3.00,  8,   10, DATE_ADD(CURDATE(), INTERVAL 45  DAY)),
 ('BATCH-AML-001',  'Amlodipine 5mg',      'Amlodipine',    'Antihypertensive', 'Pfizer Philippines','4800001010001', 19.00, 9.50,  45,  15, DATE_ADD(CURDATE(), INTERVAL 240 DAY));
 
--- Sample orders (last 7 days) for analytics demo
-INSERT INTO orders (order_number, cashier_id, subtotal, discount, tax, total, payment_method, amount_tendered, change_amount, status) VALUES
+INSERT IGNORE INTO orders (order_number, cashier_id, subtotal, discount, tax, total, payment_method, amount_tendered, change_amount, status) VALUES
 ('ORD-001', 3, 850.00, 0.00, 0.00, 850.00, 'cash', 1000.00, 150.00, 'completed'),
 ('ORD-002', 3, 340.00, 0.00, 0.00, 340.00, 'gcash', 340.00, 0.00,  'completed'),
 ('ORD-003', 3, 120.50, 0.00, 0.00, 120.50, 'cash', 200.00, 79.50,  'completed'),
 ('ORD-004', 3, 660.00, 50.00, 0.00, 610.00, 'cash', 700.00, 90.00, 'completed'),
 ('ORD-005', 3, 450.00, 0.00, 0.00, 450.00, 'maya', 450.00, 0.00,   'completed');
 
-INSERT INTO order_items (order_id, product_id, batch_number, product_name, quantity, unit_price, unit_cost, subtotal) VALUES
+INSERT IGNORE INTO order_items (order_id, product_id, batch_number, product_name, quantity, unit_price, unit_cost, subtotal) VALUES
 (1, 1, 'BATCH-PARA-001', 'Paracetamol 500mg', 10, 8.50,  4.00, 85.00),
 (1, 2, 'BATCH-BIO-001',  'Biogesic 500mg',    5,  12.00, 6.00, 60.00),
 (2, 4, 'BATCH-AMO-001',  'Amoxicillin 500mg', 8,  18.50, 9.00, 148.00),
