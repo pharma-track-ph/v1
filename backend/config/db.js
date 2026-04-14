@@ -21,7 +21,7 @@ const pool = mysql.createPool({
     timezone: '+08:00',
     multipleStatements: true,  // Required for running full schema
     ssl: {
-        rejectUnauthorized: true  // Always enforce SSL certificate validation for security
+        rejectUnauthorized: false  // Required for Aiven self-signed certificate chain
     }
 });
 
@@ -47,7 +47,6 @@ async function initSchema() {
         if (missingTables.length > 0) {
             console.log(`📦  Missing tables detected: ${missingTables.join(', ')} — importing schema...`);
 
-            // Try multiple possible schema paths concurrently for better performance
             const schemaPaths = [
                 path.join(__dirname, '../../database/schema.sql'),
                 path.join(__dirname, '../database/schema.sql'),
@@ -70,7 +69,7 @@ async function initSchema() {
                 const schemaSQL = await fs.readFile(schemaPath, 'utf8');
                 console.log(`    Found schema at: ${schemaPath}`);
 
-                // Remove CREATE DATABASE and USE statements for Railway
+                // Remove CREATE DATABASE and USE statements for Railway/Render
                 const cleanedSchemaSQL = schemaSQL
                     .replace(/CREATE DATABASE.*?;/gi, '')
                     .replace(/USE.*?;/gi, '');
@@ -85,7 +84,7 @@ async function initSchema() {
         }
     } catch (err) {
         console.error('❌  Schema init failed:', err.message);
-        throw err; // Re-throw to allow caller to handle
+        throw err;
     }
 }
 
@@ -93,15 +92,12 @@ async function initSchema() {
 async function initializeDatabase() {
     let connection = null;
     try {
-        // Test basic connection
         connection = await pool.getConnection();
         console.log(`✅  MySQL connected: ${process.env.DB_NAME || 'pharmatrack'}@${process.env.DB_HOST || 'localhost'}`);
 
-        // Test database permissions with a simple query
         await connection.query('SELECT 1');
         console.log('✅  Database permissions verified');
 
-        // Initialize schema
         await initSchema();
 
         console.log('✅  Database initialization completed successfully');
@@ -118,7 +114,7 @@ async function initializeDatabase() {
         } else {
             console.error('❌  Database initialization failed:', err.message);
         }
-        throw err; // Re-throw to potentially crash the application if DB is critical
+        throw err;
     } finally {
         if (connection) {
             connection.release();
@@ -129,7 +125,7 @@ async function initializeDatabase() {
 // Initialize database on module load
 initializeDatabase().catch(err => {
     console.error('❌  Critical database initialization error:', err.message);
-    process.exit(1); // Exit with error code if database initialization fails
+    process.exit(1);
 });
 
 module.exports = pool;
