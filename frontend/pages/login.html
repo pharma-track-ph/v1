@@ -140,7 +140,7 @@
         // If already authenticated, redirect appropriately
         if (Auth.getToken()) {
             const user = JSON.parse(localStorage.getItem(CONFIG.USER_KEY) || '{}');
-            window.location.href = user.role === 'cashier' ? '/frontend/pages/pos.html' : '/frontend/pages/dashboard.html';
+            window.location.href = user.role === 'cashier' ? '/pages/pos.html' : '/pages/dashboard.html';
         }
 
         // ── Login Form ────────────────────────────────────────────
@@ -165,9 +165,9 @@
                     // Role-based redirect
                     const role = result.user.role;
                     if (role === 'cashier') {
-                        window.location.href = '/frontend/pages/pos.html';
+                        window.location.href = '/pages/pos.html';
                     } else {
-                        window.location.href = '/frontend/pages/dashboard.html';
+                        window.location.href = '/pages/dashboard.html';
                     }
                 } else {
                     errorEl.textContent = result.message || 'Login failed.';
