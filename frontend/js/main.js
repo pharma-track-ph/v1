@@ -33,20 +33,34 @@ const API = {
         };
 
         try {
-            const res  = await fetch(`${CONFIG.API_BASE}${endpoint}`, config);
-            const data = await res.json();
+            // Add timeout: abort after 10 seconds
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 10000);
+            config.signal = controller.signal;
 
-            if (res.status === 401) {
-                // Token expired or invalid — force logout
-                Auth.logout();
-                return null;
+            const res  = await fetch(`${CONFIG.API_BASE}${endpoint}`, config);
+            clearTimeout(timeoutId);
+
+            if (!res.ok) {
+                if (res.status === 401) {
+                    // Token expired or invalid — force logout
+                    Auth.logout();
+                    return null;
+                }
+                throw new Error(`HTTP ${res.status}: ${res.statusText}`);
             }
 
+            const data = await res.json();
             return data;
 
         } catch (err) {
-            console.error(`[API Error] ${endpoint}:`, err);
-            Toast.show('Connection error. Check if the server is running.', 'error');
+            if (err.name === 'AbortError') {
+                console.error(`[API Timeout] ${endpoint}: Request took too long`);
+                Toast.show('Server not responding. Check your connection.', 'error');
+            } else {
+                console.error(`[API Error] ${endpoint}:`, err.message);
+                Toast.show('Connection error. Check if the server is running.', 'error');
+            }
             return null;
         }
     },

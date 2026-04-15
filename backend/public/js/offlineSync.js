@@ -191,18 +191,31 @@ const OfflineAPI = {
     async get(endpoint) {
         if (offlineSync.isOnline) {
             try {
-                const response = await fetch(endpoint, {
-                    headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
+                // Add timeout: abort after 10 seconds
+                const controller = new AbortController();
+                const timeoutId = setTimeout(() => controller.abort(), 10000);
+
+                const response = await fetch(`${CONFIG.API_BASE}${endpoint}`, {
+                    headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` },
+                    signal: controller.signal
                 });
+                clearTimeout(timeoutId);
+
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}`);
+                }
+
                 const data = await response.json();
 
                 // Cache successful responses
                 if (response.ok && (endpoint.includes('/inventory') || endpoint.includes('/pos/products'))) {
                     if (endpoint.includes('/inventory')) {
-                        await offlineSync.put('products', data.data);
+                        for (const product of (data.data || [])) {
+                            await offlineSync.put('products', product);
+                        }
                     } else if (endpoint.includes('/pos/products')) {
                         // Cache all products from POS search
-                        for (const product of data.data) {
+                        for (const product of (data.data || [])) {
                             await offlineSync.put('products', product);
                         }
                     }
@@ -210,7 +223,8 @@ const OfflineAPI = {
 
                 return data;
             } catch (error) {
-                console.warn('Network error, falling back to cache:', error);
+                console.warn('Network error, falling back to cache:', error.message);
+                Toast.show('Network error. Using cached data if available.', 'warning');
             }
         }
 
@@ -257,14 +271,24 @@ const OfflineAPI = {
     async post(endpoint, body) {
         if (offlineSync.isOnline) {
             try {
-                const response = await fetch(endpoint, {
+                const controller = new AbortController();
+                const timeoutId = setTimeout(() => controller.abort(), 10000);
+
+                const response = await fetch(`${CONFIG.API_BASE}${endpoint}`, {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
                         'Authorization': `Bearer ${localStorage.getItem('token')}`
                     },
-                    body: JSON.stringify(body)
+                    body: JSON.stringify(body),
+                    signal: controller.signal
                 });
+                clearTimeout(timeoutId);
+
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}`);
+                }
+
                 const data = await response.json();
 
                 if (response.ok) {
@@ -276,7 +300,8 @@ const OfflineAPI = {
 
                 return data;
             } catch (error) {
-                console.warn('Network error, queuing for later:', error);
+                console.warn('Network error, queuing for later:', error.message);
+                Toast.show('Network error. Request queued for sync.', 'warning');
             }
         }
 
@@ -300,14 +325,24 @@ const OfflineAPI = {
     async put(endpoint, body) {
         if (offlineSync.isOnline) {
             try {
-                const response = await fetch(endpoint, {
+                const controller = new AbortController();
+                const timeoutId = setTimeout(() => controller.abort(), 10000);
+
+                const response = await fetch(`${CONFIG.API_BASE}${endpoint}`, {
                     method: 'PUT',
                     headers: {
                         'Content-Type': 'application/json',
                         'Authorization': `Bearer ${localStorage.getItem('token')}`
                     },
-                    body: JSON.stringify(body)
+                    body: JSON.stringify(body),
+                    signal: controller.signal
                 });
+                clearTimeout(timeoutId);
+
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}`);
+                }
+
                 const data = await response.json();
 
                 if (response.ok && endpoint.includes('/inventory/')) {
@@ -317,7 +352,8 @@ const OfflineAPI = {
 
                 return data;
             } catch (error) {
-                console.warn('Network error, queuing for later:', error);
+                console.warn('Network error, queuing for later:', error.message);
+                Toast.show('Network error. Request queued for sync.', 'warning');
             }
         }
 
@@ -341,10 +377,20 @@ const OfflineAPI = {
     async delete(endpoint) {
         if (offlineSync.isOnline) {
             try {
-                const response = await fetch(endpoint, {
+                const controller = new AbortController();
+                const timeoutId = setTimeout(() => controller.abort(), 10000);
+
+                const response = await fetch(`${CONFIG.API_BASE}${endpoint}`, {
                     method: 'DELETE',
-                    headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
+                    headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` },
+                    signal: controller.signal
                 });
+                clearTimeout(timeoutId);
+
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}`);
+                }
+
                 const data = await response.json();
 
                 if (response.ok && endpoint.includes('/inventory/')) {
@@ -359,7 +405,8 @@ const OfflineAPI = {
 
                 return data;
             } catch (error) {
-                console.warn('Network error, queuing for later:', error);
+                console.warn('Network error, queuing for later:', error.message);
+                Toast.show('Network error. Request queued for sync.', 'warning');
             }
         }
 
