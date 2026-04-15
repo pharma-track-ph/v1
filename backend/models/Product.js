@@ -5,7 +5,7 @@
 const db = require('../config/db');
 
 const Product = {
-    findAll: async ({ search = '', category = '', expiringOnly = false } = {}) => {
+    findAll: async ({ search = '', category = '', status = '' } = {}) => {
         let sql = `
             SELECT *,
                    DATEDIFF(expiry_date, CURDATE()) AS days_until_expiry,
@@ -32,9 +32,24 @@ const Product = {
             params.push(category);
         }
 
-        if (expiringOnly) {
-            // Items expiring within the next 30 days (but not yet expired)
-            sql += ' AND expiry_date >= CURDATE() AND DATEDIFF(expiry_date, CURDATE()) <= 30';
+        if (status) {
+            switch (status) {
+                case 'low_stock':
+                    sql += ' AND stock_quantity <= low_stock_threshold AND stock_quantity > 0';
+                    break;
+                case 'expiring':
+                    sql += ' AND expiry_date >= CURDATE() AND DATEDIFF(expiry_date, CURDATE()) <= 30';
+                    break;
+                case 'expired':
+                    sql += ' AND expiry_date < CURDATE()';
+                    break;
+                case 'out_of_stock':
+                    sql += ' AND stock_quantity <= 0';
+                    break;
+                case 'in_stock':
+                    sql += ' AND stock_quantity > low_stock_threshold AND expiry_date >= CURDATE()';
+                    break;
+            }
         }
 
         sql += ' ORDER BY expiry_date ASC, name ASC';

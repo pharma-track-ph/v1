@@ -12,11 +12,11 @@ const fs            = require('fs');
  */
 const getProducts = async (req, res, next) => {
     try {
-        const { search = '', category = '', expiring = '' } = req.query;
+        const { search = '', category = '', status = '' } = req.query;
         const products = await Product.findAll({
             search,
             category,
-            expiringOnly: expiring === 'true'
+            status
         });
         res.json({ success: true, data: products, total: products.length });
     } catch (err) { next(err); }

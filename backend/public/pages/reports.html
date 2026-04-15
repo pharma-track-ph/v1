@@ -88,15 +88,17 @@
                     <button class="report-tab" data-tab="expired">Expired Inventory</button>
                 </div>
 
-                <!-- ── Sales Report Tab ───────────────────────────── -->
-                <div id="tab-sales">
-                    <div class="report-filters">
-                        <div class="form-group">
-                            <label class="form-label">Start Date</label>
-                            <input type="date" id="report-start" class="form-control">
-                        </div>
-                        <div class="form-group">
-                            <label class="form-label">End Date</label>
+            <!-- ── Period Selection ────────────────────────────── -->
+            <div class="period-tabs">
+                <button class="period-btn active" data-period="daily">Daily</button>
+                <button class="period-btn" data-period="weekly">Weekly</button>
+                <button class="period-btn" data-period="monthly">Monthly</button>
+                <button class="period-btn" data-period="custom">Custom</button>
+            </div>
+
+            <!-- ── Sales Report Tab ───────────────────────────── -->
+            <div id="tab-sales">
+                <div class="report-filters" id="custom-filters" style="display:none">
                             <input type="date" id="report-end" class="form-control">
                         </div>
                         <button class="btn btn-primary" id="btn-run-report">Generate Report</button>
@@ -188,14 +190,59 @@
 
             let salesData = [];
 
-            // Set BOTH dates to today and auto-generate
-            const today = new Date();
-            const todayStr = today.toISOString().split('T')[0];
-            document.getElementById('report-start').value = todayStr;
-            document.getElementById('report-end').value = todayStr;
+            // ── Period Selection ───────────────────────────────────────
+            const periodBtns = document.querySelectorAll('.period-btn');
+            const customFilters = document.getElementById('custom-filters');
+            const startInput = document.getElementById('report-start');
+            const endInput = document.getElementById('report-end');
 
-            // Auto-generate report on load
-            loadSalesReport();
+            // Load saved period from localStorage
+            const savedPeriod = localStorage.getItem('pharmatrack_report_period') || 'daily';
+            setActivePeriod(savedPeriod);
+
+            function setActivePeriod(period) {
+                periodBtns.forEach(btn => {
+                    btn.classList.toggle('active', btn.dataset.period === period);
+                });
+                customFilters.style.display = period === 'custom' ? '' : 'none';
+                localStorage.setItem('pharmatrack_report_period', period);
+                autoGenerateReport(period);
+            }
+
+            periodBtns.forEach(btn => {
+                btn.addEventListener('click', () => {
+                    setActivePeriod(btn.dataset.period);
+                });
+            });
+
+            function autoGenerateReport(period) {
+                const today = new Date();
+                let start, end;
+
+                switch (period) {
+                    case 'daily':
+                        start = new Date(today);
+                        end = new Date(today);
+                        break;
+                    case 'weekly':
+                        start = new Date(today);
+                        start.setDate(today.getDate() - today.getDay()); // Start of week (Sunday)
+                        end = new Date(start);
+                        end.setDate(start.getDate() + 6); // End of week (Saturday)
+                        break;
+                    case 'monthly':
+                        start = new Date(today.getFullYear(), today.getMonth(), 1); // First day of month
+                        end = new Date(today.getFullYear(), today.getMonth() + 1, 0); // Last day of month
+                        break;
+                    case 'custom':
+                        // Don't auto-generate for custom, wait for manual button click
+                        return;
+                }
+
+                startInput.value = start.toISOString().split('T')[0];
+                endInput.value = end.toISOString().split('T')[0];
+                loadSalesReport();
+            }
 
             // ── Tabs ──────────────────────────────────────────────────
             document.querySelectorAll('.report-tab').forEach(tab => {

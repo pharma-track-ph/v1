@@ -93,9 +93,13 @@
                 <select id="inv-filter-cat" class="form-control" style="width:auto">
                     <option value="">All Categories</option>
                 </select>
-                <select id="inv-filter-expiring" class="form-control" style="width:auto">
+                <select id="inv-filter-status" class="form-control" style="width:auto">
                     <option value="">All Status</option>
-                    <option value="true">Expiring This Month</option>
+                    <option value="low_stock">⚠️ Low Stock</option>
+                    <option value="expiring">📅 Expiring This Month</option>
+                    <option value="expired">🚫 Expired</option>
+                    <option value="out_of_stock">❌ Out of Stock</option>
+                    <option value="in_stock">✅ In Stock</option>
                 </select>
                 <span class="text-muted" style="font-size:0.83rem">
                     <strong id="inv-total-count">—</strong> products
@@ -205,13 +209,14 @@
         </div>
         <div class="modal-footer">
             <button class="btn btn-light btn-close-modal">Cancel</button>
-            <button class="btn btn-primary" type="submit" form="product-form">Add Product</button>
+            <button class="btn btn-primary" type="button" id="btn-submit-product">Add Product</button>
         </div>
     </div>
 </div>
 
 <div id="toast-container" class="toast-container"></div>
 <script src="../js/main.js"></script>
+<script src="../js/offlineSync.js"></script>
 <script src="../js/inventory.js"></script>
 </body>
 </html>

@@ -14,7 +14,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const tbody         = document.getElementById('inv-tbody');
     const searchInput   = document.getElementById('inv-search');
     const categoryFilter= document.getElementById('inv-filter-cat');
-    const expiringFilter= document.getElementById('inv-filter-expiring');
+    const statusFilter  = document.getElementById('inv-filter-status');
     const totalCount    = document.getElementById('inv-total-count');
     const modalOverlay  = document.getElementById('product-modal');
     const productForm   = document.getElementById('product-form');
@@ -28,7 +28,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // ── Filters ──────────────────────────────────────────────
     searchInput?.addEventListener('input',   debounce(loadProducts, 300));
     categoryFilter?.addEventListener('change', loadProducts);
-    expiringFilter?.addEventListener('change', loadProducts);
+    statusFilter?.addEventListener('change', loadProducts);
 
     // ── Add button ────────────────────────────────────────────
     document.getElementById('btn-add-product')?.addEventListener('click', () => {
@@ -43,7 +43,7 @@ document.addEventListener('DOMContentLoaded', () => {
     importInput?.addEventListener('change', handleCSVImport);
 
     // ── Form submit ───────────────────────────────────────────
-    productForm?.addEventListener('submit', handleFormSubmit);
+    document.getElementById('btn-submit-product')?.addEventListener('click', handleFormSubmit);
 
     // ── Modal close buttons ───────────────────────────────────
     document.querySelectorAll('.btn-close-modal').forEach(btn => {
@@ -54,10 +54,10 @@ document.addEventListener('DOMContentLoaded', () => {
     async function loadProducts() {
         const search   = searchInput?.value.trim()        || '';
         const category = categoryFilter?.value            || '';
-        const expiring = expiringFilter?.value === 'true' ? 'true' : '';
+        const status   = statusFilter?.value              || '';
 
-        const params = new URLSearchParams({ search, category, expiring });
-        const data   = await API.get(`/inventory?${params}`);
+        const params = new URLSearchParams({ search, category, status });
+        const data   = await OfflineAPI.get(`/inventory?${params}`);
 
         if (!data?.success) {
             Toast.show('Failed to load products.', 'error');
@@ -155,7 +155,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     async function loadCategories() {
-        const data = await API.get('/inventory/alerts/summary');
+        const data = await OfflineAPI.get('/inventory/alerts/summary');
         if (!data?.success || !categoryFilter) return;
 
         const cats = data.data.categories || [];
@@ -203,7 +203,16 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // ── Form submission ───────────────────────────────────────
     async function handleFormSubmit(e) {
-        e.preventDefault();
+        // Manual validation
+        const requiredFields = ['batch_number', 'name', 'category', 'price', 'cost', 'stock_quantity', 'expiry_date'];
+        for (const field of requiredFields) {
+            const el = document.getElementById(`field-${field}`);
+            if (!el || !el.value.trim()) {
+                Toast.show(`${field.replace('_', ' ').toUpperCase()} is required.`, 'error');
+                el?.focus();
+                return;
+            }
+        }
 
         const formData = new FormData(productForm);
         const body     = Object.fromEntries(formData.entries());
@@ -214,15 +223,15 @@ document.addEventListener('DOMContentLoaded', () => {
         body.stock_quantity     = parseInt(body.stock_quantity);
         body.low_stock_threshold= parseInt(body.low_stock_threshold);
 
-        const submitBtn = productForm.querySelector('[type="submit"]');
+        const submitBtn = document.getElementById('btn-submit-product');
         submitBtn.disabled = true;
         submitBtn.textContent = editingId ? 'Saving…' : 'Adding…';
 
         let result;
         if (editingId) {
-            result = await API.put(`/inventory/${editingId}`, body);
+            result = await OfflineAPI.put(`/inventory/${editingId}`, body);
         } else {
-            result = await API.post('/inventory', body);
+            result = await OfflineAPI.post('/inventory', body);
         }
 
         submitBtn.disabled = false;
@@ -249,7 +258,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     async function deleteProduct(id) {
-        const result = await API.delete(`/inventory/${id}`);
+        const result = await OfflineAPI.delete(`/inventory/${id}`);
         if (result?.success) {
             Toast.show('Product removed.', 'success');
             loadProducts();

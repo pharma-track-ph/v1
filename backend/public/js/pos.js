@@ -71,7 +71,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     async function loadPOSProducts(query = '') {
         const params = query ? `?q=${encodeURIComponent(query)}` : '';
-        const data   = await API.get(`/pos/products${params}`);
+        const data   = await OfflineAPI.get(`/pos/products${params}`);
         if (!data?.success) return;
 
         allProducts = data.data;
@@ -234,7 +234,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const code = barcodeInput.value.trim();
             if (!code) return;
 
-            const data = await API.get(`/pos/products?barcode=${encodeURIComponent(code)}`);
+            const data = await OfflineAPI.get(`/pos/products?barcode=${encodeURIComponent(code)}`);
 
             if (data?.success && data.data.length) {
                 addToCart(data.data[0]);
@@ -285,15 +285,22 @@ document.addEventListener('DOMContentLoaded', () => {
             discount:        cart.discount
         };
 
-        const result = await API.post('/pos/checkout', payload);
+        const result = await OfflineAPI.post('/pos/checkout', payload);
 
         checkoutBtn.disabled = false;
         checkoutBtn.textContent = '✅ Checkout';
 
         if (result?.success) {
-            showReceipt(result.receipt);
-            cart.clear();
-            loadPOSProducts();  // Refresh stock
+            if (result.queued) {
+                // Offline checkout queued
+                Toast.show('Checkout queued for sync when online', 'info');
+                cart.clear();
+                loadPOSProducts();
+            } else {
+                showReceipt(result.receipt);
+                cart.clear();
+                loadPOSProducts();  // Refresh stock
+            }
         } else {
             // Handle expiry block from backend as extra safety layer
             if (result?.blocked && result?.reason === 'expired') {

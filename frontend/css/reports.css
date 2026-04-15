@@ -28,6 +28,27 @@
 .report-tab:hover  { color: var(--primary); }
 .report-tab.active { color: var(--primary); border-bottom-color: var(--primary); }
 
+.period-tabs {
+    display:       flex;
+    gap:           8px;
+    margin-bottom: 16px;
+}
+
+.period-btn {
+    padding:       8px 16px;
+    font-size:     0.875rem;
+    font-weight:   500;
+    color:         var(--gray-600);
+    background:    var(--gray-100);
+    border:        1px solid var(--gray-300);
+    border-radius: 6px;
+    cursor:        pointer;
+    transition:    var(--transition);
+}
+
+.period-btn:hover  { background: var(--gray-200); }
+.period-btn.active { background: var(--primary); color: white; border-color: var(--primary); }
+
 .report-filters {
     display:       flex;
     gap:           10px;
