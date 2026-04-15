@@ -1,289 +1,281 @@
 <!DOCTYPE html>
 <html lang="en">
-
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Reports – PharmaTrack</title>
     <link rel="stylesheet" href="../css/global.css">
     <link rel="stylesheet" href="../css/reports.css">
+    <style>
+        .toolbar-row {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            flex-wrap: wrap;
+            margin-bottom: 16px;
+        }
+        .period-btn {
+            padding: 8px 16px;
+            font-size: 0.875rem;
+            font-weight: 500;
+            color: var(--gray-700);
+            background: var(--gray-100);
+            border: 1px solid var(--gray-300);
+            border-radius: 6px;
+            cursor: pointer;
+            transition: var(--transition);
+            white-space: nowrap;
+        }
+        .period-btn:hover  { background: var(--gray-200); }
+        .period-btn.active { background: var(--primary); color: white; border-color: var(--primary); }
+        #custom-dates {
+            display: none;
+            align-items: center;
+            gap: 6px;
+        }
+        #custom-dates.visible { display: flex; }
+        #custom-dates input[type="date"] {
+            padding: 7px 10px;
+            border: 1px solid var(--gray-300);
+            border-radius: 6px;
+            font-size: 0.875rem;
+            font-family: var(--font-family);
+            color: var(--dark);
+            background: var(--white);
+        }
+        #custom-dates input[type="date"]:focus {
+            outline: none;
+            border-color: var(--primary);
+            box-shadow: 0 0 0 3px rgba(13,110,253,0.15);
+        }
+        #custom-dates label { font-size: 0.82rem; color: var(--secondary); white-space: nowrap; }
+        .spacer { flex: 1; }
+        .summary-chips { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 16px; }
+        .summary-chip { background: var(--white); border: 1px solid var(--gray-200); border-radius: var(--border-radius); padding: 10px 16px; box-shadow: var(--shadow-sm); }
+        .summary-chip .chip-label { font-size: 0.75rem; color: var(--secondary); }
+        .summary-chip .chip-value { font-size: 1.2rem; font-weight: 700; color: var(--dark); }
+        .expired-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; margin-bottom: 16px; }
+        .expired-stat-card { background: var(--danger-light); border: 1px solid #f5c6cb; border-radius: var(--border-radius); padding: 14px 18px; }
+        .expired-stat-card .stat-label { font-size: 0.78rem; color: var(--danger); font-weight: 600; }
+        .expired-stat-card .stat-value { font-size: 1.4rem; font-weight: 700; color: var(--danger); }
+        .report-tabs { display: flex; gap: 4px; border-bottom: 2px solid var(--gray-200); margin-bottom: 20px; }
+        .report-tab { padding: 10px 20px; font-size: 0.875rem; font-weight: 600; color: var(--secondary); cursor: pointer; border-bottom: 2px solid transparent; margin-bottom: -2px; transition: var(--transition); background: none; border-top: none; border-left: none; border-right: none; font-family: var(--font-family); }
+        .report-tab:hover  { color: var(--primary); }
+        .report-tab.active { color: var(--primary); border-bottom-color: var(--primary); }
+    </style>
 </head>
-
 <body>
-    <div class="app-container">
-        <aside class="sidebar" id="sidebar">
-            <div class="sidebar-brand">
-                <div class="brand-icon">💊</div>
-                <div class="brand-text">
-                    <h1>PharmaTrack</h1>
-                    <p>Management System</p>
-                </div>
-            </div>
-            <nav class="sidebar-nav">
-                <p class="nav-section-label">Main</p>
-                <ul>
-                    <li class="nav-item" data-roles="admin,super_admin,cashier"><a href="dashboard.html"><span
-                                class="nav-icon">📊</span> Dashboard</a></li>
-                    <li class="nav-item" data-roles="admin,super_admin,cashier"><a href="pos.html"><span
-                                class="nav-icon">🛒</span> Point of Sale</a></li>
-                </ul>
-                <p class="nav-section-label">Management</p>
-                <ul>
-                    <li class="nav-item" data-roles="admin,super_admin"><a href="inventory.html"><span
-                                class="nav-icon">📦</span> Inventory</a></li>
-                    <li class="nav-item active" data-roles="admin,super_admin"><a href="reports.html"><span
-                                class="nav-icon">📋</span> Reports</a></li>
-                    <li class="nav-item" data-roles="admin,super_admin"><a href="forecasting.html"><span
-                                class="nav-icon">📈</span> Forecasting</a></li>
-                </ul>
-                <p class="nav-section-label">Admin</p>
-                <ul>
-                    <li class="nav-item" data-roles="admin,super_admin"><a href="users.html"><span
-                                class="nav-icon">👥</span> Users</a></li>
-                    <li class="nav-item" data-roles="super_admin"><a href="audit.html"><span class="nav-icon">🔍</span>
-                            Audit Logs</a></li>
-                    <li class="nav-item"><a href="#" data-action="logout"><span class="nav-icon">🚪</span> Sign Out</a>
-                    </li>
-                </ul>
-            </nav>
-            <div class="sidebar-footer">
-                <div id="sidebar-user-name" class="fw-600">—</div>
-                <div id="sidebar-user-role" style="font-size:0.7rem;opacity:0.7">—</div>
-            </div>
-        </aside>
-        <div class="sidebar-overlay" id="sidebar-overlay"></div>
-
-        <div class="main-wrapper">
-            <header class="top-header">
-                <div class="header-left">
-                    <button class="btn-menu-toggle" id="btn-menu-toggle">☰</button>
-                    <div class="header-title">Reports</div>
-                </div>
-                <div class="header-right">
-                    <div class="header-alert-btn">📦 Low Stock <span class="alert-badge" id="badge-low-stock"
-                            style="display:none">0</span></div>
-                    <div class="header-alert-btn">⚠️ Near Expiry <span class="alert-badge amber" id="badge-near-expiry"
-                            style="display:none">0</span></div>
-                    <div class="header-user">
-                        <div class="user-avatar" id="header-avatar">?</div>
-                        <div class="user-info">
-                            <div class="user-name" id="header-user-name">—</div>
-                            <div class="user-role" id="header-user-role">—</div>
-                        </div>
-                    </div>
-                </div>
-            </header>
-
-            <main class="page-content">
-                <div class="page-header">
-                    <div>
-                        <h2>📋 Reports</h2>
-                        <p>Sales summaries, export, and expired inventory.</p>
-                    </div>
-                </div>
-
-                <!-- ── Tabs ────────────────────────────────────────── -->
-                <div class="report-tabs">
-                    <button class="report-tab active" data-tab="sales">Sales Report</button>
-                    <button class="report-tab" data-tab="expired">Expired Inventory</button>
-                </div>
-
-            <!-- ── Period Selection ────────────────────────────── -->
-            <div class="period-tabs">
-                <button class="period-btn active" data-period="daily">Daily</button>
-                <button class="period-btn" data-period="weekly">Weekly</button>
-                <button class="period-btn" data-period="monthly">Monthly</button>
-                <button class="period-btn" data-period="custom">Custom</button>
-            </div>
-
-            <!-- ── Sales Report Tab ───────────────────────────── -->
-            <div id="tab-sales">
-                <div class="report-filters" id="custom-filters" style="display:none">
-                            <input type="date" id="report-end" class="form-control">
-                        </div>
-                        <button class="btn btn-primary" id="btn-run-report">Generate Report</button>
-                        <div class="export-btn-wrap">
-                            <button class="btn btn-success" id="btn-export-csv">📥 Export CSV</button>
-                        </div>
-                    </div>
-
-                    <div class="summary-chips" id="sales-summary-chips" style="display:none">
-                        <div class="summary-chip">
-                            <div class="chip-label">Total Sales</div>
-                            <div class="chip-value" id="chip-total-sales">₱0</div>
-                        </div>
-                        <div class="summary-chip">
-                            <div class="chip-label">Transactions</div>
-                            <div class="chip-value" id="chip-txn-count">0</div>
-                        </div>
-                        <div class="summary-chip">
-                            <div class="chip-label">Total Discount</div>
-                            <div class="chip-value" id="chip-discount">₱0</div>
-                        </div>
-                    </div>
-
-                    <div class="card" style="padding:0">
-                        <div class="table-container">
-                            <table class="table" id="sales-table">
-                                <thead>
-                                    <tr>
-                                        <th>Order #</th>
-                                        <th>Date/Time</th>
-                                        <th>Cashier</th>
-                                        <th>Subtotal</th>
-                                        <th>Discount</th>
-                                        <th>Total</th>
-                                        <th>Payment</th>
-                                    </tr>
-                                </thead>
-                                <tbody id="sales-tbody">
-                                    <tr>
-                                        <td colspan="7" class="text-center text-muted" style="padding:40px">
-                                            Set a date range and click "Generate Report".
-                                        </td>
-                                    </tr>
-                                </tbody>
-                            </table>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- ── Expired Inventory Tab ──────────────────────── -->
-                <div id="tab-expired" style="display:none">
-                    <div class="expired-stats" id="expired-stats"></div>
-                    <div class="card" style="padding:0">
-                        <div class="table-container">
-                            <table class="table">
-                                <thead>
-                                    <tr>
-                                        <th>Batch No.</th>
-                                        <th>Product Name</th>
-                                        <th>Category</th>
-                                        <th>Qty on Hand</th>
-                                        <th>Cost (₱)</th>
-                                        <th>Expiry Date</th>
-                                        <th>Days Expired</th>
-                                        <th>Value Lost</th>
-                                    </tr>
-                                </thead>
-                                <tbody id="expired-tbody">
-                                    <tr>
-                                        <td colspan="8" class="text-center" style="padding:40px">
-                                            <div class="spinner" style="margin:0 auto"></div>
-                                        </td>
-                                    </tr>
-                                </tbody>
-                            </table>
-                        </div>
-                    </div>
-                </div>
-
-            </main>
+<div class="app-container">
+    <aside class="sidebar" id="sidebar">
+        <div class="sidebar-brand">
+            <div class="brand-icon">💊</div>
+            <div class="brand-text"><h1>PharmaTrack</h1><p>Management System</p></div>
         </div>
+        <nav class="sidebar-nav">
+            <p class="nav-section-label">Main</p>
+            <ul>
+                <li class="nav-item" data-roles="admin,super_admin,cashier"><a href="dashboard.html"><span class="nav-icon">📊</span> Dashboard</a></li>
+                <li class="nav-item" data-roles="admin,super_admin,cashier"><a href="pos.html"><span class="nav-icon">🛒</span> Point of Sale</a></li>
+            </ul>
+            <p class="nav-section-label">Management</p>
+            <ul>
+                <li class="nav-item" data-roles="admin,super_admin"><a href="inventory.html"><span class="nav-icon">📦</span> Inventory</a></li>
+                <li class="nav-item active" data-roles="admin,super_admin"><a href="reports.html"><span class="nav-icon">📋</span> Reports</a></li>
+                <li class="nav-item" data-roles="admin,super_admin"><a href="forecasting.html"><span class="nav-icon">📈</span> Forecasting</a></li>
+            </ul>
+            <p class="nav-section-label">Admin</p>
+            <ul>
+                <li class="nav-item" data-roles="admin,super_admin"><a href="users.html"><span class="nav-icon">👥</span> Users</a></li>
+                <li class="nav-item" data-roles="super_admin"><a href="audit.html"><span class="nav-icon">🔍</span> Audit Logs</a></li>
+                <li class="nav-item"><a href="#" data-action="logout"><span class="nav-icon">🚪</span> Sign Out</a></li>
+            </ul>
+        </nav>
+        <div class="sidebar-footer">
+            <div id="sidebar-user-name" class="fw-600">—</div>
+            <div id="sidebar-user-role" style="font-size:0.7rem;opacity:0.7">—</div>
+        </div>
+    </aside>
+    <div class="sidebar-overlay" id="sidebar-overlay"></div>
+
+    <div class="main-wrapper">
+        <header class="top-header">
+            <div class="header-left">
+                <button class="btn-menu-toggle" id="btn-menu-toggle">☰</button>
+                <div class="header-title">Reports</div>
+            </div>
+            <div class="header-right">
+                <div class="header-alert-btn">📦 Low Stock <span class="alert-badge" id="badge-low-stock" style="display:none">0</span></div>
+                <div class="header-alert-btn">⚠️ Near Expiry <span class="alert-badge amber" id="badge-near-expiry" style="display:none">0</span></div>
+                <div class="header-user">
+                    <div class="user-avatar" id="header-avatar">?</div>
+                    <div class="user-info">
+                        <div class="user-name" id="header-user-name">—</div>
+                        <div class="user-role" id="header-user-role">—</div>
+                    </div>
+                </div>
+            </div>
+        </header>
+
+        <main class="page-content">
+            <div class="page-header">
+                <div><h2>📋 Reports</h2><p>Sales summaries, export, and expired inventory.</p></div>
+            </div>
+
+            <!-- Tabs -->
+            <div class="report-tabs">
+                <button class="report-tab active" data-tab="sales">Sales Report</button>
+                <button class="report-tab" data-tab="expired">Expired Inventory</button>
+            </div>
+
+            <!-- SALES TAB -->
+            <div id="tab-sales">
+                <!-- Single row: period btns | custom date pickers | Generate | spacer | Export CSV -->
+                <div class="toolbar-row">
+                    <button class="period-btn active" data-period="daily">Daily</button>
+                    <button class="period-btn" data-period="weekly">Weekly</button>
+                    <button class="period-btn" data-period="monthly">Monthly</button>
+                    <button class="period-btn" data-period="custom">Custom</button>
+
+                    <div id="custom-dates">
+                        <label>From</label>
+                        <input type="date" id="report-start">
+                        <label>To</label>
+                        <input type="date" id="report-end">
+                        <button class="btn btn-primary btn-sm" id="btn-run-report">Generate Report</button>
+                    </div>
+
+                    <div class="spacer"></div>
+                    <button class="btn btn-success" id="btn-export-csv">📥 Export CSV</button>
+                </div>
+
+                <div class="summary-chips" id="sales-summary-chips" style="display:none">
+                    <div class="summary-chip"><div class="chip-label">Total Sales</div><div class="chip-value" id="chip-total-sales">₱0</div></div>
+                    <div class="summary-chip"><div class="chip-label">Transactions</div><div class="chip-value" id="chip-txn-count">0</div></div>
+                    <div class="summary-chip"><div class="chip-label">Total Discount</div><div class="chip-value" id="chip-discount">₱0</div></div>
+                </div>
+
+                <div class="card" style="padding:0">
+                    <div class="table-container">
+                        <table class="table">
+                            <thead>
+                                <tr><th>Order #</th><th>Date/Time</th><th>Cashier</th><th>Subtotal</th><th>Discount</th><th>Total</th><th>Payment</th></tr>
+                            </thead>
+                            <tbody id="sales-tbody">
+                                <tr><td colspan="7" class="text-center" style="padding:24px"><div class="spinner" style="margin:0 auto"></div></td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <!-- EXPIRED TAB -->
+            <div id="tab-expired" style="display:none">
+                <div class="expired-stats" id="expired-stats"></div>
+                <div class="card" style="padding:0">
+                    <div class="table-container">
+                        <table class="table">
+                            <thead>
+                                <tr><th>Batch No.</th><th>Product Name</th><th>Category</th><th>Qty</th><th>Cost (₱)</th><th>Expiry Date</th><th>Days Expired</th><th>Value Lost</th></tr>
+                            </thead>
+                            <tbody id="expired-tbody">
+                                <tr><td colspan="8" class="text-center" style="padding:24px"><div class="spinner" style="margin:0 auto"></div></td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </main>
     </div>
-    <div id="toast-container" class="toast-container"></div>
-    <script src="../js/main.js"></script>
-    <script>
-        // ── Reports Page Logic ────────────────────────────────────────
-        document.addEventListener('DOMContentLoaded', () => {
-            if (!Auth.requireAuth(['admin', 'super_admin'])) return;
+</div>
 
-            let salesData = [];
+<div id="toast-container" class="toast-container"></div>
+<script src="../js/main.js"></script>
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+    if (!Auth.requireAuth(['admin', 'super_admin'])) return;
 
-            // ── Period Selection ───────────────────────────────────────
-            const periodBtns = document.querySelectorAll('.period-btn');
-            const customFilters = document.getElementById('custom-filters');
-            const startInput = document.getElementById('report-start');
-            const endInput = document.getElementById('report-end');
+    let salesData = [];
+    const startInput  = document.getElementById('report-start');
+    const endInput    = document.getElementById('report-end');
+    const customDates = document.getElementById('custom-dates');
+    const periodBtns  = document.querySelectorAll('.period-btn');
 
-            // Load saved period from localStorage
-            const savedPeriod = localStorage.getItem('pharmatrack_report_period') || 'daily';
-            setActivePeriod(savedPeriod);
+    // ── Date range helper ─────────────────────────────────────
+    function getDateRange(period) {
+        const today = new Date();
+        let start, end;
+        switch (period) {
+            case 'daily':
+                start = end = new Date(today); break;
+            case 'weekly':
+                start = new Date(today);
+                start.setDate(today.getDate() - today.getDay());
+                end = new Date(start);
+                end.setDate(start.getDate() + 6);
+                break;
+            case 'monthly':
+                start = new Date(today.getFullYear(), today.getMonth(), 1);
+                end   = new Date(today.getFullYear(), today.getMonth() + 1, 0);
+                break;
+            default: return null;
+        }
+        const fmt = d => d.toISOString().split('T')[0];
+        return { start: fmt(start), end: fmt(end) };
+    }
 
-            function setActivePeriod(period) {
-                periodBtns.forEach(btn => {
-                    btn.classList.toggle('active', btn.dataset.period === period);
-                });
-                customFilters.style.display = period === 'custom' ? '' : 'none';
-                localStorage.setItem('pharmatrack_report_period', period);
-                autoGenerateReport(period);
-            }
-
-            periodBtns.forEach(btn => {
-                btn.addEventListener('click', () => {
-                    setActivePeriod(btn.dataset.period);
-                });
-            });
-
-            function autoGenerateReport(period) {
-                const today = new Date();
-                let start, end;
-
-                switch (period) {
-                    case 'daily':
-                        start = new Date(today);
-                        end = new Date(today);
-                        break;
-                    case 'weekly':
-                        start = new Date(today);
-                        start.setDate(today.getDate() - today.getDay()); // Start of week (Sunday)
-                        end = new Date(start);
-                        end.setDate(start.getDate() + 6); // End of week (Saturday)
-                        break;
-                    case 'monthly':
-                        start = new Date(today.getFullYear(), today.getMonth(), 1); // First day of month
-                        end = new Date(today.getFullYear(), today.getMonth() + 1, 0); // Last day of month
-                        break;
-                    case 'custom':
-                        // Don't auto-generate for custom, wait for manual button click
-                        return;
+    // ── Period buttons ────────────────────────────────────────
+    periodBtns.forEach(btn => {
+        btn.addEventListener('click', () => {
+            periodBtns.forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            const period = btn.dataset.period;
+            if (period === 'custom') {
+                customDates.classList.add('visible');
+                if (!startInput.value) {
+                    const t = new Date().toISOString().split('T')[0];
+                    startInput.value = endInput.value = t;
                 }
-
-                startInput.value = start.toISOString().split('T')[0];
-                endInput.value = end.toISOString().split('T')[0];
-                loadSalesReport();
+            } else {
+                customDates.classList.remove('visible');
+                const range = getDateRange(period);
+                if (range) { startInput.value = range.start; endInput.value = range.end; loadSalesReport(range.start, range.end); }
             }
+        });
+    });
 
-            // ── Tabs ──────────────────────────────────────────────────
-            document.querySelectorAll('.report-tab').forEach(tab => {
-                tab.addEventListener('click', () => {
-                    document.querySelectorAll('.report-tab').forEach(t => t.classList.remove('active'));
-                    tab.classList.add('active');
-                    const id = tab.dataset.tab;
-                    document.getElementById('tab-sales').style.display = id === 'sales' ? '' : 'none';
-                    document.getElementById('tab-expired').style.display = id === 'expired' ? '' : 'none';
-                    if (id === 'expired') loadExpiredReport();
-                });
-            });
+    // ── Custom "Generate Report" click ────────────────────────
+    document.getElementById('btn-run-report')?.addEventListener('click', () => {
+        const s = startInput.value, e = endInput.value;
+        if (!s || !e) { Toast.show('Select both dates.', 'warning'); return; }
+        if (s > e)    { Toast.show('Start date must be before end date.', 'warning'); return; }
+        loadSalesReport(s, e);
+    });
 
-            // ── Sales Report ──────────────────────────────────────────
-            document.getElementById('btn-run-report').addEventListener('click', loadSalesReport);
+    // ── Load sales report ─────────────────────────────────────
+    async function loadSalesReport(start, end) {
+        const tbody = document.getElementById('sales-tbody');
+        tbody.innerHTML = '<tr><td colspan="7" class="text-center" style="padding:24px"><div class="spinner" style="margin:0 auto"></div></td></tr>';
+        document.getElementById('sales-summary-chips').style.display = 'none';
 
-            async function loadSalesReport() {
-                const start = document.getElementById('report-start').value;
-                const end = document.getElementById('report-end').value;
-                if (!start || !end) { Toast.show('Select a date range.', 'warning'); return; }
+        const data = await API.get(`/reports/sales?start_date=${start}&end_date=${end}&limit=500`);
+        if (!data?.success) {
+            Toast.show('Failed to load report.', 'error');
+            tbody.innerHTML = '<tr><td colspan="7" class="text-center text-muted" style="padding:24px">Failed to load data.</td></tr>';
+            return;
+        }
 
-                const data = await API.get(`/reports/sales?start_date=${start}&end_date=${end}`);
-                if (!data?.success) { Toast.show('Failed to load report.', 'error'); return; }
+        salesData = data.data || [];
+        const s   = data.summary || {};
+        document.getElementById('chip-total-sales').textContent = Fmt.currency(s.total_sales   || 0);
+        document.getElementById('chip-txn-count').textContent   = s.transaction_count || 0;
+        document.getElementById('chip-discount').textContent    = Fmt.currency(s.total_discount || 0);
+        document.getElementById('sales-summary-chips').style.display = 'flex';
 
-                salesData = data.data;
-                const summary = data.summary;
-
-                // Summary chips
-                document.getElementById('chip-total-sales').textContent = Fmt.currency(summary.total_sales);
-                document.getElementById('chip-txn-count').textContent = summary.transaction_count;
-                document.getElementById('chip-discount').textContent = Fmt.currency(summary.total_discount);
-                document.getElementById('sales-summary-chips').style.display = 'flex';
-
-                // Table
-                const tbody = document.getElementById('sales-tbody');
-                if (!salesData.length) {
-                    tbody.innerHTML = '<tr><td colspan="7" class="text-center text-muted" style="padding:24px">No transactions in this range.</td></tr>';
-                    return;
-                }
-
-                tbody.innerHTML = salesData.map(o => `
+        if (!salesData.length) {
+            tbody.innerHTML = '<tr><td colspan="7" class="text-center text-muted" style="padding:24px">No transactions found for this period.</td></tr>';
+            return;
+        }
+        tbody.innerHTML = salesData.map(o => `
             <tr>
                 <td class="fw-600">${o.order_number}</td>
                 <td>${Fmt.datetime(o.created_at)}</td>
@@ -292,59 +284,54 @@
                 <td>${Fmt.currency(o.discount)}</td>
                 <td class="fw-600" style="color:var(--primary)">${Fmt.currency(o.total)}</td>
                 <td><span class="badge badge-primary">${o.payment_method.toUpperCase()}</span></td>
-            </tr>
-        `).join('');
-            }
+            </tr>`).join('');
+    }
 
-            // ── Export CSV ────────────────────────────────────────────
-            document.getElementById('btn-export-csv').addEventListener('click', () => {
-                if (!salesData.length) { Toast.show('Generate a report first.', 'warning'); return; }
+    // ── Export CSV ────────────────────────────────────────────
+    document.getElementById('btn-export-csv')?.addEventListener('click', () => {
+        if (!salesData.length) { Toast.show('Generate a report first.', 'warning'); return; }
+        const headers = ['Order #','Date','Cashier','Subtotal','Discount','Total','Payment'];
+        const rows    = salesData.map(o => [o.order_number, Fmt.datetime(o.created_at), o.cashier_name, o.subtotal, o.discount, o.total, o.payment_method]);
+        const csv     = [headers, ...rows].map(r => r.map(v => `"${v}"`).join(',')).join('\n');
+        const a       = Object.assign(document.createElement('a'), { href: URL.createObjectURL(new Blob([csv], {type:'text/csv'})), download: `pharmatrack_sales_${new Date().toISOString().split('T')[0]}.csv` });
+        a.click();
+    });
 
-                const headers = ['Order #', 'Date', 'Cashier', 'Subtotal', 'Discount', 'Total', 'Payment'];
-                const rows = salesData.map(o => [
-                    o.order_number,
-                    Fmt.datetime(o.created_at),
-                    o.cashier_name,
-                    o.subtotal,
-                    o.discount,
-                    o.total,
-                    o.payment_method
-                ]);
+    // ── Tab switching ─────────────────────────────────────────
+    document.querySelectorAll('.report-tab').forEach(tab => {
+        tab.addEventListener('click', () => {
+            document.querySelectorAll('.report-tab').forEach(t => t.classList.remove('active'));
+            tab.classList.add('active');
+            const id = tab.dataset.tab;
+            document.getElementById('tab-sales').style.display   = id === 'sales'   ? '' : 'none';
+            document.getElementById('tab-expired').style.display = id === 'expired' ? '' : 'none';
+            if (id === 'expired') loadExpiredReport();
+        });
+    });
 
-                const csv = [headers, ...rows].map(r => r.map(v => `"${v}"`).join(',')).join('\n');
-                const blob = new Blob([csv], { type: 'text/csv' });
-                const url = URL.createObjectURL(blob);
-                const a = document.createElement('a');
-                a.href = url;
-                a.download = `pharmatrack_sales_${new Date().toISOString().split('T')[0]}.csv`;
-                a.click();
-                URL.revokeObjectURL(url);
-            });
+    // ── Expired Inventory ─────────────────────────────────────
+    async function loadExpiredReport() {
+        const tbody = document.getElementById('expired-tbody');
+        tbody.innerHTML = '<tr><td colspan="8" class="text-center" style="padding:24px"><div class="spinner" style="margin:0 auto"></div></td></tr>';
+        document.getElementById('expired-stats').innerHTML = '';
 
-            // ── Expired Inventory Report ──────────────────────────────
-            async function loadExpiredReport() {
-                const data = await API.get('/reports/expired');
-                if (!data?.success) { Toast.show('Failed to load expired report.', 'error'); return; }
+        const data = await API.get('/reports/expired');
+        if (!data?.success) {
+            Toast.show('Failed to load expired inventory.', 'error');
+            tbody.innerHTML = '<tr><td colspan="8" class="text-center text-muted" style="padding:24px">Failed to load data.</td></tr>';
+            return;
+        }
 
-                const { data: expired, summary } = data;
+        const { data: expired, summary } = data;
+        document.getElementById('expired-stats').innerHTML = `
+            <div class="expired-stat-card"><div class="stat-label">Expired Products</div><div class="stat-value">${summary.total_products}</div></div>
+            <div class="expired-stat-card"><div class="stat-label">Total Value Lost</div><div class="stat-value">${Fmt.currency(summary.total_value_lost)}</div></div>`;
 
-                document.getElementById('expired-stats').innerHTML = `
-            <div class="expired-stat-card">
-                <div class="stat-label">Expired Products</div>
-                <div class="stat-value">${summary.total_products}</div>
-            </div>
-            <div class="expired-stat-card">
-                <div class="stat-label">Total Value Lost</div>
-                <div class="stat-value">${Fmt.currency(summary.total_value_lost)}</div>
-            </div>`;
-
-                const tbody = document.getElementById('expired-tbody');
-                if (!expired.length) {
-                    tbody.innerHTML = '<tr><td colspan="8" class="text-center text-muted" style="padding:24px">✅ No expired products on record.</td></tr>';
-                    return;
-                }
-
-                tbody.innerHTML = expired.map(p => `
+        if (!expired.length) {
+            tbody.innerHTML = '<tr><td colspan="8" class="text-center text-muted" style="padding:24px">✅ No expired products on record.</td></tr>';
+            return;
+        }
+        tbody.innerHTML = expired.map(p => `
             <tr class="row-expired">
                 <td>${p.batch_number}</td>
                 <td class="fw-600">${p.name}</td>
@@ -354,11 +341,15 @@
                 <td style="color:var(--danger)">${Fmt.date(p.expiry_date)}</td>
                 <td style="color:var(--danger);font-weight:600">${p.days_expired}d ago</td>
                 <td style="color:var(--danger);font-weight:700">${Fmt.currency(p.value_lost)}</td>
-            </tr>
-        `).join('');
-            }
-        });
-    </script>
-</body>
+            </tr>`).join('');
+    }
 
+    // ── Auto-load daily on open ───────────────────────────────
+    const initRange = getDateRange('daily');
+    startInput.value = initRange.start;
+    endInput.value   = initRange.end;
+    loadSalesReport(initRange.start, initRange.end);
+});
+</script>
+</body>
 </html>
