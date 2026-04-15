@@ -329,7 +329,8 @@ const Nav = {
 
 // ── Alert Header Badges ────────────────────────────────────────
 async function loadHeaderAlerts() {
-    const data = await API.get('/inventory/alerts/summary');
+    const alertsClient = typeof OfflineAPI !== 'undefined' ? OfflineAPI : API;
+    const data = await alertsClient.get('/inventory/alerts/summary');
     if (!data?.success) return;
 
     const { low_stock, near_expiry } = data.data;
