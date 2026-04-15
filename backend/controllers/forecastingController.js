@@ -302,7 +302,7 @@ function fillMissingWeeks(dbRows, totalWeeks) {
         const weekStart = new Date(today);
         weekStart.setDate(today.getDate() - today.getDay() - i * 7 + 1);
 
-        const label    = `Week of ${weekStart.toLocaleDateString('en-PH', { month: 'short', day: 'numeric' })}`;
+        const label    = `Week of ${weekStart.toLocaleDateString('en-PH', { month: 'short', day: 'numeric', timeZone: 'Asia/Manila' })}`;
         const yearWeek = getYearWeek(weekStart);
         const found    = dbRows.find(r => r.year_week == yearWeek);
 

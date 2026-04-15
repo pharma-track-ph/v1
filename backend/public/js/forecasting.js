@@ -527,7 +527,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
         const orderDate = new Date();
         orderDate.setDate(orderDate.getDate() + 7);
-        const orderDateLabel = orderDate.toLocaleDateString('en-PH', { month: 'short', day: 'numeric' });
+        const orderDateLabel = orderDate.toLocaleDateString('en-PH', { month: 'short', day: 'numeric', timeZone: 'Asia/Manila' });
 
         const price             = parseFloat(product.price) || 0;
         const estimatedSavings  = Math.round(recommendedOrder * price * 0.15);

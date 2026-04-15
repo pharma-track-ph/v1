@@ -193,23 +193,34 @@ const Fmt = {
     /**
      * date(dateStr) → "Mar 15, 2024"
      * Accepts ISO date string or Date object.
+     * Always displays in Philippines timezone (UTC+8)
      */
     date(dateStr) {
         if (!dateStr) return '—';
-        // Parse as local date to avoid UTC offset issues
-        const d = new Date(dateStr + (dateStr.includes('T') ? '' : 'T00:00:00'));
-        return d.toLocaleDateString('en-PH', { year: 'numeric', month: 'short', day: '2-digit' });
+        const d = new Date(dateStr);
+        return d.toLocaleDateString('en-PH', {
+            year: 'numeric',
+            month: 'short',
+            day: '2-digit',
+            timeZone: 'Asia/Manila'
+        });
     },
 
     /**
      * datetime(dateStr) → "Mar 15, 2024, 2:30 PM"
+     * Always displays in Philippines timezone (UTC+8)
      */
     datetime(dateStr) {
         if (!dateStr) return '—';
         const d = new Date(dateStr);
         return d.toLocaleDateString('en-PH', {
-            year: 'numeric', month: 'short', day: '2-digit',
-            hour: '2-digit', minute: '2-digit', hour12: true
+            year: 'numeric',
+            month: 'short',
+            day: '2-digit',
+            hour: '2-digit',
+            minute: '2-digit',
+            hour12: true,
+            timeZone: 'Asia/Manila'
         });
     }
 };
