@@ -1,0 +1,323 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Audit Logs – PharmaTrack</title>
+    <link rel="stylesheet" href="../css/global.css">
+    <style>
+        /* ── Audit-page styles ─────────────────────────────── */
+
+        /* Stat bar */
+        .audit-stats {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+            gap: 12px;
+            margin-bottom: 20px;
+        }
+
+        .audit-stat-card {
+            background: var(--white);
+            border-radius: var(--border-radius-lg);
+            padding: 16px 18px;
+            box-shadow: var(--shadow-sm);
+            border: 1px solid var(--gray-200);
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .audit-stat-icon {
+            width: 40px;
+            height: 40px;
+            border-radius: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.2rem;
+            flex-shrink: 0;
+        }
+
+        .audit-stat-icon.blue   { background: var(--primary-light); }
+        .audit-stat-icon.yellow { background: var(--warning-light); }
+        .audit-stat-icon.green  { background: var(--success-light); }
+        .audit-stat-icon.red    { background: var(--danger-light); }
+
+        .audit-stat-label { font-size: 0.75rem; color: var(--secondary); }
+        .audit-stat-value { font-size: 1.4rem; font-weight: 700; color: var(--dark); }
+
+        /* Toolbar */
+        .audit-toolbar {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            flex-wrap: wrap;
+            margin-bottom: 16px;
+        }
+
+        .audit-toolbar .search-wrap {
+            position: relative;
+            flex: 1;
+            min-width: 200px;
+        }
+
+        .audit-toolbar .search-wrap input { padding-left: 36px; }
+
+        .audit-toolbar .search-wrap .search-icon {
+            position: absolute;
+            left: 10px;
+            top: 50%;
+            transform: translateY(-50%);
+            color: var(--secondary);
+            pointer-events: none;
+        }
+
+        /* Action type badges */
+        .action-badge {
+            display: inline-flex;
+            align-items: center;
+            padding: 3px 8px;
+            border-radius: 4px;
+            font-size: 0.7rem;
+            font-weight: 600;
+            white-space: nowrap;
+        }
+
+        .action-badge.CREATE  { background: #d1e7dd; color: #0f5132; }
+        .action-badge.UPDATE  { background: #cfe2ff; color: #0a58ca; }
+        .action-badge.DELETE  { background: #f8d7da; color: #842029; }
+        .action-badge.LOGIN   { background: #fff3cd; color: #664d03; }
+        .action-badge.IMPORT  { background: #e2e3e5; color: #41464b; }
+        .action-badge.CHECKOUT{ background: #d1e7dd; color: #0f5132; }
+        .action-badge.DEFAULT { background: var(--gray-200); color: var(--secondary); }
+
+        /* Detail panel (expandable row) */
+        .detail-row td {
+            background: var(--gray-100);
+            padding: 12px 16px;
+        }
+
+        .detail-json {
+            font-family: 'Courier New', monospace;
+            font-size: 0.78rem;
+            color: var(--dark);
+            white-space: pre-wrap;
+            word-break: break-all;
+            max-height: 200px;
+            overflow-y: auto;
+            background: var(--white);
+            border: 1px solid var(--gray-200);
+            border-radius: 6px;
+            padding: 10px;
+            margin-top: 6px;
+        }
+
+        /* Pagination */
+        .pagination {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            margin-top: 20px;
+            flex-wrap: wrap;
+        }
+
+        .page-btn {
+            padding: 6px 14px;
+            border: 1px solid var(--gray-300);
+            background: var(--white);
+            border-radius: 6px;
+            font-size: 0.83rem;
+            cursor: pointer;
+            transition: var(--transition);
+        }
+
+        .page-btn:hover          { background: var(--gray-100); }
+        .page-btn.active         { background: var(--primary); color: #fff; border-color: var(--primary); }
+        .page-btn:disabled       { opacity: 0.4; cursor: not-allowed; }
+        .page-info               { font-size: 0.83rem; color: var(--secondary); }
+
+        /* Empty state */
+        .empty-audit {
+            text-align: center;
+            padding: 60px 20px;
+            color: var(--secondary);
+        }
+
+        .empty-audit .empty-icon { font-size: 3rem; margin-bottom: 12px; opacity: 0.4; }
+
+        /* Expand btn */
+        .btn-expand {
+            background: none;
+            border: 1px solid var(--gray-300);
+            border-radius: 4px;
+            width: 22px;
+            height: 22px;
+            cursor: pointer;
+            font-size: 0.7rem;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            transition: var(--transition);
+            color: var(--secondary);
+        }
+
+        .btn-expand:hover { background: var(--gray-100); }
+    </style>
+</head>
+<body>
+<div class="app-container">
+
+    <aside class="sidebar" id="sidebar">
+        <div class="sidebar-brand">
+            <div class="brand-icon">💊</div>
+            <div class="brand-text"><h1>PharmaTrack</h1><p>Management System</p></div>
+        </div>
+        <nav class="sidebar-nav">
+            <p class="nav-section-label">Main</p>
+            <ul>
+                <li class="nav-item" data-roles="admin,super_admin,cashier"><a href="dashboard.html"><span class="nav-icon">📊</span> Dashboard</a></li>
+                <li class="nav-item" data-roles="admin,super_admin,cashier"><a href="pos.html"><span class="nav-icon">🛒</span> Point of Sale</a></li>
+            </ul>
+            <p class="nav-section-label">Management</p>
+            <ul>
+                <li class="nav-item" data-roles="admin,super_admin"><a href="inventory.html"><span class="nav-icon">📦</span> Inventory</a></li>
+                <li class="nav-item" data-roles="admin,super_admin"><a href="reports.html"><span class="nav-icon">📋</span> Reports</a></li>
+                <li class="nav-item" data-roles="admin,super_admin"><a href="forecasting.html"><span class="nav-icon">📈</span> Forecasting</a></li>
+            </ul>
+            <p class="nav-section-label">Admin</p>
+            <ul>
+                <li class="nav-item" data-roles="admin,super_admin"><a href="users.html"><span class="nav-icon">👥</span> Users</a></li>
+                <li class="nav-item active" data-roles="super_admin"><a href="audit.html"><span class="nav-icon">🔍</span> Audit Logs</a></li>
+                <li class="nav-item"><a href="#" data-action="logout"><span class="nav-icon">🚪</span> Sign Out</a></li>
+            </ul>
+        </nav>
+        <div class="sidebar-footer">
+            <div id="sidebar-user-name" class="fw-600">—</div>
+            <div id="sidebar-user-role" style="font-size:0.7rem;opacity:0.7">—</div>
+        </div>
+    </aside>
+    <div class="sidebar-overlay" id="sidebar-overlay"></div>
+
+    <div class="main-wrapper">
+        <header class="top-header">
+            <div class="header-left">
+                <button class="btn-menu-toggle" id="btn-menu-toggle">☰</button>
+                <div class="header-title">Audit Logs</div>
+            </div>
+            <div class="header-right">
+                <div class="header-alert-btn">📦 Low Stock <span class="alert-badge" id="badge-low-stock" style="display:none">0</span></div>
+                <div class="header-alert-btn">⚠️ Near Expiry <span class="alert-badge amber" id="badge-near-expiry" style="display:none">0</span></div>
+                <div class="header-user">
+                    <div class="user-avatar" id="header-avatar">?</div>
+                    <div class="user-info">
+                        <div class="user-name" id="header-user-name">—</div>
+                        <div class="user-role" id="header-user-role">—</div>
+                    </div>
+                </div>
+            </div>
+        </header>
+
+        <main class="page-content">
+            <div class="page-header">
+                <div>
+                    <h2>🔍 Audit Logs</h2>
+                    <p>Full trail of all system actions — create, update, delete, login, checkout.</p>
+                </div>
+                <button class="btn btn-outline" id="btn-export-audit">📥 Export CSV</button>
+            </div>
+
+            <!-- ── Stats ────────────────────────────────────── -->
+            <div class="audit-stats">
+                <div class="audit-stat-card">
+                    <div class="audit-stat-icon blue">📋</div>
+                    <div>
+                        <div class="audit-stat-label">Total Events</div>
+                        <div class="audit-stat-value" id="stat-total">—</div>
+                    </div>
+                </div>
+                <div class="audit-stat-card">
+                    <div class="audit-stat-icon yellow">🔑</div>
+                    <div>
+                        <div class="audit-stat-label">Logins Today</div>
+                        <div class="audit-stat-value" id="stat-logins">—</div>
+                    </div>
+                </div>
+                <div class="audit-stat-card">
+                    <div class="audit-stat-icon green">✏️</div>
+                    <div>
+                        <div class="audit-stat-label">Edits Today</div>
+                        <div class="audit-stat-value" id="stat-edits">—</div>
+                    </div>
+                </div>
+                <div class="audit-stat-card">
+                    <div class="audit-stat-icon red">🗑️</div>
+                    <div>
+                        <div class="audit-stat-label">Deletions Today</div>
+                        <div class="audit-stat-value" id="stat-deletes">—</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- ── Toolbar ──────────────────────────────────── -->
+            <div class="audit-toolbar">
+                <div class="search-wrap">
+                    <span class="search-icon">🔍</span>
+                    <input type="text" id="audit-search" class="form-control"
+                           placeholder="Search by user, action, or entity…">
+                </div>
+                <select id="filter-action" class="form-control" style="width:auto">
+                    <option value="">All Actions</option>
+                    <option value="LOGIN">Login</option>
+                    <option value="CREATE">Create</option>
+                    <option value="UPDATE">Update</option>
+                    <option value="DELETE">Delete</option>
+                    <option value="CHECKOUT">Checkout</option>
+                    <option value="IMPORT">Import</option>
+                </select>
+                <select id="filter-entity" class="form-control" style="width:auto">
+                    <option value="">All Entities</option>
+                    <option value="products">Products</option>
+                    <option value="users">Users</option>
+                    <option value="orders">Orders</option>
+                </select>
+                <input type="date" id="filter-date" class="form-control" style="width:auto" title="Filter by date">
+                <button class="btn btn-light" id="btn-clear-filters">✕ Clear</button>
+                <button class="btn btn-primary" id="btn-refresh">↻ Refresh</button>
+            </div>
+
+            <!-- ── Audit Table ──────────────────────────────── -->
+            <div class="card" style="padding:0">
+                <div class="table-container">
+                    <table class="table">
+                        <thead>
+                            <tr>
+                                <th style="width:30px"></th>
+                                <th>Date / Time</th>
+                                <th>User</th>
+                                <th>Action</th>
+                                <th>Entity</th>
+                                <th>Entity ID</th>
+                                <th>IP Address</th>
+                            </tr>
+                        </thead>
+                        <tbody id="audit-tbody">
+                            <tr><td colspan="7" class="text-center" style="padding:40px">
+                                <div class="spinner" style="margin:0 auto"></div>
+                            </td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- ── Pagination ─────────────────────────────────── -->
+            <div class="pagination" id="pagination"></div>
+        </main>
+    </div>
+</div>
+
+<div id="toast-container" class="toast-container"></div>
+<script src="../js/main.js"></script>
+<script src="../js/audit.js"></script>
+</body>
+</html>

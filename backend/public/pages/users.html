@@ -1,0 +1,360 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Users – PharmaTrack</title>
+    <link rel="stylesheet" href="../css/global.css">
+    <style>
+        /* ── Users page styles ─────────────────────────────── */
+        .users-toolbar {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            flex-wrap: wrap;
+            margin-bottom: 16px;
+        }
+
+        .users-toolbar .search-wrap {
+            position: relative;
+            flex: 1;
+            min-width: 200px;
+        }
+
+        .users-toolbar .search-wrap input { padding-left: 36px; }
+
+        .users-toolbar .search-wrap .search-icon {
+            position: absolute;
+            left: 10px;
+            top: 50%;
+            transform: translateY(-50%);
+            color: var(--secondary);
+            pointer-events: none;
+        }
+
+        /* Role badge colours */
+        .role-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            padding: 3px 10px;
+            border-radius: 50px;
+            font-size: 0.72rem;
+            font-weight: 600;
+            white-space: nowrap;
+        }
+
+        .role-badge.super_admin { background: #ede7f6; color: #6d28d9; }
+        .role-badge.admin       { background: var(--primary-light); color: var(--primary-dark); }
+        .role-badge.cashier     { background: var(--success-light); color: var(--success); }
+
+        /* Status dot */
+        .status-dot {
+            display: inline-block;
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            margin-right: 5px;
+        }
+
+        .status-dot.active   { background: var(--success); }
+        .status-dot.inactive { background: var(--secondary); }
+
+        /* Stat cards row */
+        .user-stats {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+            gap: 12px;
+            margin-bottom: 20px;
+        }
+
+        .user-stat-card {
+            background: var(--white);
+            border-radius: var(--border-radius-lg);
+            padding: 16px 18px;
+            box-shadow: var(--shadow-sm);
+            border: 1px solid var(--gray-200);
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .user-stat-icon {
+            width: 40px;
+            height: 40px;
+            border-radius: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.2rem;
+            flex-shrink: 0;
+        }
+
+        .user-stat-icon.purple { background: #ede7f6; }
+        .user-stat-icon.blue   { background: var(--primary-light); }
+        .user-stat-icon.green  { background: var(--success-light); }
+
+        .user-stat-label { font-size: 0.75rem; color: var(--secondary); }
+        .user-stat-value { font-size: 1.4rem; font-weight: 700; color: var(--dark); }
+
+        /* Password strength */
+        .pw-strength-bar {
+            height: 4px;
+            border-radius: 2px;
+            margin-top: 6px;
+            background: var(--gray-200);
+            transition: var(--transition);
+        }
+
+        .pw-strength-bar .bar-fill {
+            height: 100%;
+            border-radius: 2px;
+            transition: all 0.3s;
+        }
+
+        .pw-strength-hint { font-size: 0.72rem; color: var(--secondary); margin-top: 3px; }
+
+        /* Self-account warning */
+        .self-row td { opacity: 0.6; }
+        .self-badge {
+            display: inline-block;
+            padding: 1px 7px;
+            background: var(--primary-light);
+            color: var(--primary-dark);
+            border-radius: 4px;
+            font-size: 0.65rem;
+            font-weight: 600;
+            margin-left: 4px;
+        }
+
+        /* Action buttons column */
+        .action-cell { white-space: nowrap; }
+    </style>
+</head>
+<body>
+<div class="app-container">
+
+    <aside class="sidebar" id="sidebar">
+        <div class="sidebar-brand">
+            <div class="brand-icon">💊</div>
+            <div class="brand-text"><h1>PharmaTrack</h1><p>Management System</p></div>
+        </div>
+        <nav class="sidebar-nav">
+            <p class="nav-section-label">Main</p>
+            <ul>
+                <li class="nav-item" data-roles="admin,super_admin,cashier"><a href="dashboard.html"><span class="nav-icon">📊</span> Dashboard</a></li>
+                <li class="nav-item" data-roles="admin,super_admin,cashier"><a href="pos.html"><span class="nav-icon">🛒</span> Point of Sale</a></li>
+            </ul>
+            <p class="nav-section-label">Management</p>
+            <ul>
+                <li class="nav-item" data-roles="admin,super_admin"><a href="inventory.html"><span class="nav-icon">📦</span> Inventory</a></li>
+                <li class="nav-item" data-roles="admin,super_admin"><a href="reports.html"><span class="nav-icon">📋</span> Reports</a></li>
+                <li class="nav-item" data-roles="admin,super_admin"><a href="forecasting.html"><span class="nav-icon">📈</span> Forecasting</a></li>
+            </ul>
+            <p class="nav-section-label">Admin</p>
+            <ul>
+                <li class="nav-item active" data-roles="admin,super_admin"><a href="users.html"><span class="nav-icon">👥</span> Users</a></li>
+                <li class="nav-item" data-roles="super_admin"><a href="audit.html"><span class="nav-icon">🔍</span> Audit Logs</a></li>
+                <li class="nav-item"><a href="#" data-action="logout"><span class="nav-icon">🚪</span> Sign Out</a></li>
+            </ul>
+        </nav>
+        <div class="sidebar-footer">
+            <div id="sidebar-user-name" class="fw-600">—</div>
+            <div id="sidebar-user-role" style="font-size:0.7rem;opacity:0.7">—</div>
+        </div>
+    </aside>
+    <div class="sidebar-overlay" id="sidebar-overlay"></div>
+
+    <div class="main-wrapper">
+        <header class="top-header">
+            <div class="header-left">
+                <button class="btn-menu-toggle" id="btn-menu-toggle">☰</button>
+                <div class="header-title">User Management</div>
+            </div>
+            <div class="header-right">
+                <div class="header-alert-btn">📦 Low Stock <span class="alert-badge" id="badge-low-stock" style="display:none">0</span></div>
+                <div class="header-alert-btn">⚠️ Near Expiry <span class="alert-badge amber" id="badge-near-expiry" style="display:none">0</span></div>
+                <div class="header-user">
+                    <div class="user-avatar" id="header-avatar">?</div>
+                    <div class="user-info">
+                        <div class="user-name" id="header-user-name">—</div>
+                        <div class="user-role" id="header-user-role">—</div>
+                    </div>
+                </div>
+            </div>
+        </header>
+
+        <main class="page-content">
+            <div class="page-header">
+                <div>
+                    <h2>👥 Users</h2>
+                    <p>Manage staff accounts, roles, and access levels.</p>
+                </div>
+                <button class="btn btn-primary" id="btn-add-user">＋ Add User</button>
+            </div>
+
+            <!-- ── User Stats ──────────────────────────────────── -->
+            <div class="user-stats">
+                <div class="user-stat-card">
+                    <div class="user-stat-icon purple">👤</div>
+                    <div>
+                        <div class="user-stat-label">Total Users</div>
+                        <div class="user-stat-value" id="stat-total">—</div>
+                    </div>
+                </div>
+                <div class="user-stat-card">
+                    <div class="user-stat-icon blue">🔑</div>
+                    <div>
+                        <div class="user-stat-label">Admins</div>
+                        <div class="user-stat-value" id="stat-admins">—</div>
+                    </div>
+                </div>
+                <div class="user-stat-card">
+                    <div class="user-stat-icon green">🛒</div>
+                    <div>
+                        <div class="user-stat-label">Cashiers</div>
+                        <div class="user-stat-value" id="stat-cashiers">—</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- ── Toolbar ─────────────────────────────────────── -->
+            <div class="users-toolbar">
+                <div class="search-wrap">
+                    <span class="search-icon">🔍</span>
+                    <input type="text" id="user-search" class="form-control"
+                           placeholder="Search by name or email…">
+                </div>
+                <select id="filter-role" class="form-control" style="width:auto">
+                    <option value="">All Roles</option>
+                    <option value="super_admin">Super Admin</option>
+                    <option value="admin">Admin</option>
+                    <option value="cashier">Cashier</option>
+                </select>
+                <select id="filter-status" class="form-control" style="width:auto">
+                    <option value="">All Status</option>
+                    <option value="1">Active</option>
+                    <option value="0">Inactive</option>
+                </select>
+            </div>
+
+            <!-- ── Users Table ─────────────────────────────────── -->
+            <div class="card" style="padding:0">
+                <div class="table-container">
+                    <table class="table">
+                        <thead>
+                            <tr>
+                                <th>Name</th>
+                                <th>Email</th>
+                                <th>Role</th>
+                                <th>Status</th>
+                                <th>Created</th>
+                                <th class="action-cell">Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="users-tbody">
+                            <tr><td colspan="6" class="text-center" style="padding:40px">
+                                <div class="spinner" style="margin:0 auto"></div>
+                            </td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </main>
+    </div>
+</div>
+
+<!-- ── Add / Edit User Modal ─────────────────────────────────── -->
+<div class="modal-overlay" id="user-modal">
+    <div class="modal">
+        <div class="modal-header">
+            <h3 id="user-modal-title">Add New User</h3>
+            <button class="btn-close btn-close-modal">✕</button>
+        </div>
+        <div class="modal-body">
+            <form id="user-form" autocomplete="off">
+                <div class="form-group">
+                    <label class="form-label">Full Name *</label>
+                    <input type="text" id="field-name" name="name" class="form-control"
+                           required placeholder="e.g. Maria Santos">
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Email Address *</label>
+                    <input type="email" id="field-email" name="email" class="form-control"
+                           required placeholder="staff@pharmatrack.ph">
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Role *</label>
+                    <select id="field-role" name="role" class="form-control" required>
+                        <option value="">— Select role —</option>
+                        <option value="cashier">Cashier</option>
+                        <option value="admin">Admin</option>
+                        <option value="super_admin" id="opt-super-admin">Super Admin</option>
+                    </select>
+                    <div style="font-size:0.72rem;color:var(--secondary);margin-top:4px" id="role-hint">
+                        Cashiers can only use POS. Admins manage inventory & reports. Super Admins have full access.
+                    </div>
+                </div>
+
+                <!-- Password (required on create, optional on edit) -->
+                <div class="form-group" id="pw-group">
+                    <label class="form-label" id="pw-label">Password *</label>
+                    <input type="password" id="field-password" name="password" class="form-control"
+                           placeholder="Min. 8 characters" autocomplete="new-password">
+                    <div class="pw-strength-bar"><div class="bar-fill" id="pw-bar"></div></div>
+                    <div class="pw-strength-hint" id="pw-hint"></div>
+                </div>
+
+                <!-- Status (edit mode only) -->
+                <div class="form-group hidden" id="status-group">
+                    <label class="form-label">Account Status</label>
+                    <select id="field-is_active" name="is_active" class="form-control">
+                        <option value="1">✅ Active</option>
+                        <option value="0">🔴 Inactive</option>
+                    </select>
+                </div>
+            </form>
+        </div>
+        <div class="modal-footer">
+            <button class="btn btn-light btn-close-modal">Cancel</button>
+            <button class="btn btn-primary" type="button" id="btn-submit-user">Add User</button>
+        </div>
+    </div>
+</div>
+
+<!-- ── Change Password Modal ──────────────────────────────────── -->
+<div class="modal-overlay" id="pw-modal">
+    <div class="modal">
+        <div class="modal-header">
+            <h3>🔒 Change Password</h3>
+            <button class="btn-close btn-close-pw">✕</button>
+        </div>
+        <div class="modal-body">
+            <p style="font-size:0.85rem;color:var(--secondary);margin-bottom:16px">
+                Changing password for: <strong id="pw-target-name">—</strong>
+            </p>
+            <div class="form-group">
+                <label class="form-label">New Password *</label>
+                <input type="password" id="new-pw" class="form-control"
+                       placeholder="Min. 8 characters" autocomplete="new-password">
+                <div class="pw-strength-bar"><div class="bar-fill" id="pw-bar-2"></div></div>
+                <div class="pw-strength-hint" id="pw-hint-2"></div>
+            </div>
+            <div class="form-group">
+                <label class="form-label">Confirm Password *</label>
+                <input type="password" id="confirm-pw" class="form-control"
+                       placeholder="Re-enter new password">
+            </div>
+        </div>
+        <div class="modal-footer">
+            <button class="btn btn-light btn-close-pw">Cancel</button>
+            <button class="btn btn-primary" id="btn-save-pw">Update Password</button>
+        </div>
+    </div>
+</div>
+
+<div id="toast-container" class="toast-container"></div>
+<script src="../js/main.js"></script>
+<script src="../js/users.js"></script>
+</body>
+</html>
