@@ -155,25 +155,61 @@ const deleteUser = async (req, res, next) => {
 
 /**
  * GET /api/auth/audit-logs  [Super Admin only]
- * Returns audit log records.
+ * Returns audit log records with filtering support.
+ * Query params: limit, offset, action, user, date_start, date_end
  */
 const getAuditLogs = async (req, res, next) => {
     try {
-        const { limit = 100, offset = 0 } = req.query;
-        const db = require('../config/db');
+        const { 
+            limit = 100, 
+            offset = 0,
+            action = '',
+            user = '',
+            date_start = '',
+            date_end = ''
+        } = req.query;
 
-        const [rows] = await db.query(
-            `SELECT al.*, u.name AS user_name, u.role AS user_role
-             FROM audit_logs al
-             JOIN users u ON u.id = al.user_id
-             ORDER BY al.created_at DESC
-             LIMIT ? OFFSET ?`,
-            [parseInt(limit), parseInt(offset)]
-        );
+        let sql = `
+            SELECT al.*, u.name AS user_name, u.role AS user_role
+            FROM audit_logs al
+            JOIN users u ON u.id = al.user_id
+            WHERE 1=1
+        `;
+        const params = [];
+
+        // Filter by action type
+        if (action) {
+            sql += ' AND al.action = ?';
+            params.push(action);
+        }
+
+        // Filter by user name or email
+        if (user) {
+            sql += ' AND (u.name LIKE ? OR u.email LIKE ?)';
+            const searchPattern = `%${user}%`;
+            params.push(searchPattern, searchPattern);
+        }
+
+        // Filter by date range
+        if (date_start) {
+            sql += ' AND DATE(al.created_at) >= ?';
+            params.push(date_start);
+        }
+        if (date_end) {
+            sql += ' AND DATE(al.created_at) <= ?';
+            params.push(date_end);
+        }
+
+        sql += ' ORDER BY al.created_at DESC LIMIT ? OFFSET ?';
+        params.push(parseInt(limit), parseInt(offset));
+
+        const [rows] = await db.query(sql, params);
 
         res.json({ success: true, data: rows });
 
-    } catch (err) { next(err); }
+    } catch (err) { 
+        next(err); 
+    }
 };
 
 module.exports = { login, getMe, getAllUsers, createUser, updateUser, deleteUser, getAuditLogs };
