@@ -3,58 +3,50 @@
 // Inventory CRUD, expiry highlighting, CSV import
 // ============================================================
 document.addEventListener('DOMContentLoaded', () => {
-    // Guard: only admin and above can access inventory
     if (!Auth.requireAuth(['admin', 'super_admin'])) return;
 
-    // State
+    // ── State ────────────────────────────────────────────────
     let products  = [];
     let editingId = null;
 
     // ── DOM References ───────────────────────────────────────
-    const tbody         = document.getElementById('inv-tbody');
-    const searchInput   = document.getElementById('inv-search');
-    const categoryFilter= document.getElementById('inv-filter-cat');
-    const statusFilter  = document.getElementById('inv-filter-status');
-    const totalCount    = document.getElementById('inv-total-count');
-    const modalOverlay  = document.getElementById('product-modal');
-    const productForm   = document.getElementById('product-form');
-    const modalTitle    = document.getElementById('modal-title');
-    const importInput   = document.getElementById('csv-import-input');
+    const tbody          = document.getElementById('inv-tbody');
+    const searchInput    = document.getElementById('inv-search');
+    const categoryFilter = document.getElementById('inv-filter-cat');
+    const statusFilter   = document.getElementById('inv-filter-status');
+    const totalCount     = document.getElementById('inv-total-count');
+    const productForm    = document.getElementById('product-form');
+    const modalTitle     = document.getElementById('modal-title');
+    const importInput    = document.getElementById('csv-import-input');
+    const submitBtn      = document.getElementById('btn-submit-product');
 
-    // ── Load products on page load ───────────────────────────
+    // ── Initial load ─────────────────────────────────────────
     loadProducts();
     loadCategories();
 
     // ── Filters ──────────────────────────────────────────────
-    searchInput?.addEventListener('input',   debounce(loadProducts, 300));
+    searchInput?.addEventListener('input',    debounce(loadProducts, 300));
     categoryFilter?.addEventListener('change', loadProducts);
-    statusFilter?.addEventListener('change', loadProducts);
+    statusFilter?.addEventListener('change',   loadProducts);
 
-    // ── Add button ────────────────────────────────────────────
-    document.getElementById('btn-add-product')?.addEventListener('click', () => {
-        openAddModal();
-    });
-
-    // ── Import CSV button ─────────────────────────────────────
-    document.getElementById('btn-import-csv')?.addEventListener('click', () => {
-        importInput?.click();
-    });
-
+    // ── Toolbar ───────────────────────────────────────────────
+    document.getElementById('btn-add-product')?.addEventListener('click', openAddModal);
+    document.getElementById('btn-import-csv')?.addEventListener('click', () => importInput?.click());
     importInput?.addEventListener('change', handleCSVImport);
+    submitBtn?.addEventListener('click', handleFormSubmit);
 
-    // ── Form submit ───────────────────────────────────────────
-    document.getElementById('btn-submit-product')?.addEventListener('click', handleFormSubmit);
-
-    // ── Modal close buttons ───────────────────────────────────
+    // ── Modal close ───────────────────────────────────────────
     document.querySelectorAll('.btn-close-modal').forEach(btn => {
         btn.addEventListener('click', () => Modal.close('product-modal'));
     });
 
     // ─────────────────────────────────────────────────────────
+    // LOAD PRODUCTS
+    // ─────────────────────────────────────────────────────────
     async function loadProducts() {
-        const search   = searchInput?.value.trim()        || '';
-        const category = categoryFilter?.value            || '';
-        const status   = statusFilter?.value              || '';
+        const search   = searchInput?.value.trim() || '';
+        const category = categoryFilter?.value     || '';
+        const status   = statusFilter?.value       || '';
 
         const params = new URLSearchParams({ search, category, status });
         const data   = await OfflineAPI.get(`/inventory?${params}`);
@@ -69,14 +61,15 @@ document.addEventListener('DOMContentLoaded', () => {
         if (totalCount) totalCount.textContent = products.length;
     }
 
+    // ─────────────────────────────────────────────────────────
+    // RENDER TABLE
+    // ─────────────────────────────────────────────────────────
     function renderTable(data) {
         if (!tbody) return;
 
         if (!data.length) {
-            tbody.innerHTML = `
-                <tr><td colspan="8" class="text-center text-muted" style="padding:40px">
-                    No products found.
-                </td></tr>`;
+            tbody.innerHTML = `<tr><td colspan="8" class="text-center text-muted" style="padding:40px">
+                No products found.</td></tr>`;
             return;
         }
 
@@ -84,7 +77,6 @@ document.addEventListener('DOMContentLoaded', () => {
             const statusBadge = getStatusBadge(p.stock_status);
             const expiryCell  = getExpiryCell(p);
             const rowClass    = getRowClass(p.stock_status);
-
             return `
             <tr class="${rowClass}" data-id="${p.id}">
                 <td><span class="fw-600">${escHtml(p.batch_number)}</span></td>
@@ -103,18 +95,16 @@ document.addEventListener('DOMContentLoaded', () => {
                 <td>${statusBadge}</td>
                 <td>
                     <div class="d-flex gap-8">
-                        <button class="btn btn-light btn-sm btn-edit" data-id="${p.id}" title="Edit">✏️</button>
+                        <button class="btn btn-light btn-sm btn-edit"    data-id="${p.id}" title="Edit">✏️</button>
                         <button class="btn btn-danger btn-sm btn-delete" data-id="${p.id}" title="Delete">🗑️</button>
                     </div>
                 </td>
             </tr>`;
         }).join('');
 
-        // Attach row action listeners
         tbody.querySelectorAll('.btn-edit').forEach(btn => {
             btn.addEventListener('click', () => openEditModal(parseInt(btn.dataset.id)));
         });
-
         tbody.querySelectorAll('.btn-delete').forEach(btn => {
             btn.addEventListener('click', () => confirmDelete(parseInt(btn.dataset.id)));
         });
@@ -133,11 +123,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function getExpiryCell(p) {
         const daysLeft = parseInt(p.days_until_expiry);
-        let dotClass   = 'green';
-
-        if (daysLeft < 0)  dotClass = 'red';
+        let dotClass = 'green';
+        if (daysLeft < 0)        dotClass = 'red';
         else if (daysLeft <= 30) dotClass = 'amber';
-
         return `
             <div class="expiry-cell">
                 <span class="expiry-dot ${dotClass}"></span>
@@ -154,110 +142,149 @@ document.addEventListener('DOMContentLoaded', () => {
         return '';
     }
 
+    // ─────────────────────────────────────────────────────────
+    // CATEGORIES
+    // ─────────────────────────────────────────────────────────
     async function loadCategories() {
         const data = await OfflineAPI.get('/inventory/alerts/summary');
         if (!data?.success || !categoryFilter) return;
-
         const cats = data.data.categories || [];
         cats.forEach(cat => {
             const opt = document.createElement('option');
-            opt.value = cat;
-            opt.textContent = cat;
+            opt.value = cat; opt.textContent = cat;
             categoryFilter.appendChild(opt);
         });
     }
 
-    // ── Add Modal ─────────────────────────────────────────────
+    // ─────────────────────────────────────────────────────────
+    // MODALS
+    // ─────────────────────────────────────────────────────────
     function openAddModal() {
         editingId = null;
-        if (modalTitle)  modalTitle.textContent = 'Add New Product';
+        if (modalTitle) modalTitle.textContent = 'Add New Product';
         productForm?.reset();
         document.getElementById('field-stock-add')?.classList.remove('hidden');
         document.getElementById('field-stock-edit')?.classList.add('hidden');
+        if (submitBtn) submitBtn.textContent = 'Add Product';
         Modal.open('product-modal');
     }
 
-    // ── Edit Modal ────────────────────────────────────────────
     function openEditModal(id) {
         editingId = id;
-        const p   = products.find(x => x.id === id);
+        const p = products.find(x => x.id === id);
         if (!p) return;
 
         if (modalTitle) modalTitle.textContent = `Edit: ${p.name}`;
 
-        // Populate form fields
+        // Populate all non-stock fields
         const fields = ['batch_number','name','generic_name','category','supplier',
-                        'barcode','price','cost','stock_quantity','low_stock_threshold',
-                        'expiry_date','description'];
-
+                        'barcode','price','cost','low_stock_threshold','expiry_date','description'];
         fields.forEach(f => {
             const el = document.getElementById(`field-${f}`);
             if (el) el.value = p[f] ?? '';
         });
 
+        // FIX Bug 2: populate the edit-mode stock field by its unique element ID,
+        // NOT by looking up 'field-stock_quantity' which belongs to the add field.
+        const editStockEl = document.getElementById('field-stock_quantity_edit');
+        if (editStockEl) editStockEl.value = p.stock_quantity ?? 0;
+
         document.getElementById('field-stock-add')?.classList.add('hidden');
         document.getElementById('field-stock-edit')?.classList.remove('hidden');
-
+        if (submitBtn) submitBtn.textContent = 'Save Changes';
         Modal.open('product-modal');
     }
 
-    // ── Form submission ───────────────────────────────────────
-    async function handleFormSubmit(e) {
-        // Manual validation
-        const requiredFields = ['batch_number', 'name', 'category', 'price', 'cost', 'stock_quantity', 'expiry_date'];
-        for (const field of requiredFields) {
+    // ─────────────────────────────────────────────────────────
+    // FORM SUBMIT
+    // ─────────────────────────────────────────────────────────
+    async function handleFormSubmit() {
+        // FIX Bug 1: only validate fields that are visible for the current mode.
+        // 'stock_quantity' (add field) is hidden during edit — never block on it.
+        const alwaysRequired = ['batch_number', 'name', 'category', 'price', 'cost', 'expiry_date'];
+        for (const field of alwaysRequired) {
             const el = document.getElementById(`field-${field}`);
-            if (!el || !el.value.trim()) {
-                Toast.show(`${field.replace('_', ' ').toUpperCase()} is required.`, 'error');
+            if (!el || !String(el.value).trim()) {
+                Toast.show(`${field.replace(/_/g, ' ')} is required.`, 'error');
                 el?.focus();
                 return;
             }
         }
 
-        const formData = new FormData(productForm);
-        const body     = Object.fromEntries(formData.entries());
-
-        // Type coercions
-        body.price              = parseFloat(body.price);
-        body.cost               = parseFloat(body.cost);
-        body.stock_quantity     = parseInt(body.stock_quantity);
-        body.low_stock_threshold= parseInt(body.low_stock_threshold);
-
-        const submitBtn = document.getElementById('btn-submit-product');
-        submitBtn.disabled = true;
-        submitBtn.textContent = editingId ? 'Saving…' : 'Adding…';
-
-        let result;
-        if (editingId) {
-            result = await OfflineAPI.put(`/inventory/${editingId}`, body);
-        } else {
-            result = await OfflineAPI.post('/inventory', body);
+        // Only validate stock qty when adding
+        if (!editingId) {
+            const stockEl = document.getElementById('field-stock_quantity');
+            if (!stockEl || stockEl.value === '') {
+                Toast.show('Stock quantity is required.', 'error');
+                stockEl?.focus();
+                return;
+            }
         }
 
-        submitBtn.disabled = false;
-        submitBtn.textContent = editingId ? 'Save Changes' : 'Add Product';
+        // FIX Bug 2: build body manually and read from the correct stock field per mode.
+        // Using FormData here is unreliable because both add/edit stock inputs share a
+        // similar name, and the hidden one's value may bleed through depending on browser.
+        const body = {
+            batch_number:        document.getElementById('field-batch_number')?.value.trim()            || '',
+            name:                document.getElementById('field-name')?.value.trim()                    || '',
+            generic_name:        document.getElementById('field-generic_name')?.value.trim()            || null,
+            category:            document.getElementById('field-category')?.value.trim()                || '',
+            supplier:            document.getElementById('field-supplier')?.value.trim()                || null,
+            barcode:             document.getElementById('field-barcode')?.value.trim()                 || null,
+            price:               parseFloat(document.getElementById('field-price')?.value)              || 0,
+            cost:                parseFloat(document.getElementById('field-cost')?.value)               || 0,
+            low_stock_threshold: parseInt(document.getElementById('field-low_stock_threshold')?.value)  || 10,
+            expiry_date:         document.getElementById('field-expiry_date')?.value                   || '',
+            description:         document.getElementById('field-description')?.value.trim()             || null,
+        };
+
+        // Read from the correct stock element for each mode
+        body.stock_quantity = editingId
+            ? parseInt(document.getElementById('field-stock_quantity_edit')?.value) || 0
+            : parseInt(document.getElementById('field-stock_quantity')?.value)      || 0;
+
+        // Normalize empty optional strings to null
+        ['generic_name', 'supplier', 'barcode', 'description'].forEach(k => {
+            if (body[k] === '') body[k] = null;
+        });
+
+        if (submitBtn) {
+            submitBtn.disabled    = true;
+            submitBtn.textContent = editingId ? 'Saving…' : 'Adding…';
+        }
+
+        let result;
+        try {
+            result = editingId
+                ? await OfflineAPI.put(`/inventory/${editingId}`, body)
+                : await OfflineAPI.post('/inventory', body);
+        } finally {
+            if (submitBtn) {
+                submitBtn.disabled    = false;
+                submitBtn.textContent = editingId ? 'Save Changes' : 'Add Product';
+            }
+        }
 
         if (result?.success) {
             Toast.show(result.message, 'success');
             Modal.close('product-modal');
             loadProducts();
         } else {
-            Toast.show(result?.message || 'Save failed.', 'error');
+            Toast.show(result?.message || 'Save failed. Check all fields and try again.', 'error');
         }
     }
 
-    // ── Delete ────────────────────────────────────────────────
+    // ─────────────────────────────────────────────────────────
+    // DELETE
+    // ─────────────────────────────────────────────────────────
     function confirmDelete(id) {
         const p = products.find(x => x.id === id);
         if (!p) return;
-
-        // Use browser confirm for simplicity; can be replaced with custom modal
         if (!confirm(`Remove "${p.name}" (${p.batch_number}) from inventory?\n\nThis is a soft delete — historical orders will be preserved.`)) return;
-
-        deleteProduct(id);
+        doDelete(id);
     }
 
-    async function deleteProduct(id) {
+    async function doDelete(id) {
         const result = await OfflineAPI.delete(`/inventory/${id}`);
         if (result?.success) {
             Toast.show('Product removed.', 'success');
@@ -267,17 +294,38 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    // ── CSV Import ────────────────────────────────────────────
+    // ─────────────────────────────────────────────────────────
+    // CSV IMPORT
+    // FIX Bug 3: was using API.upload which may not exist in this codebase.
+    // OfflineAPI has no upload method (multipart is always online-only),
+    // so we call fetch directly using the same auth pattern as offlineSync.js.
+    // ─────────────────────────────────────────────────────────
     async function handleCSVImport(e) {
         const file = e.target.files[0];
         if (!file) return;
 
+        Toast.show('Importing CSV…', 'info');
+
         const formData = new FormData();
         formData.append('file', file);
 
-        Toast.show('Importing CSV…', 'info');
+        const config  = typeof getRuntimeConfig === 'function' ? getRuntimeConfig() : CONFIG;
+        const token   = typeof Auth !== 'undefined' ? Auth.getToken()
+                      : localStorage.getItem(config.TOKEN_KEY);
 
-        const result = await API.upload('/inventory/import/csv', formData);
+        let result;
+        try {
+            const res = await fetch(`${config.API_BASE}/inventory/import/csv`, {
+                method:  'POST',
+                headers: token ? { 'Authorization': `Bearer ${token}` } : {},
+                body:    formData
+            });
+            result = await res.json();
+        } catch (err) {
+            Toast.show('Upload failed. Check your connection.', 'error');
+            e.target.value = '';
+            return;
+        }
 
         if (result?.success) {
             Toast.show(result.message, 'success');
@@ -286,12 +334,11 @@ document.addEventListener('DOMContentLoaded', () => {
             Toast.show(result?.message || 'Import failed.', 'error');
         }
 
-        // Reset input so same file can be re-selected
         e.target.value = '';
     }
 });
 
-// ── Utility ────────────────────────────────────────────────────
+// ── Utilities ─────────────────────────────────────────────────
 function escHtml(str) {
     return String(str ?? '')
         .replace(/&/g, '&amp;')
