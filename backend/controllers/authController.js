@@ -4,6 +4,7 @@
 // ============================================================
 const jwt     = require('jsonwebtoken');
 const User    = require('../models/User');
+const db      = require('../config/db');           // ← FIX: was missing, causes ReferenceError in getAuditLogs
 const { logAudit } = require('../middleware/authMiddleware');
 
 /**
@@ -27,12 +28,10 @@ const login = async (req, res, next) => {
         const isMatch = await User.comparePassword(password, user.password);
 
         if (!isMatch) {
-            // Log failed attempt
             await logAudit(user.id, 'LOGIN_FAILED', 'users', user.id, { email }, req.ip);
             return res.status(401).json({ success: false, message: 'Invalid email or password.' });
         }
 
-        // Sign JWT with user id and role
         const token = jwt.sign(
             { id: user.id, role: user.role, name: user.name },
             process.env.JWT_SECRET,
@@ -68,7 +67,6 @@ const getMe = async (req, res) => {
 
 /**
  * GET /api/auth/users  [Admin+]
- * Returns all users for user management screen.
  */
 const getAllUsers = async (req, res, next) => {
     try {
@@ -79,8 +77,7 @@ const getAllUsers = async (req, res, next) => {
 
 /**
  * POST /api/auth/users  [Admin+]
- * Creates a new user. Super Admin can create any role;
- * Admin can only create Cashier accounts.
+ * Super Admin can create any role; Admin can only create Cashier accounts.
  */
 const createUser = async (req, res, next) => {
     try {
@@ -90,7 +87,6 @@ const createUser = async (req, res, next) => {
             return res.status(400).json({ success: false, message: 'All fields are required.' });
         }
 
-        // Admin can only create cashiers; super_admin can create any
         if (req.user.role === 'admin' && role !== 'cashier') {
             return res.status(403).json({ success: false, message: 'Admins can only create Cashier accounts.' });
         }
@@ -114,9 +110,8 @@ const createUser = async (req, res, next) => {
 const updateUser = async (req, res, next) => {
     try {
         const { id } = req.params;
-        const { name, email, role, is_active } = req.body;
+        const { name, email, role, is_active, password } = req.body;
 
-        // Prevent demoting/disabling own account
         if (parseInt(id) === req.user.id) {
             return res.status(400).json({ success: false, message: 'Cannot modify your own account here.' });
         }
@@ -127,6 +122,11 @@ const updateUser = async (req, res, next) => {
             return res.status(404).json({ success: false, message: 'User not found.' });
         }
 
+        // Optional password change in the same request
+        if (password && password.length >= 8) {
+            await User.updatePassword(id, password);
+        }
+
         await logAudit(req.user.id, 'UPDATE_USER', 'users', id, { name, email, role, is_active }, req.ip);
         res.json({ success: true, message: 'User updated.' });
 
@@ -135,7 +135,6 @@ const updateUser = async (req, res, next) => {
 
 /**
  * DELETE /api/auth/users/:id  [Super Admin only]
- * Soft deletes a user account.
  */
 const deleteUser = async (req, res, next) => {
     try {
@@ -155,18 +154,17 @@ const deleteUser = async (req, res, next) => {
 
 /**
  * GET /api/auth/audit-logs  [Super Admin only]
- * Returns audit log records with filtering support.
  * Query params: limit, offset, action, user, date_start, date_end
  */
 const getAuditLogs = async (req, res, next) => {
     try {
-        const { 
-            limit = 100, 
-            offset = 0,
-            action = '',
-            user = '',
+        const {
+            limit      = 500,
+            offset     = 0,
+            action     = '',
+            user       = '',
             date_start = '',
-            date_end = ''
+            date_end   = ''
         } = req.query;
 
         let sql = `
@@ -177,20 +175,17 @@ const getAuditLogs = async (req, res, next) => {
         `;
         const params = [];
 
-        // Filter by action type
         if (action) {
-            sql += ' AND al.action = ?';
-            params.push(action);
+            sql += ' AND al.action LIKE ?';
+            params.push(`${action}%`);
         }
 
-        // Filter by user name or email
         if (user) {
             sql += ' AND (u.name LIKE ? OR u.email LIKE ?)';
-            const searchPattern = `%${user}%`;
-            params.push(searchPattern, searchPattern);
+            const pattern = `%${user}%`;
+            params.push(pattern, pattern);
         }
 
-        // Filter by date range
         if (date_start) {
             sql += ' AND DATE(al.created_at) >= ?';
             params.push(date_start);
@@ -207,8 +202,8 @@ const getAuditLogs = async (req, res, next) => {
 
         res.json({ success: true, data: rows });
 
-    } catch (err) { 
-        next(err); 
+    } catch (err) {
+        next(err);
     }
 };
 
