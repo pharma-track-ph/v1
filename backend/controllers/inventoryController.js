@@ -2,22 +2,36 @@
 // Inventory Controller
 // Full CRUD for products + CSV import + alert counts
 // ============================================================
-const Product       = require('../models/Product');
-const { logAudit }  = require('../middleware/authMiddleware');
-const fs            = require('fs');
+const Product      = require('../models/Product');
+const { logAudit } = require('../middleware/authMiddleware');
+const fs           = require('fs');
 
 /**
  * GET /api/inventory
  * Returns filtered product list with computed stock_status.
+ * Query params: search, category, status
+ *
+ * FIX Bug 4: The original code passed 'status' to Product.findAll() but
+ * that method only accepts { search, category, expiringOnly }. Status was
+ * silently ignored, returning all products regardless of the filter.
+ * Fix: run findAll() normally, then filter the JS array by stock_status.
+ * This works because Product.findAll() already computes stock_status via
+ * a SQL CASE expression, so no extra DB query is needed.
  */
 const getProducts = async (req, res, next) => {
     try {
         const { search = '', category = '', status = '' } = req.query;
-        const products = await Product.findAll({
-            search,
-            category,
-            status
-        });
+
+        // 'expiring' in the status dropdown maps to near_expiry in stock_status
+        const normalizedStatus = status === 'expiring' ? 'near_expiry' : status;
+
+        let products = await Product.findAll({ search, category });
+
+        // Apply status filter post-fetch if one was requested
+        if (normalizedStatus) {
+            products = products.filter(p => p.stock_status === normalizedStatus);
+        }
+
         res.json({ success: true, data: products, total: products.length });
     } catch (err) { next(err); }
 };
@@ -42,7 +56,6 @@ const createProduct = async (req, res, next) => {
         await logAudit(req.user.id, 'CREATE_PRODUCT', 'products', id, req.body, req.ip);
         res.status(201).json({ success: true, message: 'Product created.', id });
     } catch (err) {
-        // MySQL duplicate entry (barcode unique constraint)
         if (err.code === 'ER_DUP_ENTRY') {
             return res.status(409).json({ success: false, message: 'Barcode already exists.' });
         }
@@ -82,7 +95,7 @@ const deleteProduct = async (req, res, next) => {
 
 /**
  * GET /api/inventory/alerts/summary
- * Returns low stock count and near-expiry count for badge/header.
+ * Returns low stock count, near-expiry count, and category list.
  */
 const getAlertSummary = async (req, res, next) => {
     try {
@@ -103,10 +116,8 @@ const getAlertSummary = async (req, res, next) => {
  * Parses an uploaded CSV and bulk-upserts products.
  *
  * Expected CSV columns (header row required):
- * batch_number,name,generic_name,category,supplier,barcode,price,cost,stock_quantity,low_stock_threshold,expiry_date
- *
- * Example row:
- * BATCH-TEST-001,Vitamin C 500mg,Ascorbic Acid,Vitamins,Interphil,4800001099001,15.00,7.00,100,20,2025-12-31
+ * batch_number,name,generic_name,category,supplier,barcode,
+ * price,cost,stock_quantity,low_stock_threshold,expiry_date
  */
 const importCSV = async (req, res, next) => {
     try {
@@ -115,12 +126,11 @@ const importCSV = async (req, res, next) => {
         }
 
         const content = fs.readFileSync(req.file.path, 'utf8');
-        fs.unlinkSync(req.file.path);  // Clean up temp file
+        fs.unlinkSync(req.file.path);
 
         const lines  = content.split('\n').map(l => l.trim()).filter(Boolean);
         const header = lines[0].split(',').map(h => h.trim().toLowerCase());
 
-        // Validate required columns
         const required = ['batch_number','name','category','price','cost','stock_quantity','expiry_date'];
         const missing  = required.filter(col => !header.includes(col));
 
@@ -131,7 +141,7 @@ const importCSV = async (req, res, next) => {
             });
         }
 
-        const items = [];
+        const items       = [];
         const parseErrors = [];
 
         for (let i = 1; i < lines.length; i++) {
@@ -139,24 +149,23 @@ const importCSV = async (req, res, next) => {
             const row    = {};
             header.forEach((col, idx) => { row[col] = values[idx] || ''; });
 
-            // Basic validation
             if (!row.batch_number || !row.name || !row.expiry_date) {
                 parseErrors.push(`Row ${i + 1}: batch_number, name, expiry_date are required.`);
                 continue;
             }
 
             items.push({
-                batch_number:       row.batch_number,
-                name:               row.name,
-                generic_name:       row.generic_name   || null,
-                category:           row.category,
-                supplier:           row.supplier        || null,
-                barcode:            row.barcode         || null,
-                price:              parseFloat(row.price)         || 0,
-                cost:               parseFloat(row.cost)          || 0,
-                stock_quantity:     parseInt(row.stock_quantity)  || 0,
-                low_stock_threshold:parseInt(row.low_stock_threshold) || 10,
-                expiry_date:        row.expiry_date
+                batch_number:        row.batch_number,
+                name:                row.name,
+                generic_name:        row.generic_name          || null,
+                category:            row.category,
+                supplier:            row.supplier              || null,
+                barcode:             row.barcode               || null,
+                price:               parseFloat(row.price)     || 0,
+                cost:                parseFloat(row.cost)      || 0,
+                stock_quantity:      parseInt(row.stock_quantity)      || 0,
+                low_stock_threshold: parseInt(row.low_stock_threshold) || 10,
+                expiry_date:         row.expiry_date
             });
         }
 

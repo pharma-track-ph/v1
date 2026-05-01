@@ -10,7 +10,6 @@
 <body>
 <div class="app-container">
 
-    <!-- Sidebar (same structure, active link changes) -->
     <aside class="sidebar" id="sidebar">
         <div class="sidebar-brand">
             <div class="brand-icon">💊</div>
@@ -68,13 +67,8 @@
                     <p>Manage medicines, stock levels, and expiry dates.</p>
                 </div>
                 <div class="d-flex gap-8">
-                    <button class="btn btn-outline" id="btn-import-csv">
-                        📤 Import CSV
-                    </button>
-                    <button class="btn btn-primary" id="btn-add-product">
-                        ＋ Add Product
-                    </button>
-                    <!-- Hidden file input for CSV -->
+                    <button class="btn btn-outline" id="btn-import-csv">📤 Import CSV</button>
+                    <button class="btn btn-primary" id="btn-add-product">＋ Add Product</button>
                     <input type="file" id="csv-import-input" accept=".csv" style="display:none">
                 </div>
             </div>
@@ -83,7 +77,6 @@
                 CSV template: <code>batch_number,name,generic_name,category,supplier,barcode,price,cost,stock_quantity,low_stock_threshold,expiry_date</code>
             </p>
 
-            <!-- ── Toolbar / Filters ─────────────────────────── -->
             <div class="inv-toolbar">
                 <div class="search-wrap">
                     <span class="search-icon">🔍</span>
@@ -106,7 +99,6 @@
                 </span>
             </div>
 
-            <!-- ── Inventory Table ───────────────────────────── -->
             <div class="card" style="padding:0">
                 <div class="table-container">
                     <table class="table">
@@ -146,64 +138,85 @@
                 <div class="form-row">
                     <div class="form-group">
                         <label class="form-label">Batch Number *</label>
-                        <input type="text" id="field-batch_number" name="batch_number" class="form-control" required placeholder="BATCH-XXX-001">
+                        <input type="text" id="field-batch_number" name="batch_number"
+                               class="form-control" required placeholder="BATCH-XXX-001">
                     </div>
                     <div class="form-group">
                         <label class="form-label">Barcode</label>
-                        <input type="text" id="field-barcode" name="barcode" class="form-control" placeholder="4800001000000">
+                        <input type="text" id="field-barcode" name="barcode"
+                               class="form-control" placeholder="4800001000000">
                     </div>
                 </div>
                 <div class="form-row">
                     <div class="form-group">
                         <label class="form-label">Product Name *</label>
-                        <input type="text" id="field-name" name="name" class="form-control" required placeholder="Paracetamol 500mg">
+                        <input type="text" id="field-name" name="name"
+                               class="form-control" required placeholder="Paracetamol 500mg">
                     </div>
                     <div class="form-group">
                         <label class="form-label">Generic Name</label>
-                        <input type="text" id="field-generic_name" name="generic_name" class="form-control" placeholder="Paracetamol">
+                        <input type="text" id="field-generic_name" name="generic_name"
+                               class="form-control" placeholder="Paracetamol">
                     </div>
                 </div>
                 <div class="form-row">
                     <div class="form-group">
                         <label class="form-label">Category *</label>
-                        <input type="text" id="field-category" name="category" class="form-control" required placeholder="Analgesic">
+                        <input type="text" id="field-category" name="category"
+                               class="form-control" required placeholder="Analgesic">
                     </div>
                     <div class="form-group">
                         <label class="form-label">Supplier</label>
-                        <input type="text" id="field-supplier" name="supplier" class="form-control" placeholder="Unilab Inc.">
+                        <input type="text" id="field-supplier" name="supplier"
+                               class="form-control" placeholder="Unilab Inc.">
                     </div>
                 </div>
                 <div class="form-row-3">
                     <div class="form-group">
                         <label class="form-label">Selling Price (₱) *</label>
-                        <input type="number" id="field-price" name="price" class="form-control" required step="0.01" min="0" placeholder="0.00">
+                        <input type="number" id="field-price" name="price"
+                               class="form-control" required step="0.01" min="0" placeholder="0.00">
                     </div>
                     <div class="form-group">
                         <label class="form-label">Cost (₱) *</label>
-                        <input type="number" id="field-cost" name="cost" class="form-control" required step="0.01" min="0" placeholder="0.00">
+                        <input type="number" id="field-cost" name="cost"
+                               class="form-control" required step="0.01" min="0" placeholder="0.00">
                     </div>
+                    <!-- Add mode: shown when creating a new product -->
                     <div class="form-group" id="field-stock-add">
                         <label class="form-label">Stock Qty *</label>
-                        <input type="number" id="field-stock_quantity" name="stock_quantity" class="form-control" required min="0" placeholder="0">
+                        <input type="number" id="field-stock_quantity" name="stock_quantity"
+                               class="form-control" required min="0" placeholder="0">
                     </div>
+                    <!--
+                        FIX Bug 5: Edit mode stock field now has a UNIQUE name="stock_quantity_edit"
+                        (was name="stock_quantity" — same as the add field, causing FormData
+                        to capture only one of them unpredictably).
+                        inventory.js reads this field by id="field-stock_quantity_edit" directly,
+                        so the name attribute here is just for labelling clarity.
+                    -->
                     <div class="form-group hidden" id="field-stock-edit">
                         <label class="form-label">Stock Qty</label>
-                        <input type="number" id="field-stock_quantity_edit" name="stock_quantity" class="form-control" min="0">
+                        <input type="number" id="field-stock_quantity_edit" name="stock_quantity_edit"
+                               class="form-control" min="0">
                     </div>
                 </div>
                 <div class="form-row">
                     <div class="form-group">
                         <label class="form-label">Low Stock Threshold</label>
-                        <input type="number" id="field-low_stock_threshold" name="low_stock_threshold" class="form-control" min="1" value="10">
+                        <input type="number" id="field-low_stock_threshold" name="low_stock_threshold"
+                               class="form-control" min="1" value="10">
                     </div>
                     <div class="form-group">
                         <label class="form-label">Expiry Date *</label>
-                        <input type="date" id="field-expiry_date" name="expiry_date" class="form-control" required>
+                        <input type="date" id="field-expiry_date" name="expiry_date"
+                               class="form-control" required>
                     </div>
                 </div>
                 <div class="form-group">
                     <label class="form-label">Description</label>
-                    <textarea id="field-description" name="description" class="form-control" rows="2" placeholder="Optional notes…"></textarea>
+                    <textarea id="field-description" name="description"
+                              class="form-control" rows="2" placeholder="Optional notes…"></textarea>
                 </div>
             </form>
         </div>
