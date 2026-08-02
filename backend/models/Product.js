@@ -135,9 +135,18 @@ const Product = {
     },
 
     getLowStockCount: async () => {
+        // Must mirror the exact priority order used in findAll()'s CASE expression
+        // (expired > near_expiry > out_of_stock > low_stock) so this count always
+        // matches what Inventory shows when filtered to "Low Stock" — otherwise a
+        // product that's both low-stock AND expiring soon would get double-counted
+        // here while only showing up under "Near Expiry" in the actual table.
         const [rows] = await db.query(
             `SELECT COUNT(*) AS count FROM products
-             WHERE is_active = 1 AND stock_quantity <= low_stock_threshold AND stock_quantity > 0`
+             WHERE is_active = 1
+               AND expiry_date >= CURDATE()
+               AND DATEDIFF(expiry_date, CURDATE()) > 30
+               AND stock_quantity > 0
+               AND stock_quantity <= low_stock_threshold`
         );
         return rows[0].count;
     },
@@ -150,6 +159,66 @@ const Product = {
                AND DATEDIFF(expiry_date, CURDATE()) <= 30`
         );
         return rows[0].count;
+    },
+
+    getExpiredCount: async () => {
+        const [rows] = await db.query(
+            `SELECT COUNT(*) AS count FROM products
+             WHERE is_active = 1 AND expiry_date < CURDATE()`
+        );
+        return rows[0].count;
+    },
+
+    getOutOfStockCount: async () => {
+        // Same priority rule as above — a product that's both out of stock AND
+        // expiring within 30 days is categorized as near_expiry, not out_of_stock.
+        const [rows] = await db.query(
+            `SELECT COUNT(*) AS count FROM products
+             WHERE is_active = 1
+               AND expiry_date >= CURDATE()
+               AND DATEDIFF(expiry_date, CURDATE()) > 30
+               AND stock_quantity <= 0`
+        );
+        return rows[0].count;
+    },
+
+    // ── POS-specific fetch: only active, non-expired batches ──
+    // Used by /api/pos/products so the POS never has to know about
+    // expired stock at all — filtering happens once, here.
+    findAllForPOS: async (search = '') => {
+        let sql = `
+            SELECT *,
+                   DATEDIFF(expiry_date, CURDATE()) AS days_until_expiry
+            FROM products
+            WHERE is_active = 1
+              AND expiry_date >= CURDATE()
+        `;
+        const params = [];
+        if (search) {
+            sql += ' AND (name LIKE ? OR generic_name LIKE ? OR batch_number LIKE ? OR barcode = ?)';
+            const like = `%${search}%`;
+            params.push(like, like, like, search);
+        }
+        // Ordered by name then expiry ASC so the earliest-expiring batch of
+        // each product always comes first — this gives us FEFO ordering for free.
+        sql += ' ORDER BY name ASC, expiry_date ASC';
+        const [rows] = await db.query(sql, params);
+        return rows;
+    },
+
+    // All active, non-expired batches sharing an exact product name.
+    // Used to re-group a single barcode-scanned batch back into its
+    // product family (so POS behaviour stays consistent either way).
+    findActiveNonExpiredByName: async (name) => {
+        const [rows] = await db.query(
+            `SELECT *,
+                    DATEDIFF(expiry_date, CURDATE()) AS days_until_expiry
+             FROM products
+             WHERE is_active = 1 AND expiry_date >= CURDATE() AND name = ?
+             ORDER BY expiry_date ASC`,
+            [name]
+        );
+        return rows;
     },
 
     getCategories: async () => {

@@ -13,6 +13,7 @@ const path = require('path');
 // SECURITY: Disable multipleStatements in production
 // ============================================================
 const isProduction = process.env.NODE_ENV === 'production';
+const DB_TIMEZONE = '+08:00';
 
 const pool = mysql.createPool({
     host: process.env.DB_HOST,
@@ -23,14 +24,28 @@ const pool = mysql.createPool({
     waitForConnections: true,
     connectionLimit: parseInt(process.env.DB_POOL_LIMIT || '10'),
     queueLimit: 0,
-    timezone: '+08:00',
+    timezone: DB_TIMEZONE,
     multipleStatements: !isProduction,  // DISABLED in production for safety
     ssl: {
         rejectUnauthorized: false  // Required for Aiven self-signed certificate chain
-    }
+    },
+    // Keep-alive prevents Aiven (and most managed MySQL free tiers) from silently
+    // closing idle TCP connections, which otherwise surface as ECONNRESET on the
+    // next query using that pooled connection.
+    enableKeepAlive: true,
+    keepAliveInitialDelay: 10000,
+    connectTimeout: 20000
+});
+
+// Pool-level errors (e.g. a connection reset by the server while idle) must be
+// handled here — otherwise Node treats them as unhandled 'error' events and the
+// process can crash, or the dead connection can linger in the pool.
+pool.on('error', (err) => {
+    console.error('[DB POOL ERROR]', err.code || err.message);
 });
 
 pool.on('connection', (connection) => {
+    connection.query(`SET time_zone = '${DB_TIMEZONE}'`);
     connection.query("SET SESSION sql_mode = 'ONLY_FULL_GROUP_BY,STRICT_TRANS_TABLES,NO_ZERO_IN_DATE,NO_ZERO_DATE,ERROR_FOR_DIVISION_BY_ZERO,NO_ENGINE_SUBSTITUTION'");
 });
 
@@ -121,6 +136,7 @@ async function initializeDatabase() {
 
         // Verify database connectivity and permissions
         await connection.query('SELECT 1');
+        await connection.query(`SET time_zone = '${DB_TIMEZONE}'`);
         console.log(`${envLabel} ✅ Database permissions verified`);
 
         // For production, verify critical tables exist BEFORE initialization

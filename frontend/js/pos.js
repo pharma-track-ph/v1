@@ -8,10 +8,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // ── State ─────────────────────────────────────────────────
     const cart = {
-        items:         [],    // Array of { product, quantity }
-        discount:      0,
-        paymentMethod: 'cash',
-        amountTendered: 0,
+        items:            [],    // Array of { product, quantity }
+        discountEnabled:  false, // true = flat 20% discount applied
+        paymentMethod:    'cash',
+        amountTendered:   0,
 
         addItem(product) {
             const existing = this.items.find(i => i.product.id === product.id);
@@ -36,14 +36,15 @@ document.addEventListener('DOMContentLoaded', () => {
             else renderCart();
         },
 
-        get subtotal() { return this.items.reduce((s, i) => s + (i.product.price * i.quantity), 0); },
-        get total()    { return Math.max(0, this.subtotal - this.discount); },
-        get change()   { return this.amountTendered - this.total; },
-        get isEmpty()  { return !this.items.length; },
+        get subtotal()  { return this.items.reduce((s, i) => s + (i.product.price * i.quantity), 0); },
+        get discount()  { return this.discountEnabled ? Math.round(this.subtotal * 0.20 * 100) / 100 : 0; },
+        get total()     { return Math.max(0, this.subtotal - this.discount); },
+        get change()    { return this.amountTendered - this.total; },
+        get isEmpty()   { return !this.items.length; },
 
         clear() {
             this.items = [];
-            this.discount = 0;
+            this.discountEnabled = false;
             this.amountTendered = 0;
             renderCart();
         }
@@ -60,12 +61,16 @@ document.addEventListener('DOMContentLoaded', () => {
     const discountEl      = document.getElementById('cart-discount-display');
     const totalEl         = document.getElementById('cart-total');
     const changeEl        = document.getElementById('change-display');
-    const discountInput   = document.getElementById('discount-input');
+    const discountToggle  = document.getElementById('discount-toggle');
     const tenderedInput   = document.getElementById('amount-tendered');
     const checkoutBtn     = document.getElementById('btn-checkout');
     const clearCartBtn    = document.getElementById('btn-clear-cart');
+    const voidBtn         = document.getElementById('btn-void');
 
     // ── Load all available products ───────────────────────────
+    // Every card here represents one product *family* — batches of the
+    // same product name are combined server-side into a single card with
+    // a combined stock count, and expired batches are excluded entirely.
     let allProducts = [];
     loadPOSProducts();
 
@@ -89,30 +94,28 @@ document.addEventListener('DOMContentLoaded', () => {
     }, 280));
 
     // ── Render product cards ───────────────────────────────────
+    // No status tags (expired/low-stock/near-expiry) — expired items
+    // never appear at all, and stock count alone is enough signal.
     function renderProductGrid(products) {
         if (!productGrid) return;
 
         productGrid.innerHTML = products.map(p => {
-            const isExpired = p.stock_status === 'expired';
             const isOOS     = p.stock_status === 'out_of_stock';
-            const cardClass = isExpired ? 'expired' : (isOOS ? 'out-of-stock' : '');
+            const cardClass = isOOS ? 'out-of-stock' : '';
 
             return `
             <div class="product-card ${cardClass}"
                  data-id="${p.id}"
-                 title="${isExpired ? 'Expired — cannot sell' : (isOOS ? 'Out of stock' : 'Click to add')}">
+                 title="${isOOS ? 'Out of stock' : 'Click to add'}">
                 <div class="p-name">${escHtml(p.name)}</div>
-                ${p.generic_name ? `<div class="text-muted" style="font-size:0.72rem">${escHtml(p.generic_name)}</div>` : ''}
+                ${p.generic_name ? `<div class="p-generic text-muted">${escHtml(p.generic_name)}</div>` : ''}
                 <div class="p-price">${Fmt.currency(p.price)}</div>
                 <div class="p-stock">Stock: ${p.stock_quantity} ${p.unit || 'pcs'}</div>
-                ${isExpired ? `<div class="p-expiry-warn">⛔ EXPIRED</div>` : ''}
-                ${p.stock_status === 'near_expiry' ? `<div class="p-expiry-warn" style="color:var(--warning)">⚠️ Near expiry</div>` : ''}
-                ${p.stock_status === 'low_stock'   ? `<div class="p-expiry-warn" style="color:var(--primary)">📦 Low stock</div>` : ''}
             </div>`;
         }).join('') || '<div class="text-center text-muted" style="padding:40px;grid-column:1/-1">No products found.</div>';
 
         // Add click listeners
-        productGrid.querySelectorAll('.product-card:not(.expired):not(.out-of-stock)').forEach(card => {
+        productGrid.querySelectorAll('.product-card:not(.out-of-stock)').forEach(card => {
             card.addEventListener('click', () => {
                 const id      = parseInt(card.dataset.id);
                 const product = allProducts.find(p => p.id === id);
@@ -121,21 +124,12 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    // ── Add to cart (with expiry block) ───────────────────────
+    // ── Add to cart ─────────────────────────────────────────────
+    // Expired batches are never returned by the backend at all, so no
+    // client-side expiry check is needed here — the checkout endpoint
+    // still re-validates server-side as a final safety net regardless.
     function addToCart(product) {
-        const today = new Date().toISOString().split('T')[0];
-
-        // ── EXPIRY BLOCK ──────────────────────────────────────
-        if (product.expiry_date <= today) {
-            Toast.show(
-                `Cannot sell batch ${product.batch_number}: Item expired.`,
-                'error',
-                'Sale Blocked'
-            );
-            return;
-        }
-
-        // ── STOCK CHECK ───────────────────────────────────────
+        // Stock check against the combined total across all non-expired batches
         const currentQty = cart.items.find(i => i.product.id === product.id)?.quantity || 0;
         if (currentQty >= product.stock_quantity) {
             Toast.show(`Only ${product.stock_quantity} units available.`, 'warning');
@@ -195,9 +189,11 @@ document.addEventListener('DOMContentLoaded', () => {
         updateChange();
     }
 
-    // ── Discount ──────────────────────────────────────────────
-    discountInput?.addEventListener('input', () => {
-        cart.discount = parseFloat(discountInput.value) || 0;
+    // ── Discount toggle (flat 20%) ───────────────────────────
+    discountToggle?.addEventListener('click', () => {
+        cart.discountEnabled = !cart.discountEnabled;
+        discountToggle.classList.toggle('active', cart.discountEnabled);
+        discountToggle.setAttribute('aria-pressed', String(cart.discountEnabled));
         renderCart();
     });
 
@@ -252,9 +248,98 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     // ── Clear cart ────────────────────────────────────────────
-    clearCartBtn?.addEventListener('click', () => {
+    clearCartBtn?.addEventListener('click', async () => {
         if (cart.isEmpty) return;
-        if (confirm('Clear the cart?')) cart.clear();
+        const confirmed = await ConfirmDialog.show({
+            title: 'Clear Cart',
+            message: 'Remove all items from the cart?',
+            confirmText: 'Clear'
+        });
+        if (confirmed) cart.clear();
+    });
+
+    voidBtn?.addEventListener('click', async () => {
+        const candidate = await OfflineAPI.get('/pos/void-candidate');
+
+        if (!candidate?.success || !candidate.data) {
+            Toast.show("No transaction from today's shift available to void.", 'info');
+            return;
+        }
+
+        const order = candidate.data;
+
+        const itemsList = (order.items || [])
+            .map(i => `• ${i.product_name} x${i.quantity}`)
+            .join('\n');
+
+        // Step 1: show what would be voided (same for every role)
+        const confirmed = await ConfirmDialog.show({
+            title:       `Void ${order.order_number}?`,
+            message:     `Total: ${Fmt.currency(order.total)}\n${itemsList}\n\nThis restores stock and cannot be undone.`,
+            confirmText: 'Void Transaction'
+        });
+
+        if (!confirmed) return;
+
+        const isCashier = Auth.getUser()?.role === 'cashier';
+        let payload = {};
+
+        if (isCashier) {
+            // Cashiers cannot void on their own authority — an admin/owner must
+            // approve by entering their own credentials right here. Loop so a
+            // typo doesn't just silently fail; every exit path below is an
+            // explicit return (success, cashier cancels, or a non-credential
+            // failure), so this never spins forever.
+            let promptMessage = `Voiding ${order.order_number} requires an admin or owner to approve.`;
+
+            while (true) {
+                const creds = await ManagerApprovalDialog.show(promptMessage);
+                if (!creds) return; // cashier cancelled
+
+                payload = { manager_email: creds.email, manager_password: creds.password };
+
+                voidBtn.disabled = true;
+                const result = await OfflineAPI.post('/pos/void', payload);
+                voidBtn.disabled = false;
+
+                if (result?.success) {
+                    Toast.show(result.message, 'success');
+                    loadPOSProducts();
+                    return;
+                }
+
+                if (result?.message?.toLowerCase().includes('credentials')) {
+                    // Wrong email/password or not an admin/owner — let them retry
+                    promptMessage = `❌ ${result.message} Please try again.`;
+                    continue;
+                }
+
+                // Any other failure (already voided, no transaction, etc.) — stop
+                Toast.show(result?.message || 'Void failed.', 'error');
+                return;
+            }
+        } else {
+            // Admins/super_admins already have full authority — just a final
+            // explicit confirmation since voiding cannot be reversed.
+            const finalConfirmed = await ConfirmDialog.show({
+                title:       'Final Confirmation',
+                message:     `Are you absolutely sure you want to void ${order.order_number}? This action is permanent.`,
+                confirmText: 'Yes, Void It'
+            });
+
+            if (!finalConfirmed) return;
+
+            voidBtn.disabled = true;
+            const result = await OfflineAPI.post('/pos/void', {});
+            voidBtn.disabled = false;
+
+            if (result?.success) {
+                Toast.show(result.message, 'success');
+                loadPOSProducts();
+            } else {
+                Toast.show(result?.message || 'Void failed.', 'error');
+            }
+        }
     });
 
     // ── Checkout ──────────────────────────────────────────────
@@ -267,17 +352,50 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         const tendered = parseFloat(tenderedInput?.value) || 0;
+        if (cart.discount < 0 || cart.discount > cart.subtotal) {
+            Toast.show('Discount cannot be greater than subtotal.', 'warning');
+            return;
+        }
+
         if (tendered < cart.total) {
             Toast.show(`Amount tendered must be at least ${Fmt.currency(cart.total)}.`, 'warning');
             return;
         }
 
+        // Show a summary of exactly what's about to be charged before doing
+        // anything irreversible — same principle as the void confirmation.
+        const itemsList = cart.items
+            .map(i => `• ${i.product.name} x${i.quantity} @ ${Fmt.currency(i.product.price)} = ${Fmt.currency(i.product.price * i.quantity)}`)
+            .join('\n');
+
+        const summary =
+            `${itemsList}\n\n` +
+            `Subtotal: ${Fmt.currency(cart.subtotal)}\n` +
+            (cart.discount > 0 ? `Discount: -${Fmt.currency(cart.discount)}\n` : '') +
+            `TOTAL: ${Fmt.currency(cart.total)}\n` +
+            `Payment: ${cart.paymentMethod.toUpperCase()}\n` +
+            `Tendered: ${Fmt.currency(tendered)}\n` +
+            `Change: ${Fmt.currency(tendered - cart.total)}`;
+
+        const confirmed = await ConfirmDialog.show({
+            title:       'Confirm Checkout',
+            message:     summary,
+            confirmText: 'Confirm & Checkout',
+            danger:      false
+        });
+
+        if (!confirmed) return;
+
         checkoutBtn.disabled = true;
         checkoutBtn.textContent = 'Processing…';
 
+        // batch_ids lets the backend consume stock FEFO (earliest-expiring
+        // batch first) across whichever batches make up this product's
+        // combined stock count.
         const payload = {
             items: cart.items.map(i => ({
                 product_id: i.product.id,
+                batch_ids:  i.product.batch_ids,
                 quantity:   i.quantity
             })),
             payment_method:  cart.paymentMethod,

@@ -1,4 +1,34 @@
-node_modules/
+# ── Environment & secrets ────────────────────────────────
 .env
+.env.local
+.env.*.local
+database/SEED_CREDENTIALS.txt
+
+# ── Dependencies ─────────────────────────────────────────
+node_modules/
+
+# ── Uploaded / user-generated content ────────────────────
 uploads/
+backend/uploads/
+
+# ── Logs ─────────────────────────────────────────────────
 *.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# ── Build output (if ever generated) ─────────────────────
+backend/public/
+dist/
+build/
+
+# ── Editor / IDE ─────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# ── OS-generated files ────────────────────────────────────
+.DS_Store
+Thumbs.db
+desktop.ini

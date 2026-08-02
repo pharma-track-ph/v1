@@ -193,6 +193,8 @@ img { max-width: 100%; display: block; }
     display:        flex;
     flex-direction: column;
     min-height:     100vh;
+    min-width:      0;   /* allow flex item to shrink below content width */
+    overflow-x:     hidden;
     transition:     var(--transition);
 }
 
@@ -263,6 +265,88 @@ img { max-width: 100%; display: block; }
 
 .alert-badge.amber { background: var(--warning); color: var(--dark); }
 
+/* ── Notification bell dropdown (replaces the old alert pills) ── */
+.notif-wrap { position: relative; }
+
+.notif-bell-btn {
+    position:       relative;
+    background:     var(--light);
+    border:         1px solid var(--gray-200);
+    border-radius:  50%;
+    width:          38px;
+    height:         38px;
+    display:        flex;
+    align-items:    center;
+    justify-content:center;
+    font-size:      1.05rem;
+    cursor:         pointer;
+    transition:     var(--transition);
+}
+
+.notif-bell-btn:hover { background: var(--gray-200); }
+
+.notif-bell-btn .alert-badge {
+    position: absolute;
+    top:      -3px;
+    right:    -3px;
+}
+
+.notif-dropdown {
+    position:      absolute;
+    top:           calc(100% + 8px);
+    right:         0;
+    width:         260px;
+    background:    var(--white);
+    border:        1px solid var(--gray-200);
+    border-radius: var(--border-radius-lg);
+    box-shadow:    var(--shadow-lg);
+    z-index:       200;
+    overflow:      hidden;
+}
+
+.notif-dropdown-header {
+    padding:       10px 14px;
+    font-size:     0.75rem;
+    font-weight:   700;
+    text-transform:uppercase;
+    letter-spacing:0.5px;
+    color:         var(--secondary);
+    border-bottom: 1px solid var(--gray-200);
+    background:    var(--light-blue);
+}
+
+.notif-item {
+    width:           100%;
+    display:         flex;
+    align-items:     center;
+    justify-content: space-between;
+    gap:             10px;
+    padding:         10px 14px;
+    background:      none;
+    border:          none;
+    border-bottom:   1px solid var(--gray-100);
+    font-size:       0.85rem;
+    font-family:     var(--font-family);
+    color:           var(--dark);
+    cursor:          pointer;
+    text-align:      left;
+    transition:      var(--transition);
+}
+
+.notif-item:last-child { border-bottom: none; }
+.notif-item:hover { background: var(--gray-100); }
+
+.notif-count {
+    background:    var(--gray-200);
+    color:         var(--gray-700);
+    font-weight:   700;
+    font-size:     0.75rem;
+    padding:       2px 8px;
+    border-radius: 999px;
+    min-width:     22px;
+    text-align:    center;
+}
+
 .header-user {
     display:     flex;
     align-items: center;
@@ -292,7 +376,7 @@ img { max-width: 100%; display: block; }
 .user-info .user-role { font-size: 0.7rem; color: var(--secondary); text-transform: capitalize; }
 
 /* ── Page Content ─────────────────────────────────────────── */
-.page-content { padding: 24px; flex: 1; }
+.page-content { padding: 24px; flex: 1; min-width: 0; }
 
 .page-header {
     display:       flex;
@@ -651,6 +735,7 @@ select.form-control { appearance: none; background-image: url("data:image/svg+xm
 .alert-info    { background: var(--info-light);    border: 1px solid #b8daff; color: #0c5460; }
 
 /* ── Loading Spinner ───────────────────────────────────────── */
+body { overflow-x: hidden; }
 .spinner {
     display:       inline-block;
     width:         20px;
@@ -734,6 +819,27 @@ tr.row-low-stock td { background: #f0f0ff !important; }
 
 .login-logo h1 { font-size: 1.6rem; font-weight: 800; color: var(--primary); }
 .login-logo p  { font-size: 0.85rem; color: var(--secondary); }
+
+.login-card .form-control {
+    height:    44px;
+    font-size: 0.95rem;
+}
+
+.login-card .btn-primary {
+    width:           100%;
+    height:          44px;
+    justify-content: center;
+    font-size:       0.95rem;
+    font-weight:     600;
+}
+
+.error-msg {
+    color:      var(--danger);
+    font-size:  0.83rem;
+    margin-top: 8px;
+    text-align: center;
+    min-height: 20px;
+}
 
 /* ── Responsive Breakpoints ────────────────────────────────── */
 

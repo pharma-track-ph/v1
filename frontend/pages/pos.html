@@ -18,20 +18,20 @@
         <nav class="sidebar-nav">
             <p class="nav-section-label">Main</p>
             <ul>
-                <li class="nav-item" data-roles="admin,super_admin,cashier"><a href="dashboard.html"><span class="nav-icon">📊</span> Dashboard</a></li>
-                <li class="nav-item active" data-roles="admin,super_admin,cashier"><a href="pos.html"><span class="nav-icon">🛒</span> Point of Sale</a></li>
+                <li class="nav-item" data-roles="admin,super_admin,cashier"><a href="dashboard.html"><span class="nav-icon"></span> Dashboard</a></li>
+                <li class="nav-item active" data-roles="admin,super_admin,cashier"><a href="pos.html"><span class="nav-icon"></span> Point of Sale</a></li>
             </ul>
             <p class="nav-section-label">Management</p>
             <ul>
-                <li class="nav-item" data-roles="admin,super_admin"><a href="inventory.html"><span class="nav-icon">📦</span> Inventory</a></li>
-                <li class="nav-item" data-roles="admin,super_admin"><a href="reports.html"><span class="nav-icon">📋</span> Reports</a></li>
-                <li class="nav-item" data-roles="admin,super_admin"><a href="forecasting.html"><span class="nav-icon">📈</span> Forecasting</a></li>
+                <li class="nav-item" data-roles="admin,super_admin"><a href="inventory.html"><span class="nav-icon"></span> Inventory</a></li>
+                <li class="nav-item" data-roles="admin,super_admin"><a href="reports.html"><span class="nav-icon"></span> Reports</a></li>
+                <li class="nav-item" data-roles="admin,super_admin"><a href="forecasting.html"><span class="nav-icon"></span> Forecasting</a></li>
             </ul>
             <p class="nav-section-label">Admin</p>
             <ul>
-                <li class="nav-item" data-roles="admin,super_admin"><a href="users.html"><span class="nav-icon">👥</span> Users</a></li>
-                <li class="nav-item" data-roles="super_admin"><a href="audit.html"><span class="nav-icon">🔍</span> Audit Logs</a></li>
-                <li class="nav-item"><a href="#" data-action="logout"><span class="nav-icon">🚪</span> Sign Out</a></li>
+                <li class="nav-item" data-roles="super_admin"><a href="users.html"><span class="nav-icon"></span> Users</a></li>
+                <li class="nav-item" data-roles="super_admin"><a href="audit.html"><span class="nav-icon"></span> Audit Logs</a></li>
+                <li class="nav-item"><a href="#" data-action="logout"><span class="nav-icon"></span> Sign Out</a></li>
             </ul>
         </nav>
         <div class="sidebar-footer">
@@ -69,7 +69,7 @@
                         <div class="search-input-wrap">
                             <span class="search-icon">🔍</span>
                             <input type="text" id="pos-search" class="form-control"
-                                   placeholder="Search medicine name…" autocomplete="off">
+                                   placeholder="Search product name…" autocomplete="off">
                         </div>
                         <button class="btn-barcode" id="btn-barcode-scan">
                             📷 Scan Barcode
@@ -123,19 +123,20 @@
                         <label>Payment Method</label>
                         <div class="payment-methods">
                             <button class="pay-method-btn active" data-method="cash">💵 Cash</button>
-                            <button class="pay-method-btn" data-method="card">💳 Card</button>
+                            <!-- <button class="pay-method-btn" data-method="card">💳 Card</button>
                             <button class="pay-method-btn" data-method="gcash">📱 GCash</button>
-                            <button class="pay-method-btn" data-method="maya">🏦 Maya</button>
+                            <button class="pay-method-btn" data-method="maya">🏦 Maya</button> -->
                         </div>
-                        <div class="form-row" style="gap:8px">
+                        <div class="form-row" style="gap:8px;align-items:end">
                             <div class="form-group" style="margin-bottom:0">
-                                <label class="form-label" style="font-size:0.75rem">Discount (₱)</label>
-                                <input type="number" id="discount-input" class="form-control"
-                                       value="0" min="0" step="0.01"
-                                       style="height:36px;font-size:0.875rem">
+                                <label class="form-label" style="font-size:0.75rem">Discount</label>
+                                <button type="button" id="discount-toggle" class="discount-toggle-btn" aria-pressed="false">
+                                    <span class="toggle-track"><span class="toggle-thumb"></span></span>
+                                    <span class="toggle-label">20% OFF</span>
+                                </button>
                             </div>
                             <div class="form-group" style="margin-bottom:0">
-                                <label class="form-label" style="font-size:0.75rem">Amount Tendered (₱)</label>
+                                <label class="form-label" style="font-size:0.75rem">Amount Paid (₱)</label>
                                 <input type="number" id="amount-tendered" class="form-control"
                                        placeholder="0.00" min="0" step="0.01"
                                        style="height:36px;font-size:0.875rem">
@@ -158,6 +159,9 @@
                     <div class="cart-actions">
                         <button class="btn btn-light" id="btn-clear-cart">🗑 Clear</button>
                         <button class="btn btn-success btn-lg" id="btn-checkout">✅ Checkout</button>
+                    </div>
+                    <div class="cart-actions" style="padding-top:0">
+                        <button class="btn-void-full" id="btn-void">↩ Void Last Transaction</button>
                     </div>
                 </div>
 

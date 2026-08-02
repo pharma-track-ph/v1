@@ -5,9 +5,15 @@
 
 // ── Configuration ─────────────────────────────────────────────
 const CONFIG = {
-    API_BASE:      window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
-        ? 'http://localhost:5000/api'
-        : '/api',
+    API_BASE: (() => {
+        const host = window.location.hostname;
+        // Opened as a local file (file://) or via Live Server
+        if (host === 'localhost' || host === '127.0.0.1' || host === '') {
+            return 'http://localhost:5000/api';
+        }
+        // Deployed version
+        return '/api';
+    })(),
     TOKEN_KEY:     'pharmatrack_token',
     USER_KEY:      'pharmatrack_user',
     TOAST_TIMEOUT: 4000
@@ -253,20 +259,24 @@ const Nav = {
         const user = Auth.getUser();
         if (!user) return;
 
+        // Display-only label — the underlying role value stays 'super_admin'
+        // everywhere in code/DB/JWT; this only changes what's shown on screen.
+        const roleLabel = user.role === 'super_admin' ? 'Owner' : user.role.replace('_', ' ');
+
         // Header user info
         const nameEl   = document.getElementById('header-user-name');
         const roleEl   = document.getElementById('header-user-role');
         const avatarEl = document.getElementById('header-avatar');
 
         if (nameEl)   nameEl.textContent   = user.name;
-        if (roleEl)   roleEl.textContent   = user.role.replace('_', ' ');
+        if (roleEl)   roleEl.textContent   = roleLabel;
         if (avatarEl) avatarEl.textContent = user.name.charAt(0).toUpperCase();
 
         // Sidebar footer
         const sfName = document.getElementById('sidebar-user-name');
         const sfRole = document.getElementById('sidebar-user-role');
         if (sfName) sfName.textContent = user.name;
-        if (sfRole) sfRole.textContent = user.role.replace('_', ' ');
+        if (sfRole) sfRole.textContent = roleLabel;
     },
 
     highlightActive() {
@@ -283,6 +293,9 @@ const Nav = {
     /**
      * Hide/show sidebar links based on the logged-in user's role.
      * nav-items use data-roles attribute: e.g. data-roles="admin,super_admin"
+     * Also hides an entire section label (e.g. "Management", "Admin") when
+     * every role-gated item under it ends up hidden — so a cashier never
+     * sees an empty "Admin" heading with nothing accessible underneath.
      */
     applyRoleVisibility() {
         const user = Auth.getUser();
@@ -293,6 +306,22 @@ const Nav = {
             if (!roles.includes(user.role)) {
                 item.classList.add('role-hidden');
             }
+        });
+
+        // Hide section labels whose entire group of role-gated items is hidden.
+        // Items with NO data-roles (like "Sign Out") are ignored for this check
+        // since they're always visible and shouldn't keep an empty label alive.
+        document.querySelectorAll('.nav-section-label').forEach(label => {
+            const ul = label.nextElementSibling;
+            if (!ul || ul.tagName !== 'UL') return;
+
+            const roleGatedItems = Array.from(ul.children)
+                .filter(li => li.classList.contains('nav-item') && li.dataset.roles);
+
+            if (!roleGatedItems.length) return; // nothing role-gated in this group
+
+            const anyVisible = roleGatedItems.some(li => !li.classList.contains('role-hidden'));
+            label.style.display = anyVisible ? '' : 'none';
         });
     },
 
@@ -319,11 +348,270 @@ const Nav = {
 
     initLogout() {
         document.querySelectorAll('[data-action="logout"]').forEach(el => {
-            el.addEventListener('click', (e) => {
+            el.addEventListener('click', async (e) => {
                 e.preventDefault();
-                Auth.logout();
+                const confirmed = await ConfirmDialog.show({
+                    title:       'Sign Out',
+                    message:     'Are you sure you want to sign out?',
+                    confirmText: 'Sign Out'
+                });
+                if (confirmed) Auth.logout();
             });
         });
+    }
+};
+
+// ── Confirmation Dialog ──────────────────────────────
+// Reusable Yes/No confirmation modal (progressive enhancement — injected
+// on first use, so no per-page HTML is needed). Returns a Promise<boolean>.
+const ConfirmDialog = {
+    ensureModal() {
+        if (document.getElementById('confirm-dialog-modal')) return;
+
+        const overlay = document.createElement('div');
+        overlay.className = 'modal-overlay';
+        overlay.id = 'confirm-dialog-modal';
+        overlay.innerHTML = `
+            <div class="modal" style="max-width:380px">
+                <div class="modal-header">
+                    <h3 id="confirm-dialog-title">Are you sure?</h3>
+                </div>
+                <div class="modal-body">
+                    <p id="confirm-dialog-message" style="font-size:0.9rem;color:var(--gray-700);white-space:pre-line"></p>
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-light" id="confirm-dialog-cancel">Cancel</button>
+                    <button class="btn btn-danger" id="confirm-dialog-ok">Confirm</button>
+                </div>
+            </div>`;
+        document.body.appendChild(overlay);
+
+        // Clicking the dimmed background acts the same as Cancel
+        overlay.addEventListener('click', (e) => {
+            if (e.target === overlay) document.getElementById('confirm-dialog-cancel')?.click();
+        });
+    },
+
+    show({ title = 'Are you sure?', message = '', confirmText = 'Confirm', danger = true } = {}) {
+        this.ensureModal();
+        const overlay = document.getElementById('confirm-dialog-modal');
+
+        document.getElementById('confirm-dialog-title').textContent   = title;
+        document.getElementById('confirm-dialog-message').textContent = message;
+
+        const okBtn     = document.getElementById('confirm-dialog-ok');
+        const cancelBtn = document.getElementById('confirm-dialog-cancel');
+        okBtn.textContent = confirmText;
+        okBtn.className   = danger ? 'btn btn-danger' : 'btn btn-primary';
+
+        return new Promise((resolve) => {
+            function cleanup(result) {
+                overlay.classList.remove('active');
+                okBtn.removeEventListener('click', onOk);
+                cancelBtn.removeEventListener('click', onCancel);
+                resolve(result);
+            }
+            function onOk()     { cleanup(true); }
+            function onCancel() { cleanup(false); }
+
+            okBtn.addEventListener('click', onOk);
+            cancelBtn.addEventListener('click', onCancel);
+
+            overlay.classList.add('active');
+        });
+    }
+};
+
+// ── Manager/Owner Approval Dialog ──────────────────────
+// Collects an admin/owner's email + password for actions a cashier can't
+// authorize alone (e.g. voiding a sale). Returns { email, password } on
+// submit, or null if cancelled. Does NOT change the logged-in session —
+// it's a one-off approval check, verified server-side per use.
+const ManagerApprovalDialog = {
+    ensureModal() {
+        if (document.getElementById('manager-approval-modal')) return;
+
+        const overlay = document.createElement('div');
+        overlay.className = 'modal-overlay';
+        overlay.id = 'manager-approval-modal';
+        overlay.innerHTML = `
+            <div class="modal" style="max-width:380px">
+                <div class="modal-header">
+                    <h3>🔒 Manager Approval Required</h3>
+                </div>
+                <div class="modal-body">
+                    <p id="manager-approval-message" style="font-size:0.85rem;color:var(--gray-700);margin-bottom:14px"></p>
+                    <div class="form-group">
+                        <label class="form-label">Admin/Owner Email</label>
+                        <input type="email" id="manager-approval-email" class="form-control" autocomplete="off">
+                    </div>
+                    <div class="form-group" style="margin-top:10px">
+                        <label class="form-label">Password</label>
+                        <input type="password" id="manager-approval-password" class="form-control" autocomplete="off">
+                    </div>
+                    <p id="manager-approval-error" style="color:var(--danger);font-size:0.8rem;margin-top:8px;display:none"></p>
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-light" id="manager-approval-cancel">Cancel</button>
+                    <button class="btn btn-danger" id="manager-approval-ok">Approve</button>
+                </div>
+            </div>`;
+        document.body.appendChild(overlay);
+
+        overlay.addEventListener('click', (e) => {
+            if (e.target === overlay) document.getElementById('manager-approval-cancel')?.click();
+        });
+
+        // Enter key on either field submits
+        overlay.querySelectorAll('input').forEach(input => {
+            input.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter') document.getElementById('manager-approval-ok')?.click();
+            });
+        });
+    },
+
+    show(message = 'This action requires an admin or owner to approve.') {
+        this.ensureModal();
+        const overlay  = document.getElementById('manager-approval-modal');
+        const emailEl  = document.getElementById('manager-approval-email');
+        const pwEl     = document.getElementById('manager-approval-password');
+        const errEl    = document.getElementById('manager-approval-error');
+
+        document.getElementById('manager-approval-message').textContent = message;
+        emailEl.value = '';
+        pwEl.value    = '';
+        errEl.style.display = 'none';
+
+        return new Promise((resolve) => {
+            const okBtn     = document.getElementById('manager-approval-ok');
+            const cancelBtn = document.getElementById('manager-approval-cancel');
+
+            function cleanup(result) {
+                overlay.classList.remove('active');
+                okBtn.removeEventListener('click', onOk);
+                cancelBtn.removeEventListener('click', onCancel);
+                resolve(result);
+            }
+            function onOk() {
+                const email    = emailEl.value.trim();
+                const password = pwEl.value;
+                if (!email || !password) {
+                    errEl.textContent   = 'Enter both email and password.';
+                    errEl.style.display = 'block';
+                    return;
+                }
+                cleanup({ email, password });
+            }
+            function onCancel() { cleanup(null); }
+
+            okBtn.addEventListener('click', onOk);
+            cancelBtn.addEventListener('click', onCancel);
+
+            overlay.classList.add('active');
+            setTimeout(() => emailEl.focus(), 50);
+        });
+    },
+
+    showError(msg) {
+        const errEl = document.getElementById('manager-approval-error');
+        if (errEl) {
+            errEl.textContent   = msg;
+            errEl.style.display = 'block';
+        }
+    }
+};
+
+// ── Alert Header Notification Dropdown ──────────────────────────
+// Replaces the old pair of static "Low Stock" / "Near Expiry" pills with a
+// single bell-style notification button (progressive enhancement — works
+// on every page without needing per-page HTML changes). Clicking a category
+// navigates to Inventory filtered by that status, but only for roles that
+// can actually access Inventory; other roles still see the counts.
+const AlertsNav = {
+    INVENTORY_ROLES: ['admin', 'super_admin'],
+
+    init() {
+        const headerRight = document.querySelector('.header-right');
+        if (!headerRight) return;
+
+        // Remove the old static alert pills if present (any page that still
+        // has the legacy markup) — we replace them with the dropdown below.
+        headerRight.querySelectorAll('.header-alert-btn').forEach(el => el.remove());
+
+        const wrap = document.createElement('div');
+        wrap.className = 'notif-wrap';
+        wrap.id = 'notif-wrap';
+        wrap.innerHTML = `
+            <button class="notif-bell-btn" id="notif-bell-btn" type="button" title="Alerts">
+                🔔
+                <span class="alert-badge" id="notif-total-badge" style="display:none">0</span>
+            </button>
+            <div class="notif-dropdown hidden" id="notif-dropdown">
+                <div class="notif-dropdown-header">Inventory Alerts</div>
+                <button class="notif-item" data-status="low_stock">
+                    <span>📦 Low Stock</span>
+                    <span class="notif-count" id="notif-count-low_stock">0</span>
+                </button>
+                <button class="notif-item" data-status="expiring">
+                    <span>📅 Expiring This Month</span>
+                    <span class="notif-count" id="notif-count-expiring">0</span>
+                </button>
+                <button class="notif-item" data-status="expired">
+                    <span>🚫 Expired</span>
+                    <span class="notif-count" id="notif-count-expired">0</span>
+                </button>
+                <button class="notif-item" data-status="out_of_stock">
+                    <span>❌ Out of Stock</span>
+                    <span class="notif-count" id="notif-count-out_of_stock">0</span>
+                </button>
+            </div>`;
+
+        // Insert before the user info block so it sits to the left of the avatar
+        const userBlock = headerRight.querySelector('.header-user');
+        headerRight.insertBefore(wrap, userBlock || null);
+
+        // Toggle open/close
+        const bellBtn  = document.getElementById('notif-bell-btn');
+        const dropdown = document.getElementById('notif-dropdown');
+        bellBtn?.addEventListener('click', (e) => {
+            e.stopPropagation();
+            dropdown?.classList.toggle('hidden');
+        });
+        document.addEventListener('click', (e) => {
+            if (!wrap.contains(e.target)) dropdown?.classList.add('hidden');
+        });
+
+        // Role-gated navigation on each category item
+        const user  = Auth.getUser();
+        const canGo = user && this.INVENTORY_ROLES.includes(user.role);
+        wrap.querySelectorAll('.notif-item').forEach(item => {
+            item.addEventListener('click', () => {
+                if (canGo) {
+                    window.location.href = `inventory.html?status=${item.dataset.status}`;
+                } else {
+                    Toast.show("You don't have access to Inventory.", 'warning');
+                    dropdown?.classList.add('hidden');
+                }
+            });
+        });
+    },
+
+    setCounts({ low_stock = 0, near_expiry = 0, expired = 0, out_of_stock = 0 }) {
+        const set = (id, val) => {
+            const el = document.getElementById(id);
+            if (el) el.textContent = val;
+        };
+        set('notif-count-low_stock',    low_stock);
+        set('notif-count-expiring',     near_expiry);
+        set('notif-count-expired',      expired);
+        set('notif-count-out_of_stock', out_of_stock);
+
+        const total = low_stock + near_expiry + expired + out_of_stock;
+        const badge = document.getElementById('notif-total-badge');
+        if (badge) {
+            badge.textContent   = total;
+            badge.style.display = total > 0 ? 'flex' : 'none';
+        }
     }
 };
 
@@ -333,19 +621,7 @@ async function loadHeaderAlerts() {
     const data = await alertsClient.get('/inventory/alerts/summary');
     if (!data?.success) return;
 
-    const { low_stock, near_expiry } = data.data;
-
-    const lowBadge  = document.getElementById('badge-low-stock');
-    const exprBadge = document.getElementById('badge-near-expiry');
-
-    if (lowBadge) {
-        lowBadge.textContent    = low_stock;
-        lowBadge.style.display  = low_stock  > 0 ? 'flex' : 'none';
-    }
-    if (exprBadge) {
-        exprBadge.textContent   = near_expiry;
-        exprBadge.style.display = near_expiry > 0 ? 'flex' : 'none';
-    }
+    AlertsNav.setCounts(data.data);
 }
 
 // ── Modal Helpers ──────────────────────────────────────────────
@@ -368,6 +644,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // Only run Nav init on protected pages (pages with a sidebar)
     if (document.getElementById('sidebar')) {
         Nav.init();
+        AlertsNav.init();
         loadHeaderAlerts();
     }
 

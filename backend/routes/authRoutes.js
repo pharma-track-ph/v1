@@ -6,10 +6,11 @@ const { verifyToken, requireRole } = require('../middleware/authMiddleware');
 router.post('/login', login);
 router.get('/me',     verifyToken, getMe);
 
-// User management routes
-router.get('/users',      verifyToken, requireRole('admin'), getAllUsers);
-router.post('/users',     verifyToken, requireRole('admin'), createUser);
-router.put('/users/:id',  verifyToken, requireRole('admin'), updateUser);
+// User management routes — super_admin ("owner") only. Admins can view
+// inventory/reports/forecasting but not manage staff accounts.
+router.get('/users',      verifyToken, requireRole('super_admin'), getAllUsers);
+router.post('/users',     verifyToken, requireRole('super_admin'), createUser);
+router.put('/users/:id',  verifyToken, requireRole('super_admin'), updateUser);
 router.delete('/users/:id', verifyToken, requireRole('super_admin'), deleteUser);
 
 // Audit logs – Super Admin only

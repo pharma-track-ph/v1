@@ -3,13 +3,22 @@
 // ============================================================
 const db = require('../config/db');
 
+function getManilaDateString() {
+    return new Intl.DateTimeFormat('en-CA', {
+        timeZone: 'Asia/Manila',
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit'
+    }).format(new Date());
+}
+
 const Order = {
     /**
      * generateOrderNumber
      * Format: ORD-YYYYMMDD-XXXX (sequential per day)
      */
     generateOrderNumber: async () => {
-        const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+        const dateStr = getManilaDateString().replace(/-/g, '');
         const [rows] = await db.query(
             `SELECT COUNT(*) AS cnt FROM orders
              WHERE DATE(created_at) = CURDATE()`
@@ -50,9 +59,12 @@ const Order = {
 
     findAll: async ({ startDate, endDate, limit = 50, offset = 0 } = {}) => {
         let sql = `
-            SELECT o.*, u.name AS cashier_name
+            SELECT o.*, u.name AS cashier_name,
+                   COALESCE(SUM(oi.unit_cost * oi.quantity), 0) AS purchase_cost,
+                   ((o.subtotal - o.discount) - COALESCE(SUM(oi.unit_cost * oi.quantity), 0)) AS profit
             FROM orders o
             JOIN users u ON u.id = o.cashier_id
+            LEFT JOIN order_items oi ON oi.order_id = o.id
             WHERE o.status = 'completed'
         `;
         const params = [];
@@ -60,7 +72,10 @@ const Order = {
         if (startDate) { sql += ' AND DATE(o.created_at) >= ?'; params.push(startDate); }
         if (endDate)   { sql += ' AND DATE(o.created_at) <= ?'; params.push(endDate);   }
 
-        sql += ' ORDER BY o.created_at DESC LIMIT ? OFFSET ?';
+        sql += ` GROUP BY o.id, o.order_number, o.cashier_id, o.subtotal, o.discount,
+                         o.tax, o.total, o.payment_method, o.amount_tendered,
+                         o.change_amount, o.status, o.notes, o.created_at, u.name
+                 ORDER BY o.created_at DESC LIMIT ? OFFSET ?`;
         params.push(parseInt(limit), parseInt(offset));
 
         const [rows] = await db.query(sql, params);
@@ -159,6 +174,36 @@ const Order = {
             [limit]
         );
         return rows;
+    },
+
+    // ── Void support ───────────────────────────────────
+    // Scoped to a single calendar day ("today's shift") — a cashier or admin
+    // can never reach back and void a previous day's transaction this way.
+    // A cashier may only void THEIR OWN most recent completed sale from today.
+    // Admins/super_admins can void the most recent completed sale from today,
+    // system-wide (any cashier).
+    findLastCompletedByCashier: async (cashierId, dateStr) => {
+        const [rows] = await db.query(
+            `SELECT o.*, u.name AS cashier_name
+             FROM orders o
+             JOIN users u ON u.id = o.cashier_id
+             WHERE o.cashier_id = ? AND o.status = 'completed' AND DATE(o.created_at) = ?
+             ORDER BY o.created_at DESC LIMIT 1`,
+            [cashierId, dateStr]
+        );
+        return rows[0] || null;
+    },
+
+    findLastCompleted: async (dateStr) => {
+        const [rows] = await db.query(
+            `SELECT o.*, u.name AS cashier_name
+             FROM orders o
+             JOIN users u ON u.id = o.cashier_id
+             WHERE o.status = 'completed' AND DATE(o.created_at) = ?
+             ORDER BY o.created_at DESC LIMIT 1`,
+            [dateStr]
+        );
+        return rows[0] || null;
     }
 };
 

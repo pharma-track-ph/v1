@@ -10,27 +10,33 @@
 <body>
 <div class="app-container">
     <aside class="sidebar" id="sidebar">
-        <div class="sidebar-brand"><div class="brand-icon">💊</div><div class="brand-text"><h1>PharmaTrack</h1><p>Management System</p></div></div>
+        <div class="sidebar-brand">
+            <div class="brand-icon">💊</div>
+            <div class="brand-text"><h1>PharmaTrack</h1><p>Management System</p></div>
+        </div>
         <nav class="sidebar-nav">
             <p class="nav-section-label">Main</p>
             <ul>
-                <li class="nav-item" data-roles="admin,super_admin,cashier"><a href="dashboard.html"><span class="nav-icon">📊</span> Dashboard</a></li>
-                <li class="nav-item" data-roles="admin,super_admin,cashier"><a href="pos.html"><span class="nav-icon">🛒</span> Point of Sale</a></li>
+                <li class="nav-item" data-roles="admin,super_admin,cashier"><a href="dashboard.html"><span class="nav-icon"></span> Dashboard</a></li>
+                <li class="nav-item" data-roles="admin,super_admin,cashier"><a href="pos.html"><span class="nav-icon"></span> Point of Sale</a></li>
             </ul>
             <p class="nav-section-label">Management</p>
             <ul>
-                <li class="nav-item" data-roles="admin,super_admin"><a href="inventory.html"><span class="nav-icon">📦</span> Inventory</a></li>
-                <li class="nav-item active" data-roles="admin,super_admin"><a href="reports.html"><span class="nav-icon">📋</span> Reports</a></li>
-                <li class="nav-item" data-roles="admin,super_admin"><a href="forecasting.html"><span class="nav-icon">📈</span> Forecasting</a></li>
+                <li class="nav-item" data-roles="admin,super_admin"><a href="inventory.html"><span class="nav-icon"></span> Inventory</a></li>
+                <li class="nav-item active" data-roles="admin,super_admin"><a href="reports.html"><span class="nav-icon"></span> Reports</a></li>
+                <li class="nav-item" data-roles="admin,super_admin"><a href="forecasting.html"><span class="nav-icon"></span> Forecasting</a></li>
             </ul>
             <p class="nav-section-label">Admin</p>
             <ul>
-                <li class="nav-item" data-roles="admin,super_admin"><a href="users.html"><span class="nav-icon">👥</span> Users</a></li>
-                <li class="nav-item" data-roles="super_admin"><a href="audit.html"><span class="nav-icon">🔍</span> Audit Logs</a></li>
-                <li class="nav-item"><a href="#" data-action="logout"><span class="nav-icon">🚪</span> Sign Out</a></li>
+                <li class="nav-item" data-roles="super_admin"><a href="users.html"><span class="nav-icon"></span> Users</a></li>
+                <li class="nav-item" data-roles="super_admin"><a href="audit.html"><span class="nav-icon"></span> Audit Logs</a></li>
+                <li class="nav-item"><a href="#" data-action="logout"><span class="nav-icon"></span> Sign Out</a></li>
             </ul>
         </nav>
-        <div class="sidebar-footer"><div id="sidebar-user-name" class="fw-600">—</div><div id="sidebar-user-role" style="font-size:0.7rem;opacity:0.7">—</div></div>
+        <div class="sidebar-footer">
+            <div id="sidebar-user-name" class="fw-600">—</div>
+            <div id="sidebar-user-role" style="font-size:0.7rem;opacity:0.7">—</div>
+        </div>
     </aside>
     <div class="sidebar-overlay" id="sidebar-overlay"></div>
 
@@ -43,7 +49,13 @@
             <div class="header-right">
                 <div class="header-alert-btn">📦 Low Stock <span class="alert-badge" id="badge-low-stock" style="display:none">0</span></div>
                 <div class="header-alert-btn">⚠️ Near Expiry <span class="alert-badge amber" id="badge-near-expiry" style="display:none">0</span></div>
-                <div class="header-user"><div class="user-avatar" id="header-avatar">?</div><div class="user-info"><div class="user-name" id="header-user-name">—</div><div class="user-role" id="header-user-role">—</div></div></div>
+                <div class="header-user">
+                    <div class="user-avatar" id="header-avatar">?</div>
+                    <div class="user-info">
+                        <div class="user-name" id="header-user-name">—</div>
+                        <div class="user-role" id="header-user-role">—</div>
+                    </div>
+                </div>
             </div>
         </header>
 
@@ -52,162 +64,247 @@
                 <div><h2>📋 Reports</h2><p>Sales summaries, export, and expired inventory.</p></div>
             </div>
 
-            <!-- ── Tabs ────────────────────────────────────────── -->
+            <!-- Tabs -->
             <div class="report-tabs">
                 <button class="report-tab active" data-tab="sales">Sales Report</button>
                 <button class="report-tab" data-tab="expired">Expired Inventory</button>
+                <button class="report-tab" data-tab="void">Void Report</button>
             </div>
 
-            <!-- ── Period Selection ────────────────────────────── -->
-            <div class="period-tabs">
-                <button class="period-btn active" data-period="daily">Daily</button>
-                <button class="period-btn" data-period="weekly">Weekly</button>
-                <button class="period-btn" data-period="monthly">Monthly</button>
-                <button class="period-btn" data-period="custom">Custom</button>
-            </div>
-
-            <!-- ── Sales Report Tab ───────────────────────────── -->
+            <!-- SALES TAB -->
             <div id="tab-sales">
-                <div class="report-filters" id="custom-filters" style="display:none">
-                    <div class="form-group">
-                        <label class="form-label">Start Date</label>
-                        <input type="date" id="report-start" class="form-control">
+                <!-- Single row: period btns | custom date pickers | Generate | spacer | Export CSV -->
+                <div class="toolbar-row">
+                    <button class="period-btn active" data-period="daily">Daily</button>
+                    <button class="period-btn" data-period="weekly">Weekly</button>
+                    <button class="period-btn" data-period="monthly">Monthly</button>
+                    <button class="period-btn" data-period="custom">Custom</button>
+
+                    <div id="custom-dates">
+                        <label>From</label>
+                        <input type="date" id="report-start">
+                        <label>To</label>
+                        <input type="date" id="report-end">
+                        <button class="btn btn-primary btn-sm" id="btn-run-report">Generate Report</button>
                     </div>
-                    <div class="form-group">
-                        <label class="form-label">End Date</label>
-                        <input type="date" id="report-end" class="form-control">
-                    </div>
-                    <button class="btn btn-primary" id="btn-run-report">Generate Report</button>
-                    <div class="export-btn-wrap">
-                        <button class="btn btn-success" id="btn-export-csv">📥 Export CSV</button>
-                    </div>
+
+                    <div class="spacer"></div>
+                    <button class="btn btn-success" id="btn-export-csv">📥 Export CSV</button>
                 </div>
 
                 <div class="summary-chips" id="sales-summary-chips" style="display:none">
                     <div class="summary-chip"><div class="chip-label">Total Sales</div><div class="chip-value" id="chip-total-sales">₱0</div></div>
+                    <div class="summary-chip"><div class="chip-label">Purchase Cost</div><div class="chip-value" id="chip-total-cost">₱0</div></div>
+                    <div class="summary-chip"><div class="chip-label">Profit</div><div class="chip-value" id="chip-profit">₱0</div></div>
                     <div class="summary-chip"><div class="chip-label">Transactions</div><div class="chip-value" id="chip-txn-count">0</div></div>
                     <div class="summary-chip"><div class="chip-label">Total Discount</div><div class="chip-value" id="chip-discount">₱0</div></div>
                 </div>
 
                 <div class="card" style="padding:0">
                     <div class="table-container">
-                        <table class="table" id="sales-table">
+                        <table class="table">
                             <thead>
-                                <tr>
-                                    <th>Order #</th>
-                                    <th>Date/Time</th>
-                                    <th>Cashier</th>
-                                    <th>Subtotal</th>
-                                    <th>Discount</th>
-                                    <th>Total</th>
-                                    <th>Payment</th>
-                                </tr>
+                                <tr><th style="width:30px"></th><th>Order #</th><th>Date/Time</th><th>Cashier</th><th>Subtotal</th><th>Purchase Cost</th><th>Discount</th><th>Total</th><th>Profit</th><th>Payment</th></tr>
                             </thead>
                             <tbody id="sales-tbody">
-                                <tr><td colspan="7" class="text-center text-muted" style="padding:40px">
-                                    Set a date range and click "Generate Report".
-                                </td></tr>
+                                <tr><td colspan="10" class="text-center" style="padding:24px"><div class="spinner" style="margin:0 auto"></div></td></tr>
                             </tbody>
                         </table>
                     </div>
                 </div>
             </div>
 
-            <!-- ── Expired Inventory Tab ──────────────────────── -->
+            <!-- EXPIRED TAB -->
             <div id="tab-expired" style="display:none">
                 <div class="expired-stats" id="expired-stats"></div>
                 <div class="card" style="padding:0">
                     <div class="table-container">
                         <table class="table">
                             <thead>
-                                <tr>
-                                    <th>Batch No.</th>
-                                    <th>Product Name</th>
-                                    <th>Category</th>
-                                    <th>Qty on Hand</th>
-                                    <th>Cost (₱)</th>
-                                    <th>Expiry Date</th>
-                                    <th>Days Expired</th>
-                                    <th>Value Lost</th>
-                                </tr>
+                                <tr><th>Batch No.</th><th>Product Name</th><th>Category</th><th>Qty</th><th>Cost (₱)</th><th>Expiry Date</th><th>Days Expired</th><th>Value Lost</th></tr>
                             </thead>
                             <tbody id="expired-tbody">
-                                <tr><td colspan="8" class="text-center" style="padding:40px">
-                                    <div class="spinner" style="margin:0 auto"></div>
-                                </td></tr>
+                                <tr><td colspan="8" class="text-center" style="padding:24px"><div class="spinner" style="margin:0 auto"></div></td></tr>
                             </tbody>
                         </table>
                     </div>
                 </div>
             </div>
-
+            <!-- VOID TAB -->
+            <div id="tab-void" style="display:none">
+                <div class="card" style="padding:0">
+                    <div class="table-container">
+                        <table class="table">
+                            <thead>
+                                <tr><th style="width:30px"></th><th>Order #</th><th>Date/Time</th><th>Cashier</th><th>Voided By</th><th>Voided At</th><th>Total</th></tr>
+                            </thead>
+                            <tbody id="void-tbody">
+                                <tr><td colspan="7" class="text-center" style="padding:24px"><div class="spinner" style="margin:0 auto"></div></td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
         </main>
     </div>
 </div>
+
 <div id="toast-container" class="toast-container"></div>
 <script src="../js/main.js"></script>
 <script>
-// ── Reports Page Logic ────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', () => {
     if (!Auth.requireAuth(['admin', 'super_admin'])) return;
 
     let salesData = [];
+    const startInput  = document.getElementById('report-start');
+    const endInput    = document.getElementById('report-end');
+    const customDates = document.getElementById('custom-dates');
+    const periodBtns  = document.querySelectorAll('.period-btn');
 
-    // ── Period Selection ───────────────────────────────────────
-    const periodBtns = document.querySelectorAll('.period-btn');
-    const customFilters = document.getElementById('custom-filters');
-    const startInput = document.getElementById('report-start');
-    const endInput = document.getElementById('report-end');
-
-    // Load saved period from localStorage
-    const savedPeriod = localStorage.getItem('pharmatrack_report_period') || 'daily';
-    setActivePeriod(savedPeriod);
-
-    function setActivePeriod(period) {
-        periodBtns.forEach(btn => {
-            btn.classList.toggle('active', btn.dataset.period === period);
-        });
-        customFilters.style.display = period === 'custom' ? '' : 'none';
-        localStorage.setItem('pharmatrack_report_period', period);
-        autoGenerateReport(period);
+    // ── Date range helper ─────────────────────────────────────
+    function getDateRange(period) {
+        const today = new Date();
+        let start, end;
+        switch (period) {
+            case 'daily':
+                start = end = new Date(today); break;
+            case 'weekly':
+                start = new Date(today);
+                start.setDate(today.getDate() - today.getDay());
+                end = new Date(start);
+                end.setDate(start.getDate() + 6);
+                break;
+            case 'monthly':
+                start = new Date(today.getFullYear(), today.getMonth(), 1);
+                end   = new Date(today.getFullYear(), today.getMonth() + 1, 0);
+                break;
+            default: return null;
+        }
+        const fmt = d => new Intl.DateTimeFormat('en-CA', {
+            timeZone: 'Asia/Manila',
+            year: 'numeric',
+            month: '2-digit',
+            day: '2-digit'
+        }).format(d);
+        return { start: fmt(start), end: fmt(end) };
     }
 
+    // ── Period buttons ────────────────────────────────────────
     periodBtns.forEach(btn => {
         btn.addEventListener('click', () => {
-            setActivePeriod(btn.dataset.period);
+            periodBtns.forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            const period = btn.dataset.period;
+            if (period === 'custom') {
+                customDates.classList.add('visible');
+                if (!startInput.value) {
+                    const t = new Intl.DateTimeFormat('en-CA', {
+                        timeZone: 'Asia/Manila',
+                        year: 'numeric',
+                        month: '2-digit',
+                        day: '2-digit'
+                    }).format(new Date());
+                    startInput.value = endInput.value = t;
+                }
+            } else {
+                customDates.classList.remove('visible');
+                const range = getDateRange(period);
+                if (range) { startInput.value = range.start; endInput.value = range.end; loadSalesReport(range.start, range.end); }
+            }
         });
     });
 
-    function autoGenerateReport(period) {
-        const today = new Date();
-        let start, end;
+    // ── Custom "Generate Report" click ────────────────────────
+    document.getElementById('btn-run-report')?.addEventListener('click', () => {
+        const s = startInput.value, e = endInput.value;
+        if (!s || !e) { Toast.show('Select both dates.', 'warning'); return; }
+        if (s > e)    { Toast.show('Start date must be before end date.', 'warning'); return; }
+        loadSalesReport(s, e);
+    });
 
-        switch (period) {
-            case 'daily':
-                start = new Date(today);
-                end = new Date(today);
-                break;
-            case 'weekly':
-                start = new Date(today);
-                start.setDate(today.getDate() - today.getDay()); // Start of week (Sunday)
-                end = new Date(start);
-                end.setDate(start.getDate() + 6); // End of week (Saturday)
-                break;
-            case 'monthly':
-                start = new Date(today.getFullYear(), today.getMonth(), 1); // First day of month
-                end = new Date(today.getFullYear(), today.getMonth() + 1, 0); // Last day of month
-                break;
-            case 'custom':
-                // Don't auto-generate for custom, wait for manual button click
-                return;
+    // ── Load sales report ─────────────────────────────────────
+    async function loadSalesReport(start, end) {
+        const tbody = document.getElementById('sales-tbody');
+        tbody.innerHTML = '<tr><td colspan="10" class="text-center" style="padding:24px"><div class="spinner" style="margin:0 auto"></div></td></tr>';
+        document.getElementById('sales-summary-chips').style.display = 'none';
+
+        const data = await API.get(`/reports/sales?start_date=${start}&end_date=${end}&limit=500`);
+        if (!data?.success) {
+            Toast.show('Failed to load report.', 'error');
+            tbody.innerHTML = '<tr><td colspan="10" class="text-center text-muted" style="padding:24px">Failed to load data.</td></tr>';
+            return;
         }
 
-        startInput.value = start.toISOString().split('T')[0];
-        endInput.value = end.toISOString().split('T')[0];
-        loadSalesReport();
+        salesData = data.data || [];
+        const s   = data.summary || {};
+        document.getElementById('chip-total-sales').textContent = Fmt.currency(s.total_sales   || 0);
+        document.getElementById('chip-total-cost').textContent  = Fmt.currency(s.total_cost    || 0);
+        document.getElementById('chip-profit').textContent      = Fmt.currency(s.total_profit  || 0);
+        document.getElementById('chip-txn-count').textContent   = s.transaction_count || 0;
+        document.getElementById('chip-discount').textContent    = Fmt.currency(s.total_discount || 0);
+        document.getElementById('sales-summary-chips').style.display = 'flex';
+
+        if (!salesData.length) {
+            tbody.innerHTML = '<tr><td colspan="10" class="text-center text-muted" style="padding:24px">No transactions found for this period.</td></tr>';
+            return;
+        }
+        tbody.innerHTML = salesData.map((o, idx) => `
+            <tr>
+                <td><button class="btn-expand" data-index="${idx}" title="View items sold">▶</button></td>
+                <td class="fw-600">${o.order_number}</td>
+                <td>${Fmt.datetime(o.created_at)}</td>
+                <td>${o.cashier_name}</td>
+                <td>${Fmt.currency(o.subtotal)}</td>
+                <td>${Fmt.currency(o.purchase_cost)}</td>
+                <td>${Fmt.currency(o.discount)}</td>
+                <td class="fw-600" style="color:var(--primary)">${Fmt.currency(o.total)}</td>
+                <td class="fw-600" style="color:${parseFloat(o.profit || 0) >= 0 ? 'var(--success)' : 'var(--danger)'}">${Fmt.currency(o.profit)}</td>
+                <td><span class="badge badge-primary">${o.payment_method.toUpperCase()}</span></td>
+            </tr>
+            <tr class="detail-row hidden" id="order-detail-${idx}">
+                <td colspan="10">
+                    <strong style="font-size:0.82rem">Items Sold:</strong>
+                    <div class="table-container" style="margin-top:8px">
+                        <table class="table" style="white-space:normal">
+                            <thead><tr><th>Product</th><th>Qty</th><th>Unit Price</th><th>Line Total</th></tr></thead>
+                            <tbody>
+                                ${(o.items || []).map(item => `
+                                <tr>
+                                    <td>${escHtml(item.product_name)}</td>
+                                    <td>${item.quantity}</td>
+                                    <td>${Fmt.currency(item.unit_price)}</td>
+                                    <td class="fw-600">${Fmt.currency(item.subtotal)}</td>
+                                </tr>`).join('') || '<tr><td colspan="4" class="text-center text-muted">No item details recorded.</td></tr>'}
+                            </tbody>
+                        </table>
+                    </div>
+                </td>
+            </tr>`).join('');
+
+        // Wire expand buttons
+        tbody.querySelectorAll('.btn-expand').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const idx = btn.dataset.index;
+                const detailRow = document.getElementById(`order-detail-${idx}`);
+                if (!detailRow) return;
+                const isHidden = detailRow.classList.contains('hidden');
+                detailRow.classList.toggle('hidden', !isHidden);
+                btn.textContent = isHidden ? '▼' : '▶';
+            });
+        });
     }
 
-    // ── Tabs ──────────────────────────────────────────────────
+    // ── Export CSV ────────────────────────────────────────────
+    document.getElementById('btn-export-csv')?.addEventListener('click', () => {
+        if (!salesData.length) { Toast.show('Generate a report first.', 'warning'); return; }
+        const headers = ['Order #','Date','Cashier','Subtotal','Purchase Cost','Discount','Total','Profit','Payment'];
+        const rows    = salesData.map(o => [o.order_number, Fmt.datetime(o.created_at), o.cashier_name, o.subtotal, o.purchase_cost, o.discount, o.total, o.profit, o.payment_method]);
+        const csv     = [headers, ...rows].map(r => r.map(v => `"${v}"`).join(',')).join('\n');
+        const a       = Object.assign(document.createElement('a'), { href: URL.createObjectURL(new Blob([csv], {type:'text/csv'})), download: `pharmatrack_sales_${new Date().toISOString().split('T')[0]}.csv` });
+        a.click();
+    });
+
+    // ── Tab switching ─────────────────────────────────────────
     document.querySelectorAll('.report-tab').forEach(tab => {
         tab.addEventListener('click', () => {
             document.querySelectorAll('.report-tab').forEach(t => t.classList.remove('active'));
@@ -215,98 +312,34 @@ document.addEventListener('DOMContentLoaded', () => {
             const id = tab.dataset.tab;
             document.getElementById('tab-sales').style.display   = id === 'sales'   ? '' : 'none';
             document.getElementById('tab-expired').style.display = id === 'expired' ? '' : 'none';
+            document.getElementById('tab-void').style.display    = id === 'void'    ? '' : 'none';
             if (id === 'expired') loadExpiredReport();
+            if (id === 'void')    loadVoidReport();
         });
     });
 
-    // ── Sales Report ──────────────────────────────────────────
-    document.getElementById('btn-run-report').addEventListener('click', loadSalesReport);
+    // ── Expired Inventory ─────────────────────────────────────
+    async function loadExpiredReport() {
+        const tbody = document.getElementById('expired-tbody');
+        tbody.innerHTML = '<tr><td colspan="8" class="text-center" style="padding:24px"><div class="spinner" style="margin:0 auto"></div></td></tr>';
+        document.getElementById('expired-stats').innerHTML = '';
 
-    async function loadSalesReport() {
-        const start = document.getElementById('report-start').value;
-        const end   = document.getElementById('report-end').value;
-        if (!start || !end) { Toast.show('Select a date range.', 'warning'); return; }
-
-        const data = await API.get(`/reports/sales?start_date=${start}&end_date=${end}`);
-        if (!data?.success) { Toast.show('Failed to load report.', 'error'); return; }
-
-        salesData = data.data;
-        const summary = data.summary;
-
-        // Summary chips
-        document.getElementById('chip-total-sales').textContent = Fmt.currency(summary.total_sales);
-        document.getElementById('chip-txn-count').textContent   = summary.transaction_count;
-        document.getElementById('chip-discount').textContent    = Fmt.currency(summary.total_discount);
-        document.getElementById('sales-summary-chips').style.display = 'flex';
-
-        // Table
-        const tbody = document.getElementById('sales-tbody');
-        if (!salesData.length) {
-            tbody.innerHTML = '<tr><td colspan="7" class="text-center text-muted" style="padding:24px">No transactions in this range.</td></tr>';
+        const data = await API.get('/reports/expired');
+        if (!data?.success) {
+            Toast.show('Failed to load expired inventory.', 'error');
+            tbody.innerHTML = '<tr><td colspan="8" class="text-center text-muted" style="padding:24px">Failed to load data.</td></tr>';
             return;
         }
 
-        tbody.innerHTML = salesData.map(o => `
-            <tr>
-                <td class="fw-600">${o.order_number}</td>
-                <td>${Fmt.datetime(o.created_at)}</td>
-                <td>${o.cashier_name}</td>
-                <td>${Fmt.currency(o.subtotal)}</td>
-                <td>${Fmt.currency(o.discount)}</td>
-                <td class="fw-600" style="color:var(--primary)">${Fmt.currency(o.total)}</td>
-                <td><span class="badge badge-primary">${o.payment_method.toUpperCase()}</span></td>
-            </tr>
-        `).join('');
-    }
-
-    // ── Export CSV ────────────────────────────────────────────
-    document.getElementById('btn-export-csv').addEventListener('click', () => {
-        if (!salesData.length) { Toast.show('Generate a report first.', 'warning'); return; }
-
-        const headers = ['Order #','Date','Cashier','Subtotal','Discount','Total','Payment'];
-        const rows    = salesData.map(o => [
-            o.order_number,
-            Fmt.datetime(o.created_at),
-            o.cashier_name,
-            o.subtotal,
-            o.discount,
-            o.total,
-            o.payment_method
-        ]);
-
-        const csv   = [headers, ...rows].map(r => r.map(v => `"${v}"`).join(',')).join('\n');
-        const blob  = new Blob([csv], { type: 'text/csv' });
-        const url   = URL.createObjectURL(blob);
-        const a     = document.createElement('a');
-        a.href      = url;
-        a.download  = `pharmatrack_sales_${new Date().toISOString().split('T')[0]}.csv`;
-        a.click();
-        URL.revokeObjectURL(url);
-    });
-
-    // ── Expired Inventory Report ──────────────────────────────
-    async function loadExpiredReport() {
-        const data = await API.get('/reports/expired');
-        if (!data?.success) { Toast.show('Failed to load expired report.', 'error'); return; }
-
         const { data: expired, summary } = data;
-
         document.getElementById('expired-stats').innerHTML = `
-            <div class="expired-stat-card">
-                <div class="stat-label">Expired Products</div>
-                <div class="stat-value">${summary.total_products}</div>
-            </div>
-            <div class="expired-stat-card">
-                <div class="stat-label">Total Value Lost</div>
-                <div class="stat-value">${Fmt.currency(summary.total_value_lost)}</div>
-            </div>`;
+            <div class="expired-stat-card"><div class="stat-label">Expired Products</div><div class="stat-value">${summary.total_products}</div></div>
+            <div class="expired-stat-card"><div class="stat-label">Total Value Lost</div><div class="stat-value">${Fmt.currency(summary.total_value_lost)}</div></div>`;
 
-        const tbody = document.getElementById('expired-tbody');
         if (!expired.length) {
             tbody.innerHTML = '<tr><td colspan="8" class="text-center text-muted" style="padding:24px">✅ No expired products on record.</td></tr>';
             return;
         }
-
         tbody.innerHTML = expired.map(p => `
             <tr class="row-expired">
                 <td>${p.batch_number}</td>
@@ -317,10 +350,81 @@ document.addEventListener('DOMContentLoaded', () => {
                 <td style="color:var(--danger)">${Fmt.date(p.expiry_date)}</td>
                 <td style="color:var(--danger);font-weight:600">${p.days_expired}d ago</td>
                 <td style="color:var(--danger);font-weight:700">${Fmt.currency(p.value_lost)}</td>
-            </tr>
-        `).join('');
+            </tr>`).join('');
     }
+
+    async function loadVoidReport() {
+        const tbody = document.getElementById('void-tbody');
+        tbody.innerHTML = '<tr><td colspan="7" class="text-center" style="padding:24px"><div class="spinner" style="margin:0 auto"></div></td></tr>';
+
+        const data = await API.get('/reports/void?limit=500');
+        if (!data?.success) {
+            Toast.show('Failed to load void report.', 'error');
+            tbody.innerHTML = '<tr><td colspan="7" class="text-center text-muted" style="padding:24px">Failed to load data.</td></tr>';
+            return;
+        }
+
+        const voidData = data.data || [];
+        if (!voidData.length) {
+            tbody.innerHTML = '<tr><td colspan="7" class="text-center text-muted" style="padding:24px">✅ No voided transactions on record.</td></tr>';
+            return;
+        }
+
+        tbody.innerHTML = voidData.map((o, idx) => `
+            <tr>
+                <td><button class="btn-expand" data-index="void-${idx}" title="View items sold">▶</button></td>
+                <td class="fw-600">${o.order_number}</td>
+                <td>${Fmt.datetime(o.created_at)}</td>
+                <td>${o.cashier_name}</td>
+                <td>${o.voided_by_name || '—'}</td>
+                <td>${o.voided_at ? Fmt.datetime(o.voided_at) : '—'}</td>
+                <td class="fw-600" style="color:var(--danger)">${Fmt.currency(o.total)}</td>
+            </tr>
+            <tr class="detail-row hidden" id="order-detail-void-${idx}">
+                <td colspan="7">
+                    <strong style="font-size:0.82rem">Items Sold (before void):</strong>
+                    <div class="table-container" style="margin-top:8px">
+                        <table class="table" style="white-space:normal">
+                            <thead><tr><th>Product</th><th>Qty</th><th>Unit Price</th><th>Line Total</th></tr></thead>
+                            <tbody>
+                                ${(o.items || []).map(item => `
+                                <tr>
+                                    <td>${escHtml(item.product_name)}</td>
+                                    <td>${item.quantity}</td>
+                                    <td>${Fmt.currency(item.unit_price)}</td>
+                                    <td class="fw-600">${Fmt.currency(item.subtotal)}</td>
+                                </tr>`).join('') || '<tr><td colspan="4" class="text-center text-muted">No item details recorded.</td></tr>'}
+                            </tbody>
+                        </table>
+                    </div>
+                </td>
+            </tr>`).join('');
+
+        tbody.querySelectorAll('.btn-expand').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const idx = btn.dataset.index;
+                const detailRow = document.getElementById(`order-detail-${idx}`);
+                if (!detailRow) return;
+                const isHidden = detailRow.classList.contains('hidden');
+                detailRow.classList.toggle('hidden', !isHidden);
+                btn.textContent = isHidden ? '▼' : '▶';
+            });
+        });
+    }
+
+    // ── Auto-load daily on open ───────────────────────────────
+    const initRange = getDateRange('daily');
+    startInput.value = initRange.start;
+    endInput.value   = initRange.end;
+    loadSalesReport(initRange.start, initRange.end);
 });
+
+function escHtml(str) {
+    return String(str ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;');
+}
 </script>
 </body>
 </html>

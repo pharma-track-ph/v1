@@ -1,0 +1,157 @@
+/* ── Audit-page styles ─────────────────────────────── */
+
+/* Stat bar */
+.audit-stats {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+    gap: 12px;
+    margin-bottom: 20px;
+}
+
+.audit-stat-card {
+    background: var(--white);
+    border-radius: var(--border-radius-lg);
+    padding: 16px 18px;
+    box-shadow: var(--shadow-sm);
+    border: 1px solid var(--gray-200);
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.audit-stat-icon {
+    width: 40px;
+    height: 40px;
+    border-radius: 10px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.2rem;
+    flex-shrink: 0;
+}
+
+.audit-stat-icon.blue   { background: var(--primary-light); }
+.audit-stat-icon.yellow { background: var(--warning-light); }
+.audit-stat-icon.green  { background: var(--success-light); }
+.audit-stat-icon.red    { background: var(--danger-light); }
+
+.audit-stat-label { font-size: 0.75rem; color: var(--secondary); }
+.audit-stat-value { font-size: 1.4rem; font-weight: 700; color: var(--dark); }
+
+/* Toolbar */
+.audit-toolbar {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+    margin-bottom: 16px;
+}
+
+.audit-toolbar .search-wrap {
+    position: relative;
+    flex: 1;
+    min-width: 200px;
+}
+
+.audit-toolbar .search-wrap input { padding-left: 36px; }
+
+.audit-toolbar .search-wrap .search-icon {
+    position: absolute;
+    left: 10px;
+    top: 50%;
+    transform: translateY(-50%);
+    color: var(--secondary);
+    pointer-events: none;
+}
+
+/* Action type badges */
+.action-badge {
+    display: inline-flex;
+    align-items: center;
+    padding: 3px 8px;
+    border-radius: 4px;
+    font-size: 0.7rem;
+    font-weight: 600;
+    white-space: nowrap;
+}
+
+.action-badge.CREATE  { background: #d1e7dd; color: #0f5132; }
+.action-badge.UPDATE  { background: #cfe2ff; color: #0a58ca; }
+.action-badge.DELETE  { background: #f8d7da; color: #842029; }
+.action-badge.LOGIN   { background: #fff3cd; color: #664d03; }
+.action-badge.IMPORT  { background: #e2e3e5; color: #41464b; }
+.action-badge.CHECKOUT{ background: #d1e7dd; color: #0f5132; }
+.action-badge.DEFAULT { background: var(--gray-200); color: var(--secondary); }
+
+/* Detail panel (expandable row) */
+.detail-row td {
+    background: var(--gray-100);
+    padding: 12px 16px;
+}
+
+.detail-json {
+    font-family: 'Courier New', monospace;
+    font-size: 0.78rem;
+    color: var(--dark);
+    white-space: pre-wrap;
+    word-break: break-all;
+    max-height: 200px;
+    overflow-y: auto;
+    background: var(--white);
+    border: 1px solid var(--gray-200);
+    border-radius: 6px;
+    padding: 10px;
+    margin-top: 6px;
+}
+
+/* Pagination */
+.pagination {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    margin-top: 20px;
+    flex-wrap: wrap;
+}
+
+.page-btn {
+    padding: 6px 14px;
+    border: 1px solid var(--gray-300);
+    background: var(--white);
+    border-radius: 6px;
+    font-size: 0.83rem;
+    cursor: pointer;
+    transition: var(--transition);
+}
+
+.page-btn:hover          { background: var(--gray-100); }
+.page-btn.active         { background: var(--primary); color: #fff; border-color: var(--primary); }
+.page-btn:disabled       { opacity: 0.4; cursor: not-allowed; }
+.page-info               { font-size: 0.83rem; color: var(--secondary); }
+
+/* Empty state */
+.empty-audit {
+    text-align: center;
+    padding: 60px 20px;
+    color: var(--secondary);
+}
+
+.empty-audit .empty-icon { font-size: 3rem; margin-bottom: 12px; opacity: 0.4; }
+
+/* Expand btn */
+.btn-expand {
+    background: none;
+    border: 1px solid var(--gray-300);
+    border-radius: 4px;
+    width: 22px;
+    height: 22px;
+    cursor: pointer;
+    font-size: 0.7rem;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    transition: var(--transition);
+    color: var(--secondary);
+}
+
+.btn-expand:hover { background: var(--gray-100); }

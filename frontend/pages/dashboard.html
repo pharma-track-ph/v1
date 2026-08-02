@@ -26,39 +26,39 @@
             <p class="nav-section-label">Main</p>
             <ul>
                 <li class="nav-item" data-roles="admin,super_admin,cashier">
-                    <a href="dashboard.html"><span class="nav-icon">📊</span> Dashboard</a>
+                    <a href="dashboard.html"><span class="nav-icon"></span>Dashboard</a>
                 </li>
                 <li class="nav-item" data-roles="admin,super_admin,cashier">
-                    <a href="pos.html"><span class="nav-icon">🛒</span> Point of Sale</a>
+                    <a href="pos.html"><span class="nav-icon"></span>Point of Sale</a>
                 </li>
             </ul>
 
             <p class="nav-section-label">Management</p>
             <ul>
                 <li class="nav-item" data-roles="admin,super_admin">
-                    <a href="inventory.html"><span class="nav-icon">📦</span> Inventory</a>
+                    <a href="inventory.html"><span class="nav-icon"></span>Inventory</a>
                 </li>
                 <li class="nav-item" data-roles="admin,super_admin">
-                    <a href="reports.html"><span class="nav-icon">📋</span> Reports</a>
+                    <a href="reports.html"><span class="nav-icon"></span>Reports</a>
                 </li>
                 <li class="nav-item" data-roles="admin,super_admin">
-                    <a href="forecasting.html"><span class="nav-icon">📈</span> Forecasting</a>
+                    <a href="forecasting.html"><span class="nav-icon"></span>Forecasting</a>
                 </li>
             </ul>
 
             <p class="nav-section-label">Admin</p>
             <ul>
-                <li class="nav-item" data-roles="admin,super_admin">
-                    <a href="users.html"><span class="nav-icon">👥</span> Users</a>
+                <li class="nav-item" data-roles="super_admin">
+                    <a href="users.html"><span class="nav-icon"></span>Users</a>
                 </li>
                 <li class="nav-item" data-roles="super_admin">
-                    <a href="audit.html"><span class="nav-icon">🔍</span> Audit Logs</a>
+                    <a href="audit.html"><span class="nav-icon"></span>Audit Logs</a>
                 </li>
             </ul>
 
             <ul style="margin-top:auto">
                 <li class="nav-item">
-                    <a href="#" data-action="logout"><span class="nav-icon">🚪</span> Sign Out</a>
+                    <a href="#" data-action="logout"><span class="nav-icon"></span> Sign Out</a>
                 </li>
             </ul>
         </nav>
@@ -111,7 +111,7 @@
 
             <!-- ── KPI Cards ──────────────────────────────────── -->
             <div class="kpi-grid">
-                <div class="kpi-card">
+                <div class="kpi-card kpi-clickable" id="kpi-card-sales" title="View in Reports">
                     <div class="kpi-icon blue">💰</div>
                     <div class="kpi-info">
                         <div class="kpi-label">Sales Today</div>
@@ -119,7 +119,7 @@
                         <div class="kpi-sub" id="kpi-txn-count">— transactions</div>
                     </div>
                 </div>
-                <div class="kpi-card">
+                <div class="kpi-card kpi-clickable" id="kpi-card-profit" title="View in Reports">
                     <div class="kpi-icon green">📈</div>
                     <div class="kpi-info">
                         <div class="kpi-label">Profit Today</div>
@@ -127,7 +127,7 @@
                         <div class="kpi-sub">Sales − Cost</div>
                     </div>
                 </div>
-                <div class="kpi-card">
+                <div class="kpi-card kpi-clickable" id="kpi-card-low-stock" title="View in Inventory">
                     <div class="kpi-icon yellow">📦</div>
                     <div class="kpi-info">
                         <div class="kpi-label">Low Stock Items</div>
@@ -135,7 +135,7 @@
                         <div class="kpi-sub">Below threshold</div>
                     </div>
                 </div>
-                <div class="kpi-card">
+                <div class="kpi-card kpi-clickable" id="kpi-card-near-expiry" title="View in Inventory">
                     <div class="kpi-icon red">⚠️</div>
                     <div class="kpi-info">
                         <div class="kpi-label">Near Expiry</div>
@@ -168,6 +168,7 @@
                     <table class="table">
                         <thead>
                             <tr>
+                                <th style="width:30px"></th>
                                 <th>Order #</th>
                                 <th>Cashier</th>
                                 <th>Items</th>
@@ -176,7 +177,7 @@
                             </tr>
                         </thead>
                         <tbody id="recent-txn-tbody">
-                            <tr><td colspan="5" class="text-center text-muted" style="padding:24px">
+                            <tr><td colspan="6" class="text-center text-muted" style="padding:24px">
                                 <div class="spinner"></div>
                             </td></tr>
                         </tbody>

@@ -34,16 +34,25 @@
     margin-bottom: 16px;
 }
 
+.toolbar-row {
+    display:       flex;
+    align-items:   center;
+    gap:           8px;
+    flex-wrap:     wrap;
+    margin-bottom: 16px;
+}
+
 .period-btn {
     padding:       8px 16px;
     font-size:     0.875rem;
     font-weight:   500;
-    color:         var(--gray-600);
+    color:         var(--gray-700);
     background:    var(--gray-100);
     border:        1px solid var(--gray-300);
     border-radius: 6px;
     cursor:        pointer;
     transition:    var(--transition);
+    white-space:   nowrap;
 }
 
 .period-btn:hover  { background: var(--gray-200); }
@@ -60,6 +69,37 @@
 .report-filters .form-group { margin-bottom: 0; }
 
 .export-btn-wrap { margin-left: auto; }
+.spacer { flex: 1; }
+
+#custom-dates {
+    display:     none;
+    align-items: center;
+    gap:         6px;
+}
+
+#custom-dates.visible { display: flex; }
+
+#custom-dates label {
+    font-size:   0.82rem;
+    color:       var(--secondary);
+    white-space: nowrap;
+}
+
+#custom-dates input[type="date"] {
+    padding:       7px 10px;
+    border:        1px solid var(--gray-300);
+    border-radius: 6px;
+    font-size:     0.875rem;
+    font-family:   var(--font-family);
+    color:         var(--dark);
+    background:    var(--white);
+}
+
+#custom-dates input[type="date"]:focus {
+    outline:      none;
+    border-color: var(--primary);
+    box-shadow:   0 0 0 3px rgba(13,110,253,0.15);
+}
 
 .summary-chips {
     display:       flex;
@@ -95,3 +135,27 @@
 
 .expired-stat-card .stat-label { font-size: 0.78rem; color: var(--danger); font-weight: 600; }
 .expired-stat-card .stat-value { font-size: 1.4rem; font-weight: 700; color: var(--danger); }
+
+/* ── Expandable order-item rows (Sales Report) ─────────────── */
+.btn-expand {
+    background:    none;
+    border:        1px solid var(--gray-300);
+    border-radius: 4px;
+    width:         22px;
+    height:        22px;
+    cursor:        pointer;
+    font-size:     0.7rem;
+    display:       inline-flex;
+    align-items:   center;
+    justify-content: center;
+    transition:    var(--transition);
+    color:         var(--secondary);
+}
+
+.btn-expand:hover { background: var(--gray-100); }
+
+.detail-row td {
+    background: var(--gray-100);
+    padding:    12px 16px;
+}
+

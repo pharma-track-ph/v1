@@ -27,6 +27,31 @@ document.addEventListener('DOMContentLoaded', async () => {
         if (el) el.textContent = value;
     }
 
+    // ── KPI card click-through (role-gated) ───────────────────
+    // Sales/Profit → Reports (admin, super_admin only)
+    // Low Stock/Near Expiry → Inventory (admin, super_admin only)
+    function goIfAllowed(path, allowedRoles) {
+        const user = Auth.getUser();
+        if (user && allowedRoles.includes(user.role)) {
+            window.location.href = path;
+        } else {
+            Toast.show("You don't have access to that section.", 'warning');
+        }
+    }
+
+    document.getElementById('kpi-card-sales')?.addEventListener('click', () => {
+        goIfAllowed('reports.html', ['admin', 'super_admin']);
+    });
+    document.getElementById('kpi-card-profit')?.addEventListener('click', () => {
+        goIfAllowed('reports.html', ['admin', 'super_admin']);
+    });
+    document.getElementById('kpi-card-low-stock')?.addEventListener('click', () => {
+        goIfAllowed('inventory.html?status=low_stock', ['admin', 'super_admin']);
+    });
+    document.getElementById('kpi-card-near-expiry')?.addEventListener('click', () => {
+        goIfAllowed('inventory.html?status=expiring', ['admin', 'super_admin']);
+    });
+
     // ── Monthly Revenue Bar Chart ─────────────────────────────
     const monthlyCtx = document.getElementById('chart-monthly-revenue')?.getContext('2d');
     if (monthlyCtx && monthly_revenue.length) {
@@ -107,21 +132,59 @@ document.addEventListener('DOMContentLoaded', async () => {
         });
     }
 
-    // ── Recent Transactions Table ─────────────────────────────
+    // ── Recent Transactions Table (expandable rows) ───────────
     const tbody = document.getElementById('recent-txn-tbody');
     if (tbody) {
         if (!recent_transactions.length) {
-            tbody.innerHTML = '<tr><td colspan="5" class="text-center text-muted" style="padding:24px">No transactions yet.</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="6" class="text-center text-muted" style="padding:24px">No transactions yet.</td></tr>';
         } else {
-            tbody.innerHTML = recent_transactions.map(t => `
+            tbody.innerHTML = recent_transactions.map((t, idx) => `
                 <tr>
+                    <td><button class="btn-expand" data-index="${idx}" title="View items sold">▶</button></td>
                     <td class="fw-600">${t.order_number}</td>
                     <td>${t.cashier_name}</td>
                     <td>${t.item_count} item(s)</td>
                     <td class="fw-600" style="color:var(--primary)">${Fmt.currency(t.total)}</td>
                     <td>${Fmt.datetime(t.created_at)}</td>
                 </tr>
+                <tr class="detail-row hidden" id="txn-detail-${idx}">
+                    <td colspan="6">
+                        <strong style="font-size:0.82rem">Items Sold:</strong>
+                        <div class="table-container" style="margin-top:8px">
+                            <table class="table" style="white-space:normal">
+                                <thead><tr><th>Product</th><th>Qty</th><th>Unit Price</th><th>Line Total</th></tr></thead>
+                                <tbody>
+                                    ${(t.items || []).map(item => `
+                                    <tr>
+                                        <td>${escHtml(item.product_name)}</td>
+                                        <td>${item.quantity}</td>
+                                        <td>${Fmt.currency(item.unit_price)}</td>
+                                        <td class="fw-600">${Fmt.currency(item.subtotal)}</td>
+                                    </tr>`).join('') || '<tr><td colspan="4" class="text-center text-muted">No item details recorded.</td></tr>'}
+                                </tbody>
+                            </table>
+                        </div>
+                    </td>
+                </tr>
             `).join('');
+
+            tbody.querySelectorAll('.btn-expand').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    const idx = btn.dataset.index;
+                    const detailRow = document.getElementById(`txn-detail-${idx}`);
+                    if (!detailRow) return;
+                    const isHidden = detailRow.classList.contains('hidden');
+                    detailRow.classList.toggle('hidden', !isHidden);
+                    btn.textContent = isHidden ? '▼' : '▶';
+                });
+            });
         }
     }
 });
+
+function escHtml(str) {
+    return String(str ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;');
+}

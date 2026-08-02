@@ -48,6 +48,19 @@ const getForecastData = async (req, res, next) => {
         const history    = await Order.getWeeklySalesByProduct(productId, weeks);
         const filled     = fillMissingWeeks(history, weeks);
 
+        // How far back does this product's actual sales history go?
+        // Used by the frontend to flag longer Holt-Winters horizons
+        // (8/12-week, seasonal) as lower-confidence when there isn't
+        // roughly a year of real data behind them yet.
+        const [[spanRow]] = await db.query(
+            `SELECT DATEDIFF(CURDATE(), MIN(o.created_at)) AS span_days
+             FROM order_items oi
+             JOIN orders o ON o.id = oi.order_id AND o.status = 'completed'
+             WHERE oi.product_id = ?`,
+            [productId]
+        );
+        const data_span_days = spanRow?.span_days ?? null;
+
         res.json({
             success: true,
             product: {
@@ -60,6 +73,7 @@ const getForecastData = async (req, res, next) => {
             },
             history:          filled,
             weeks_of_history: filled.length,
+            data_span_days,
             note: 'Holt-Winters forecasting is performed client-side for transparency and auditability.'
         });
     } catch (err) {
@@ -252,25 +266,25 @@ const compareForecasts = async (req, res, next) => {
 
         const methods = [
             {
-                name:          'Moving Average (4-week)',
+                name:          'Recent Average',
                 totalForecast: maPredictions.reduce((s, v) => s + v, 0),
                 predictions:   maPredictions,
                 mape:          maMAPE.toFixed(1),
                 bestFor:       'Stable products with no trend or seasonality'
             },
             {
-                name:          'Exponential Smoothing (α=0.3)',
+                name:          'Trend-Focused',
                 totalForecast: sesPredictions.reduce((s, v) => s + v, 0),
                 predictions:   sesPredictions,
                 mape:          sesMAPE.toFixed(1),
                 bestFor:       'Slowly changing demand, no strong seasonality'
             },
             {
-                name:          'Holt-Winters (Triple)',
+                name:          'Seasonal Expert',
                 totalForecast: null,  // calculated on frontend
                 predictions:   null,
-                mape:          hwNote,
-                bestFor:       'Seasonal pharmaceutical demand (Recommended)'
+                mape:          'Calculated on-demand',
+                bestFor:       'Recommended for seasonal pharmaceutical demand'
             }
         ];
 

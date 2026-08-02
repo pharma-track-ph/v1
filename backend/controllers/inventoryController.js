@@ -65,15 +65,23 @@ const createProduct = async (req, res, next) => {
 
 /**
  * PUT /api/inventory/:id  [Admin+]
+ * Only super_admin ("the owner") may change an existing product's
+ * batch_number — enforced here regardless of what the client sends, since
+ * the edit form itself disables the field for non-super_admin users.
  */
 const updateProduct = async (req, res, next) => {
     try {
         const before = await Product.findById(req.params.id);
         if (!before) return res.status(404).json({ success: false, message: 'Product not found.' });
 
-        await Product.update(req.params.id, req.body);
+        const body = { ...req.body };
+        if (req.user.role !== 'super_admin') {
+            body.batch_number = before.batch_number;
+        }
+
+        await Product.update(req.params.id, body);
         await logAudit(req.user.id, 'UPDATE_PRODUCT', 'products', req.params.id,
-            { before, after: req.body }, req.ip);
+            { before, after: body }, req.ip);
 
         res.json({ success: true, message: 'Product updated.' });
     } catch (err) { next(err); }
@@ -99,14 +107,22 @@ const deleteProduct = async (req, res, next) => {
  */
 const getAlertSummary = async (req, res, next) => {
     try {
-        const [lowStock, nearExpiry, categories] = await Promise.all([
+        const [lowStock, nearExpiry, expiredCount, outOfStockCount, categories] = await Promise.all([
             Product.getLowStockCount(),
             Product.getNearExpiryCount(),
+            Product.getExpiredCount(),
+            Product.getOutOfStockCount(),
             Product.getCategories()
         ]);
         res.json({
             success: true,
-            data: { low_stock: lowStock, near_expiry: nearExpiry, categories }
+            data: {
+                low_stock:     lowStock,
+                near_expiry:   nearExpiry,
+                expired:       expiredCount,
+                out_of_stock:  outOfStockCount,
+                categories
+            }
         });
     } catch (err) { next(err); }
 };

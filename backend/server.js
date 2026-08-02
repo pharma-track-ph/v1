@@ -20,6 +20,7 @@ const forecastingRoutes = require('./routes/forecastingRoutes');
 
 const app  = express();
 const PORT = process.env.PORT || 5000;
+const FRONTEND_DIR = path.resolve(__dirname, '../frontend');
 
 // ── Trust proxy (required for Railway) ───────────────────────
 app.set('trust proxy', 1);
@@ -74,12 +75,11 @@ if (process.env.NODE_ENV === 'development') {
 }
 
 // ── Serve frontend static files ───────────────────────────────
-// 'public' folder = copy of frontend/ inside backend/ for Railway
-app.use(express.static(path.join(__dirname, 'public')));
+app.use(express.static(FRONTEND_DIR));
 
 // Redirect root to login page
 app.get('/', (req, res) => {
-    res.sendFile(path.join(__dirname, 'public/pages/login.html'));
+    res.sendFile(path.join('pages', 'login.html'), { root: FRONTEND_DIR });
 });
 
 // ── Static files for uploaded CSVs ───────────────────────────
@@ -104,8 +104,13 @@ app.get('/api/health', (req, res) => {
 
 // Handle requests for frontend pages (for direct access)
 app.get('/pages/:page', (req, res) => {
-    const filePath = path.join(__dirname, 'public', 'pages', req.params.page);
-    res.sendFile(filePath, (err) => {
+    const requestedPage = path.basename(req.params.page);
+
+    if (!requestedPage.endsWith('.html')) {
+        return res.status(404).json({ success: false, message: 'Page not found.' });
+    }
+
+    res.sendFile(path.join('pages', requestedPage), { root: FRONTEND_DIR }, (err) => {
         if (err) res.status(404).json({ success: false, message: 'Page not found.' });
     });
 });

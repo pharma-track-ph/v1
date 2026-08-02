@@ -66,7 +66,8 @@ CREATE TABLE IF NOT EXISTS orders (
     status          ENUM('completed','voided','refunded') NOT NULL DEFAULT 'completed',
     notes           TEXT,
     created_at      DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (cashier_id) REFERENCES users(id) ON DELETE RESTRICT
+    FOREIGN KEY (cashier_id) REFERENCES users(id) ON DELETE RESTRICT,
+    INDEX idx_orders_created_at (created_at)
 );
 
 -- ============================================================
@@ -102,7 +103,7 @@ CREATE TABLE IF NOT EXISTS audit_logs (
     details     JSON,                    -- before/after snapshots
     ip_address  VARCHAR(45),
     created_at  DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE RESTRICT,
     INDEX idx_user   (user_id),
     INDEX idx_action (action),
     INDEX idx_entity (entity, entity_id)
@@ -112,11 +113,12 @@ CREATE TABLE IF NOT EXISTS audit_logs (
 -- SEED DATA (only inserts if no users exist yet)
 -- ============================================================
 
--- Passwords are bcrypt of 'password123' (12 rounds)
+-- Each seed user has a UNIQUE bcrypt hash (12 rounds) generated locally.
+-- Plaintext passwords are provided ONLY in database/SEED_CREDENTIALS.txt (gitignored) -- rotate on first login.
 INSERT IGNORE INTO users (name, email, password, role) VALUES
-('Maria Santos',   'superadmin@pharmatrack.ph', '$2b$12$LQv3c1yqBWVHxkd0LHAkCOYz6TtxMKiQqTl.KRoUsQVyVXumCqJle', 'super_admin'),
-('Juan Dela Cruz', 'admin@pharmatrack.ph',       '$2b$12$LQv3c1yqBWVHxkd0LHAkCOYz6TtxMKiQqTl.KRoUsQVyVXumCqJle', 'admin'),
-('Ana Reyes',      'cashier@pharmatrack.ph',     '$2b$12$LQv3c1yqBWVHxkd0LHAkCOYz6TtxMKiQqTl.KRoUsQVyVXumCqJle', 'cashier');
+('Maria Santos',   'superadmin@pharmatrack.ph', '$2b$12$Rz6VmwuLL0RVi0ti7mi41ulEOz0v4q9roMpUr022ngHxfUMkDMBd2', 'super_admin'),
+('Juan Dela Cruz', 'admin@pharmatrack.ph',       '$2b$12$Z6btYTptF9AZ54ZUhmHPheKx6OXSf7k3q5yngRNSRE9ghr6ApoWVi', 'admin'),
+('Ana Reyes',      'cashier@pharmatrack.ph',     '$2b$12$cIEVtczYoOae5Gtm.em4YOQ0y8QPyL1Tqh/EVn9Fuj.CsHFlVuVO6', 'cashier');
 
 INSERT IGNORE INTO products (batch_number, name, generic_name, category, supplier, barcode, price, cost, stock_quantity, low_stock_threshold, expiry_date) VALUES
 ('BATCH-PARA-001', 'Paracetamol 500mg',   'Paracetamol',   'Analgesic',        'Unilab Inc.',       '4800001001001', 8.50,  4.00,  120, 20, DATE_ADD(CURDATE(), INTERVAL 28  DAY)),
