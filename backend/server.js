@@ -77,9 +77,13 @@ if (process.env.NODE_ENV === 'development') {
 // ── Serve frontend static files ───────────────────────────────
 app.use(express.static(FRONTEND_DIR));
 
-// Redirect root to login page
+// Redirect root to login page.
+// IMPORTANT: this must be a real HTTP redirect, not res.sendFile() —
+// sendFile() would serve login.html's CONTENT while the browser's address
+// bar stays at '/', which breaks every relative link/redirect inside the
+// page (e.g. 'pos.html' resolves to '/pos.html' instead of '/pages/pos.html').
 app.get('/', (req, res) => {
-    res.sendFile(path.join('pages', 'login.html'), { root: FRONTEND_DIR });
+    res.redirect('/pages/login.html');
 });
 
 // ── Static files for uploaded CSVs ───────────────────────────
