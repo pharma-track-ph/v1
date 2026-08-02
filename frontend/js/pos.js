@@ -262,7 +262,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const candidate = await OfflineAPI.get('/pos/void-candidate');
 
         if (!candidate?.success || !candidate.data) {
-            Toast.show("No transaction from today's shift available to void.", 'info');
+            Toast.show('No transaction from your current session available to void.', 'info');
             return;
         }
 

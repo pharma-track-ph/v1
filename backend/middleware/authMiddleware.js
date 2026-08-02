@@ -45,6 +45,11 @@ const verifyToken = async (req, res, next) => {
         }
 
         req.user = rows[0];  // Attach user to request
+        // Session start time (JWT 'iat', seconds since epoch) — used to scope
+        // actions like Void to only what THIS login session actually created,
+        // regardless of role. A fresh login (even by the same person) starts
+        // a new boundary; nothing from before this token was issued counts.
+        req.user.session_iat = decoded.iat;
         next();
 
     } catch (err) {

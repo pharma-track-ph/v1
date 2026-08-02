@@ -177,31 +177,22 @@ const Order = {
     },
 
     // ── Void support ───────────────────────────────────
-    // Scoped to a single calendar day ("today's shift") — a cashier or admin
-    // can never reach back and void a previous day's transaction this way.
-    // A cashier may only void THEIR OWN most recent completed sale from today.
-    // Admins/super_admins can void the most recent completed sale from today,
-    // system-wide (any cashier).
-    findLastCompletedByCashier: async (cashierId, dateStr) => {
+    // Scoped to the CURRENT LOGIN SESSION only — not "today", not "any
+    // cashier system-wide". Every role, including admin/super_admin, can
+    // only reach their OWN most recent completed sale, and only if it was
+    // made after their current session's token was issued. Logging out and
+    // back in starts a brand new boundary; nothing from an earlier session
+    // is ever reachable this way, even by the same person.
+    findLastCompletedInSession: async (userId, sessionIat) => {
         const [rows] = await db.query(
             `SELECT o.*, u.name AS cashier_name
              FROM orders o
              JOIN users u ON u.id = o.cashier_id
-             WHERE o.cashier_id = ? AND o.status = 'completed' AND DATE(o.created_at) = ?
+             WHERE o.cashier_id = ?
+               AND o.status = 'completed'
+               AND UNIX_TIMESTAMP(o.created_at) >= ?
              ORDER BY o.created_at DESC LIMIT 1`,
-            [cashierId, dateStr]
-        );
-        return rows[0] || null;
-    },
-
-    findLastCompleted: async (dateStr) => {
-        const [rows] = await db.query(
-            `SELECT o.*, u.name AS cashier_name
-             FROM orders o
-             JOIN users u ON u.id = o.cashier_id
-             WHERE o.status = 'completed' AND DATE(o.created_at) = ?
-             ORDER BY o.created_at DESC LIMIT 1`,
-            [dateStr]
+            [userId, sessionIat]
         );
         return rows[0] || null;
     }

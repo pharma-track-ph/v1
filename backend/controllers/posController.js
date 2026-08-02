@@ -315,19 +315,14 @@ const aiSuggest = async (req, res) => {
  * GET /api/pos/void-candidate
  * Returns the transaction that a Void click would target, so the frontend
  * can show a confirmation with real details before committing to anything.
- * Scoped to TODAY's shift only (Manila calendar day) — nothing from a
- * previous day is ever returned here, regardless of role.
- * Cashiers see only their own most recent completed sale from today;
- * admins/super_admins see the most recent completed sale system-wide, also
- * restricted to today.
+ * Scoped to the CURRENT LOGIN SESSION only — every role (including
+ * admin/super_admin) can only ever reach THEIR OWN most recent completed
+ * sale, made after their current session began. Nothing system-wide,
+ * nothing from before this login.
  */
 const getVoidCandidate = async (req, res, next) => {
     try {
-        const isElevated = ['admin', 'super_admin'].includes(req.user.role);
-        const today = getManilaDateString();
-        const order = isElevated
-            ? await Order.findLastCompleted(today)
-            : await Order.findLastCompletedByCashier(req.user.id, today);
+        const order = await Order.findLastCompletedInSession(req.user.id, req.user.session_iat);
 
         if (!order) {
             return res.json({ success: true, data: null });
@@ -345,17 +340,21 @@ const getVoidCandidate = async (req, res, next) => {
  * to the exact batches it was originally deducted from.
  *
  * ── Rules ──────────────────────────────────────────────────
- * - Only ever targets a transaction from TODAY's shift (Manila calendar
- *   day). A previous day's completed sale is never reachable via void,
- *   for any role — this is enforced at the query level, not just the UI.
- * - Cashiers can only void THEIR OWN most recent completed sale from today,
- *   and CANNOT do so on their own authority: an admin or super_admin
+ * - Scoped to the CURRENT LOGIN SESSION, for every role. This is stricter
+ *   than "today" — it's tied to the JWT that was issued at THIS login, so
+ *   logging out and back in (even as the same person) starts a fresh
+ *   boundary. An admin/owner can never reach a cashier's transaction this
+ *   way, and can't even reach their OWN transactions from a previous login.
+ * - Cashiers cannot void on their own authority: an admin or super_admin
  *   ("owner") must approve by entering their own email + password in the
  *   request body (manager_email / manager_password). The void is then
  *   attributed to that approving admin/owner in the audit log — not the
- *   cashier — since they're the one who actually authorized it.
- * - Admins/super_admins can void the most recent completed sale from today,
- *   system-wide, on their own authority (no override needed).
+ *   cashier — since they're the one who actually authorized it. Approval
+ *   does NOT change which order gets targeted — it's still whatever the
+ *   cashier's OWN current session last completed.
+ * - Admins/super_admins void on their own authority (no approval needed),
+ *   but only their OWN current-session transactions — same rule as anyone
+ *   else.
  * - Stock is restored per batch (order_items.product_id is the exact batch
  *   row consumed at checkout time), not just added back to "the product"
  *   generically — so batch-level stock stays accurate.
@@ -395,15 +394,14 @@ const voidLastOrder = async (req, res, next) => {
 
     const connection = await db.getConnection();
     try {
-        const isElevated = ['admin', 'super_admin'].includes(req.user.role);
-        const today = getManilaDateString();
-        const order = isElevated
-            ? await Order.findLastCompleted(today)
-            : await Order.findLastCompletedByCashier(req.user.id, today);
+        // Always scoped to the REQUESTING session's own user + own session
+        // start — manager approval authorizes the void, it does not expand
+        // which order is reachable.
+        const order = await Order.findLastCompletedInSession(req.user.id, req.user.session_iat);
 
         if (!order) {
             connection.release();
-            return res.status(404).json({ success: false, message: "No transaction from today's shift available to void." });
+            return res.status(404).json({ success: false, message: 'No transaction from this session available to void.' });
         }
 
         const items = await OrderItem.findByOrderId(order.id);
