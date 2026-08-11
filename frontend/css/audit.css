@@ -104,6 +104,30 @@
     margin-top: 6px;
 }
 
+/* Readable detail grid — replaces raw JSON with plain label:value rows */
+.detail-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 8px 20px;
+    background: var(--white);
+    border: 1px solid var(--gray-200);
+    border-radius: 6px;
+    padding: 12px 14px;
+    margin-top: 6px;
+}
+
+.detail-row-item {
+    display: flex;
+    justify-content: space-between;
+    gap: 10px;
+    font-size: 0.83rem;
+    padding: 4px 0;
+    border-bottom: 1px solid var(--gray-100);
+}
+
+.detail-row-item .detail-label { color: var(--secondary); font-weight: 500; }
+.detail-row-item .detail-value { color: var(--dark); font-weight: 600; text-align: right; }
+
 /* Pagination */
 .pagination {
     display: flex;

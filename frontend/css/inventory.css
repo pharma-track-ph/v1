@@ -62,3 +62,24 @@
  * batch_number,name,generic_name,category,supplier,barcode,price,cost,stock_quantity,low_stock_threshold,expiry_date
  * BATCH-X-001,Vitamin C 500mg,Ascorbic Acid,Vitamins,Supplier Name,4800001099001,15.00,7.00,100,20,2025-12-31
  */
+
+/* ── Barcode preview (Edit Product modal) ────────── */
+.barcode-preview-box {
+    display:         flex;
+    flex-direction:  column;
+    align-items:     center;
+    background:      var(--white);
+    border:          1px solid var(--gray-200);
+    border-radius:   var(--border-radius);
+    padding:         14px;
+}
+
+.barcode-preview-box svg { max-width: 100%; }
+
+.barcode-value-text {
+    font-family:  'Courier New', monospace;
+    font-size:    0.8rem;
+    color:        var(--secondary);
+    margin-top:   4px;
+    letter-spacing: 1px;
+}

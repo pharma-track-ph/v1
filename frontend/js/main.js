@@ -655,3 +655,30 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     });
 });
+
+// ── Repaint safety net for a known Chromium quirk ──────────
+// After certain window state changes (minimize → restore), Chromium can
+// leave a page's GPU-COMPOSITED layers stale — the underlying layout box
+// sizes are actually correct, but the rasterized pixels on screen aren't
+// refreshed to match. A layout reflow (recalculating element positions/
+// sizes) does NOT fix this, because it's a compositor-level staleness, not
+// a layout-level one — only a full page refresh reliably forces Chromium
+// to rebuild its composited layers from scratch. This nudges the same
+// effect without a reload: a near-invisible opacity change is a well-known
+// trick that forces Chromium to recomposite the whole page.
+function nudgeRepaint() {
+    const body = document.body;
+    const prevOpacity = body.style.opacity;
+    body.style.opacity = '0.999';
+    requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+            body.style.opacity = prevOpacity || '';
+        });
+    });
+}
+
+window.addEventListener('resize', nudgeRepaint);
+window.addEventListener('focus', nudgeRepaint);
+document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') nudgeRepaint();
+});

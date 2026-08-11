@@ -196,6 +196,10 @@ img { max-width: 100%; display: block; }
     min-width:      0;   /* allow flex item to shrink below content width */
     overflow-x:     hidden;
     transition:     var(--transition);
+    /* .top-header below is now position:fixed and removed from normal
+       flow (see its own comment for why), so this padding reserves the
+       space it used to occupy, on every page that shares this layout. */
+    padding-top:    var(--header-height);
 }
 
 /* ── Top Header ───────────────────────────────────────────── */
@@ -207,9 +211,26 @@ img { max-width: 100%; display: block; }
     justify-content:space-between;
     padding:        0 24px;
     box-shadow:     var(--shadow-sm);
-    position:       sticky;
+    /* position: fixed instead of sticky — sticky requires every ancestor
+       between this element and the viewport to have overflow:visible, but
+       .main-wrapper (used globally, on every page) has overflow-x:hidden
+       — and per the CSS spec, setting overflow on just one axis silently
+       forces the OTHER axis into a scroll container too, which breaks
+       sticky positioning. fixed positions relative to the actual browser
+       viewport directly, bypassing that ancestor-overflow requirement, so
+       the header now stays pinned on every page while scrolling. */
+    position:       fixed;
     top:            0;
+    left:           var(--sidebar-width);
+    right:          0;
     z-index:        100;
+    transition:     var(--transition);
+}
+
+@media (max-width: 768px) {
+    /* Matches .main-wrapper's margin-left:0 on mobile (sidebar slides
+       off-screen instead of pushing content over). */
+    .top-header { left: 0; }
 }
 
 .header-left { display: flex; align-items: center; gap: 16px; }

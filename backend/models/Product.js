@@ -228,27 +228,34 @@ const Product = {
         return rows.map(r => r.category);
     },
 
-    // Bulk upsert from CSV import
-    // If batch_number matches an existing active product, update stock; otherwise insert.
+    // Bulk upsert from CSV import.
+    // Matches on BOTH batch_number AND expiry_date — a shared batch number
+    // with a DIFFERENT expiry date is treated as a distinct physical batch
+    // (e.g. a re-used or mistyped lot code from the supplier), not the same
+    // stock. That case becomes a new row instead of silently overwriting the
+    // expiry date on existing stock, which would misrepresent how soon the
+    // OLDER units actually expire.
     bulkUpsert: async (items) => {
         const results = { inserted: 0, updated: 0, errors: [] };
 
         for (const item of items) {
             try {
                 const [existing] = await db.query(
-                    'SELECT id FROM products WHERE batch_number = ? AND is_active = 1 LIMIT 1',
-                    [item.batch_number]
+                    'SELECT id FROM products WHERE batch_number = ? AND expiry_date = ? AND is_active = 1 LIMIT 1',
+                    [item.batch_number, item.expiry_date]
                 );
 
                 if (existing.length) {
+                    // True match on batch + expiry: safe to merge quantity.
+                    // Update by the specific row id (not by batch_number again)
+                    // so this can never accidentally touch more than one row.
                     await db.query(
                         `UPDATE products SET
                             stock_quantity = stock_quantity + ?,
-                            expiry_date    = ?,
                             price          = ?,
                             cost           = ?
-                         WHERE batch_number = ? AND is_active = 1`,
-                        [item.stock_quantity, item.expiry_date, item.price, item.cost, item.batch_number]
+                         WHERE id = ?`,
+                        [item.stock_quantity, item.price, item.cost, existing[0].id]
                     );
                     results.updated++;
                 } else {
@@ -261,6 +268,24 @@ const Product = {
         }
 
         return results;
+    },
+
+    // Auto-generates and PERSISTS a barcode for a product that doesn't have
+    // one yet, so every product always has something scannable. Format:
+    // "PT" + zero-padded product id (e.g. PT000042) — structurally distinct
+    // from real manufacturer barcodes (which are numeric-only, e.g. EAN-13),
+    // so there's no risk of ever colliding with a real, manually-entered one.
+    // Since it's derived from the unique primary key, it can never collide
+    // with another product's generated code either.
+    ensureBarcode: async (id) => {
+        const [rows] = await db.query('SELECT barcode FROM products WHERE id = ?', [id]);
+        if (!rows.length) return null;
+
+        if (rows[0].barcode) return rows[0].barcode;
+
+        const generated = 'PT' + String(id).padStart(6, '0');
+        await db.query('UPDATE products SET barcode = ? WHERE id = ?', [generated, id]);
+        return generated;
     }
 };
 

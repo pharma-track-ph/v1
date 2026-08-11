@@ -269,14 +269,14 @@ const compareForecasts = async (req, res, next) => {
                 name:          'Recent Average',
                 totalForecast: maPredictions.reduce((s, v) => s + v, 0),
                 predictions:   maPredictions,
-                mape:          maMAPE.toFixed(1),
+                mape:          maMAPE === null ? null : maMAPE.toFixed(1),
                 bestFor:       'Stable products with no trend or seasonality'
             },
             {
                 name:          'Trend-Focused',
                 totalForecast: sesPredictions.reduce((s, v) => s + v, 0),
                 predictions:   sesPredictions,
-                mape:          sesMAPE.toFixed(1),
+                mape:          sesMAPE === null ? null : sesMAPE.toFixed(1),
                 bestFor:       'Slowly changing demand, no strong seasonality'
             },
             {
@@ -288,15 +288,28 @@ const compareForecasts = async (req, res, next) => {
             }
         ];
 
-        // Pick recommendation: lowest MAPE wins (HW excluded from auto-pick since MAPE is client-side)
-        const best = maMAPE <= sesMAPE ? methods[0] : methods[1];
+        // Pick recommendation: lowest MAPE wins, but only among methods that
+        // actually have a measurable score — a null MAPE (no comparable sales
+        // weeks) must never win by default null-coerces-to-0 comparison.
+        let best;
+        if (maMAPE === null && sesMAPE === null) {
+            best = null;
+        } else if (maMAPE === null) {
+            best = methods[1];
+        } else if (sesMAPE === null) {
+            best = methods[0];
+        } else {
+            best = maMAPE <= sesMAPE ? methods[0] : methods[1];
+        }
 
         res.json({
             success: true,
             product: { id: product.id, name: product.name },
             history: filled,
             methods,
-            recommendation: `Based on historical data, <strong>${best.name}</strong> has the lowest server-calculated error (MAPE ${best.mape}%). However, if this product shows seasonal patterns, Holt-Winters (generated client-side) will typically outperform both.`
+            recommendation: best
+                ? `Based on historical data, <strong>${best.name}</strong> has the lowest server-calculated error (MAPE ${best.mape}%). However, if this product shows seasonal patterns, Holt-Winters (generated client-side) will typically outperform both.`
+                : `This product has no recorded sales history yet, so neither method can be scored for accuracy. Predictions are still shown, but treat them as rough starting estimates.`
         });
     } catch (err) {
         next(err);
@@ -383,7 +396,10 @@ function calcMAPE(actual, fitted) {
             count++;
         }
     }
-    return count === 0 ? 0 : (sum / count) * 100;
+    // No comparable weeks means accuracy genuinely cannot be measured —
+    // return null rather than 0, since 0% would misleadingly imply a
+    // perfect score when really there was nothing to score at all.
+    return count === 0 ? null : (sum / count) * 100;
 }
 
 // ─────────────────────────────────────────────────────────────

@@ -4,7 +4,7 @@ const multer  = require('multer');
 const path    = require('path');
 const {
     getProducts, getProduct, createProduct, updateProduct,
-    deleteProduct, getAlertSummary, importCSV
+    deleteProduct, getAlertSummary, importCSV, getBarcode
 } = require('../controllers/inventoryController');
 const { verifyToken, requireRole } = require('../middleware/authMiddleware');
 
@@ -22,6 +22,7 @@ const upload = multer({
 
 router.get('/',               verifyToken, getProducts);
 router.get('/alerts/summary', verifyToken, getAlertSummary);
+router.get('/:id/barcode',    verifyToken, requireRole('admin'), getBarcode);
 router.get('/:id',            verifyToken, getProduct);
 router.post('/',              verifyToken, requireRole('admin'), createProduct);
 router.put('/:id',            verifyToken, requireRole('admin'), updateProduct);

@@ -38,7 +38,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // ── Load audit logs from API ──────────────────────────────
     async function loadAuditLogs() {
         if (tbody) {
-            tbody.innerHTML = `<tr><td colspan="7" class="text-center" style="padding:40px">
+            tbody.innerHTML = `<tr><td colspan="6" class="text-center" style="padding:40px">
                 <div class="spinner" style="margin:0 auto"></div>
             </td></tr>`;
         }
@@ -48,7 +48,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!data?.success) {
             Toast.show('Failed to load audit logs.', 'error');
             if (tbody) {
-                tbody.innerHTML = `<tr><td colspan="7" class="text-center text-muted" style="padding:40px">
+                tbody.innerHTML = `<tr><td colspan="6" class="text-center text-muted" style="padding:40px">
                     Failed to load audit logs. Check your connection.
                 </td></tr>`;
             }
@@ -113,6 +113,30 @@ document.addEventListener('DOMContentLoaded', () => {
         applyFilters();
     }
 
+    // Display-only maps — underlying values in the database/logic (role,
+    // entity) never change, only what's shown on screen here.
+    const ROLE_LABELS = { super_admin: 'Owner', admin: 'Admin', cashier: 'Cashier' };
+
+    function roleLabel(role) {
+        if (!role) return '';
+        return ROLE_LABELS[role] || role.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+    }
+
+    const ENTITY_LABELS = {
+        products:       'Product',
+        users:          'User',
+        orders:         'Order',
+        order_items:    'Order Item',
+        cash_sessions:  'Cash Session',
+        cash_movements: 'Cash Movement',
+        audit_logs:     'Audit Log'
+    };
+
+    function entityLabel(entity) {
+        if (!entity) return '—';
+        return ENTITY_LABELS[entity] || entity.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+    }
+
     // ── Render table ──────────────────────────────────────────
     function renderTable() {
         if (!tbody) return;
@@ -122,7 +146,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         if (!filteredLogs.length) {
             tbody.innerHTML = `
-                <tr><td colspan="7">
+                <tr><td colspan="6">
                     <div class="empty-audit">
                         <div class="empty-icon">🔍</div>
                         <div>No audit logs found for the selected filters.</div>
@@ -134,7 +158,7 @@ document.addEventListener('DOMContentLoaded', () => {
         tbody.innerHTML = page.map((log, i) => {
             const globalIdx = start + i;
             const badgeHtml = getActionBadge(log.action);
-            const roleLabel = log.user_role ? `<span style="font-size:0.68rem;color:var(--secondary);margin-left:4px">(${log.user_role.replace('_', ' ')})</span>` : '';
+            const roleLabelText = log.user_role ? `<span style="font-size:0.68rem;color:var(--secondary);margin-left:4px">(${roleLabel(log.user_role)})</span>` : '';
 
             return `
             <tr>
@@ -143,17 +167,16 @@ document.addEventListener('DOMContentLoaded', () => {
                 </td>
                 <td style="white-space:nowrap;font-size:0.83rem">${Fmt.datetime(log.created_at)}</td>
                 <td>
-                    <span class="fw-600">${escHtml(log.user_name || '—')}</span>${roleLabel}
+                    <span class="fw-600">${escHtml(log.user_name || '—')}</span>${roleLabelText}
                 </td>
                 <td>${badgeHtml}</td>
-                <td style="font-size:0.83rem">${log.entity ? escHtml(log.entity) : '—'}</td>
+                <td style="font-size:0.83rem">${entityLabel(log.entity)}</td>
                 <td style="font-size:0.83rem;color:var(--secondary)">${log.entity_id || '—'}</td>
-                <td style="font-size:0.83rem;color:var(--secondary)">${log.ip_address || '—'}</td>
             </tr>
             <tr class="detail-row hidden" id="detail-${globalIdx}">
-                <td colspan="7">
-                    <strong style="font-size:0.82rem">Details / Snapshot:</strong>
-                    <div class="detail-json">${formatDetails(log.details)}</div>
+                <td colspan="6">
+                    <strong style="font-size:0.82rem">Details:</strong>
+                    ${formatDetails(log)}
                 </td>
             </tr>`;
         }).join('');
@@ -188,15 +211,98 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // ── Format details JSON ───────────────────────────────────
-    function formatDetails(details) {
-        if (!details) return 'No details recorded.';
-        try {
-            const parsed = typeof details === 'string' ? JSON.parse(details) : details;
-            if (Object.keys(parsed).length === 0) return 'No additional details.';
-            return JSON.stringify(parsed, null, 2);
-        } catch {
-            return String(details);
+    function detailGrid(rows) {
+        return `<div class="detail-grid">${rows.map(([label, value]) =>
+            `<div class="detail-row-item"><span class="detail-label">${label}</span><span class="detail-value">${value}</span></div>`
+        ).join('')}</div>`;
+    }
+
+    function prettyLabel(key) {
+        return String(key).replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+    }
+
+    function formatDetails(log) {
+        const raw = log.details;
+        let parsed;
+        try { parsed = typeof raw === 'string' ? JSON.parse(raw) : raw; } catch (e) { parsed = null; }
+
+        if (!parsed || typeof parsed !== 'object' || Object.keys(parsed).length === 0) {
+            return '<span class="text-muted">No additional details.</span>';
         }
+
+        const action = log.action || '';
+
+        if (action === 'OPEN_CASH_SESSION') {
+            return detailGrid([['Opening Cash', Fmt.currency(parsed.opening_cash)]]);
+        }
+
+        if (action === 'CLOSE_CASH_SESSION') {
+            const variance = parseFloat(parsed.variance || 0);
+            const label = variance === 0 ? 'Balanced' : variance > 0 ? 'Overage' : 'Shortage';
+            const color = variance === 0 ? 'var(--success)' : variance > 0 ? '#92400e' : 'var(--danger)';
+            return detailGrid([
+                ['Expected Cash', Fmt.currency(parsed.expected)],
+                ['Actual Cash', Fmt.currency(parsed.actual)],
+                ['Variance', `<span style="color:${color}">${Fmt.currency(Math.abs(variance))} (${label})</span>`]
+            ]);
+        }
+
+        if (action === 'CASH_IN' || action === 'CASH_OUT') {
+            return detailGrid([
+                ['Amount', Fmt.currency(parsed.amount)],
+                ['Reason', escHtml(parsed.reason || '—')]
+            ]);
+        }
+
+        if (action === 'VOID_ORDER') {
+            const rows = [
+                ['Order #', escHtml(parsed.order_number || '—')],
+                ['Total', Fmt.currency(parsed.total)]
+            ];
+            if (parsed.requested_by) rows.push(['Requested By (Cashier)', escHtml(parsed.requested_by)]);
+            return detailGrid(rows);
+        }
+
+        if (action === 'CHECKOUT') {
+            return detailGrid([
+                ['Order #', escHtml(parsed.order_number || '—')],
+                ['Total', Fmt.currency(parsed.total)]
+            ]);
+        }
+
+        if (action === 'IMPORT_INVENTORY') {
+            return detailGrid([
+                ['Inserted', parsed.inserted != null ? parsed.inserted : 0],
+                ['Updated', parsed.updated != null ? parsed.updated : 0],
+                ['Errors', (parsed.errors || []).length]
+            ]);
+        }
+
+        if (action === 'UPDATE_PRODUCT' && parsed.before && parsed.after) {
+            const changed = Object.keys(parsed.after).filter(function(k) {
+                const b = parsed.before[k] == null ? '' : parsed.before[k];
+                const a = parsed.after[k]  == null ? '' : parsed.after[k];
+                return String(b) !== String(a);
+            });
+            if (!changed.length) return '<span class="text-muted">No fields changed.</span>';
+            return detailGrid(changed.map(function(k) {
+                return [prettyLabel(k), escHtml(parsed.before[k] || '—') + ' → ' + escHtml(parsed.after[k] || '—')];
+            }));
+        }
+
+        if (action === 'CREATE_PRODUCT') {
+            return detailGrid(
+                Object.entries(parsed)
+                    .filter(function(entry) { return entry[0] !== 'description'; })
+                    .map(function(entry) { return [prettyLabel(entry[0]), escHtml(entry[1] || '—')]; })
+            );
+        }
+
+        return detailGrid(Object.entries(parsed).map(function(entry) {
+            const k = entry[0], v = entry[1];
+            const display = (typeof v === 'object' && v !== null) ? JSON.stringify(v) : v;
+            return [prettyLabel(k), escHtml(display == null ? '—' : display)];
+        }));
     }
 
     // ── Pagination ────────────────────────────────────────────
@@ -251,7 +357,7 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
 
-        const headers = ['Date/Time', 'User', 'Role', 'Action', 'Entity', 'Entity ID', 'IP Address', 'Details'];
+        const headers = ['Date/Time', 'User', 'Role', 'Action', 'Entity', 'Entity ID', 'Details'];
         const rows = filteredLogs.map(log => [
             Fmt.datetime(log.created_at),
             log.user_name  || '',
@@ -259,7 +365,6 @@ document.addEventListener('DOMContentLoaded', () => {
             log.action     || '',
             log.entity     || '',
             log.entity_id  || '',
-            log.ip_address || '',
             JSON.stringify(log.details || {}).replace(/"/g, '""')
         ]);
 

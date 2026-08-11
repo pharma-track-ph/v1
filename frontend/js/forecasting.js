@@ -956,8 +956,14 @@ document.addEventListener('DOMContentLoaded', async () => {
             { name: 'Seasonal Forecast', emoji: '🌟', result: hw,  desc: 'Best for seasonal patterns (recommended)' }
         ];
 
-        // Find best method (lowest MAPE)
-        const bestMethod = methods.reduce((best, m) => m.result.mape < best.result.mape ? m : best, methods[0]);
+        // Only methods with a measurable MAPE can be meaningfully compared.
+        // A null MAPE means "not enough sales history to score" — not "0%
+        // error" — and must never accidentally win "best fit" through JS's
+        // null-coerces-to-0 comparison quirk (null < 5 is true!).
+        const scorable  = methods.filter(m => m.result.mape !== null);
+        const bestMethod = scorable.length
+            ? scorable.reduce((best, m) => m.result.mape < best.result.mape ? m : best, scorable[0])
+            : null;
 
         body.innerHTML = `
             <p style="font-size:0.85rem;color:var(--secondary);margin-bottom:20px">
@@ -976,8 +982,9 @@ document.addEventListener('DOMContentLoaded', async () => {
                     </thead>
                     <tbody>
                         ${methods.map(m => {
-                            const isBest  = m.name === bestMethod.name;
-                            const total   = m.result.predictions.reduce((s, p) => s + p.forecast, 0);
+                            const isBest   = bestMethod && m.name === bestMethod.name;
+                            const total    = m.result.predictions.reduce((s, p) => s + p.forecast, 0);
+                            const hasScore = m.result.mape !== null;
                             return `
                             <tr style="border-bottom:1px solid var(--gray-200);${isBest ? 'background:#f0f7ff' : ''}">
                                 <td style="padding:12px 10px">
@@ -986,10 +993,15 @@ document.addEventListener('DOMContentLoaded', async () => {
                                     ${isBest ? '<span style="margin-left:8px;background:var(--primary);color:white;padding:2px 8px;border-radius:10px;font-size:0.68rem;font-weight:700">BEST FIT</span>' : ''}
                                 </td>
                                 <td style="padding:12px 10px;text-align:center">
+                                    ${hasScore ? `
                                     <span style="font-size:1.1rem;font-weight:700;color:${m.result.mape < 20 ? 'var(--success)' : m.result.mape < 40 ? '#f0ad4e' : 'var(--danger)'}">
                                         ${m.result.mape}%
                                     </span>
                                     <div style="font-size:0.72rem;color:var(--secondary)">${m.result.mape < 20 ? 'Excellent' : m.result.mape < 40 ? 'Acceptable' : 'Less accurate'}</div>
+                                    ` : `
+                                    <span style="font-size:1.1rem;font-weight:700;color:var(--secondary)">N/A</span>
+                                    <div style="font-size:0.72rem;color:var(--secondary)">No sales data yet</div>
+                                    `}
                                 </td>
                                 <td style="padding:12px 10px;text-align:center;font-size:1.1rem;font-weight:700;color:var(--primary)">${total} units</td>
                                 <td style="padding:12px 10px;font-size:0.82rem;color:var(--secondary)">${m.desc}</td>
@@ -998,6 +1010,7 @@ document.addEventListener('DOMContentLoaded', async () => {
                     </tbody>
                 </table>
             </div>
+            ${bestMethod ? `
             <div style="margin-top:20px;padding:16px;background:#eef4ff;border-radius:10px;border-left:4px solid var(--primary)">
                 <strong>💡 Our Recommendation for ${product.name}:</strong>
                 <p style="margin-top:8px;font-size:0.875rem">
@@ -1011,6 +1024,15 @@ document.addEventListener('DOMContentLoaded', async () => {
                     because it accounts for future seasonal spikes that may not have appeared in the training data.
                 </p>
             </div>
+            ` : `
+            <div style="margin-top:20px;padding:16px;background:#fff8e6;border-radius:10px;border-left:4px solid #f0ad4e">
+                <strong>⚠️ Not enough sales data yet</strong>
+                <p style="margin-top:8px;font-size:0.875rem">
+                    This product has no recorded sales history, so none of the three methods can be scored for accuracy yet.
+                    The predictions above are still shown, but treat them as rough starting estimates until real sales accumulate.
+                </p>
+            </div>
+            `}
         `;
     }
 
@@ -1028,12 +1050,17 @@ document.addEventListener('DOMContentLoaded', async () => {
                     </tr>
                 </thead>
                 <tbody>
-                    ${(data.methods || []).map(m => `
+                    ${(data.methods || []).map(m => {
+                        const mapeDisplay = m.mape === null ? 'N/A'
+                            : m.mape === 'Calculated on-demand' ? m.mape
+                            : `${m.mape}%`;
+                        return `
                     <tr style="border-bottom:1px solid var(--gray-200)">
                         <td style="padding:10px"><strong>${m.name}</strong></td>
-                        <td style="padding:10px;text-align:center">${m.mape}${typeof m.mape === 'number' ? '%' : ''}</td>
+                        <td style="padding:10px;text-align:center">${mapeDisplay}</td>
                         <td style="padding:10px;font-size:0.82rem;color:var(--secondary)">${m.bestFor}</td>
-                    </tr>`).join('')}
+                    </tr>`;
+                    }).join('')}
                 </tbody>
             </table>
             ${data.recommendation ? `<div style="margin-top:16px;padding:14px;background:#eef4ff;border-radius:8px;border-left:4px solid var(--primary);font-size:0.875rem">${data.recommendation}</div>` : ''}
@@ -1051,7 +1078,10 @@ document.addEventListener('DOMContentLoaded', async () => {
                 count++;
             }
         }
-        return count === 0 ? 0 : parseFloat(((sum / count) * 100).toFixed(1));
+        // No comparable weeks means accuracy genuinely cannot be measured —
+        // return null rather than 0, since 0% would misleadingly imply a
+        // perfect score when really there was nothing to score at all.
+        return count === 0 ? null : parseFloat(((sum / count) * 100).toFixed(1));
     }
 
     function checkUrlParams() {

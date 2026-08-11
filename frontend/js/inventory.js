@@ -168,6 +168,7 @@ document.addEventListener('DOMContentLoaded', () => {
         productForm?.reset();
         document.getElementById('field-stock-add')?.classList.remove('hidden');
         document.getElementById('field-stock-edit')?.classList.add('hidden');
+        document.getElementById('field-barcode-preview')?.classList.add('hidden');
         if (submitBtn) submitBtn.textContent = 'Add Product';
 
         // New products always need a batch_number set — this restriction only
@@ -181,7 +182,7 @@ document.addEventListener('DOMContentLoaded', () => {
         Modal.open('product-modal');
     }
 
-    function openEditModal(id) {
+    async function openEditModal(id) {
         editingId = id;
         const p = products.find(x => x.id === id);
         if (!p) return;
@@ -214,6 +215,46 @@ document.addEventListener('DOMContentLoaded', () => {
         document.getElementById('field-stock-edit')?.classList.remove('hidden');
         if (submitBtn) submitBtn.textContent = 'Save Changes';
         Modal.open('product-modal');
+
+        // Barcode preview — every product always has a real, persisted
+        // barcode value: this endpoint auto-generates and saves one
+        // server-side if the product doesn't have one yet, so the image
+        // rendered here always corresponds to something that will actually
+        // work when scanned at the POS.
+        const barcodePreview   = document.getElementById('field-barcode-preview');
+        const barcodeValueText = document.getElementById('barcode-value-text');
+        if (barcodePreview) {
+            barcodePreview.classList.remove('hidden');
+            if (barcodeValueText) barcodeValueText.textContent = 'Loading barcode…';
+
+            const barcodeData = await API.get(`/inventory/${id}/barcode`);
+
+            if (barcodeData?.success) {
+                const value = barcodeData.barcode;
+                const barcodeFieldEl = document.getElementById('field-barcode');
+                if (barcodeFieldEl) barcodeFieldEl.value = value; // keep the form field in sync
+
+                if (typeof JsBarcode !== 'undefined') {
+                    try {
+                        // width/height increased from the defaults (2/60) so bars
+                        // are chunkier and more tolerant of camera distance,
+                        // focus, and lighting limitations when scanning —
+                        // especially important when scanning a barcode displayed
+                        // on a screen rather than printed on paper.
+                        JsBarcode('#barcode-svg', value, {
+                            format: 'CODE128', width: 3, height: 90, displayValue: false, margin: 10
+                        });
+                        if (barcodeValueText) barcodeValueText.textContent = value;
+                    } catch (err) {
+                        if (barcodeValueText) barcodeValueText.textContent = `${value} (could not render image)`;
+                    }
+                } else {
+                    if (barcodeValueText) barcodeValueText.textContent = `${value} (barcode library failed to load)`;
+                }
+            } else {
+                if (barcodeValueText) barcodeValueText.textContent = p.barcode || '—';
+            }
+        }
     }
 
     // ─────────────────────────────────────────────────────────

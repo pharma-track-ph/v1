@@ -89,18 +89,35 @@ const getSalesReport = async (req, res, next) => {
 /**
  * GET /api/reports/expired
  * Returns all expired products with estimated value lost.
+ * Query params (optional):
+ *   months=1|3|6   — only products that expired within the last N*30 days
+ *   start_date/end_date — custom range, filtered on the actual expiry_date
+ * With no params, returns everything expired (all time) — same as before.
  */
 const getExpiredReport = async (req, res, next) => {
     try {
-        const [rows] = await db.query(
-            `SELECT *,
+        const { months, start_date, end_date } = req.query;
+
+        let sql = `
+            SELECT *,
                     (cost * stock_quantity)           AS value_lost,
                     DATEDIFF(CURDATE(), expiry_date)  AS days_expired
              FROM products
              WHERE expiry_date < CURDATE()
                AND is_active = 1
-             ORDER BY expiry_date ASC`
-        );
+        `;
+        const params = [];
+
+        if (start_date) { sql += ' AND expiry_date >= ?'; params.push(start_date); }
+        if (end_date)   { sql += ' AND expiry_date <= ?'; params.push(end_date);   }
+        else if (months && months !== 'all') {
+            sql += ' AND DATEDIFF(CURDATE(), expiry_date) <= ?';
+            params.push(parseInt(months) * 30);
+        }
+
+        sql += ' ORDER BY expiry_date ASC';
+
+        const [rows] = await db.query(sql, params);
 
         const totalLoss = rows.reduce((s, r) => s + parseFloat(r.value_lost), 0);
 

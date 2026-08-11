@@ -7,7 +7,7 @@
     <link rel="stylesheet" href="../css/global.css">
     <link rel="stylesheet" href="../css/pos.css">
 </head>
-<body>
+<body class="pos-page">
 <div class="app-container">
 
     <aside class="sidebar" id="sidebar">
@@ -60,43 +60,118 @@
             </div>
         </header>
 
-        <main class="page-content" style="padding-bottom:0">
-            <div class="pos-layout">
+        <main class="page-content pos-fixed-height" style="padding-bottom:0">
 
-                <!-- ── Left: Product Search & Grid ────────────── -->
+            <!-- ══════════════════════════════════════════════════════════
+                 ⚠️ PINNED / STAYS-ON-SCREEN REGION — DO NOT REMOVE
+                 The Register OPEN box, product search, Scan Barcode, and
+                 Use Camera controls live inside this ONE wrapper on
+                 purpose. It's a plain flex child at BOTH mobile and
+                 desktop widths now -- pos.css confines the whole page to
+                 one screen height (overflow:hidden all the way down) and
+                 lets ONLY the product grid scroll internally, so this
+                 toolbar can never scroll out of view at any width. See
+                 pos.css's .pos-fixed-height rules (both the
+                 min-width:901px and max-width:900px blocks) for how each
+                 case is structured.
+                 The Cart panel (further down, .pos-right) follows the
+                 same split: normal flow on desktop (fills the row height,
+                 only its own item list scrolls), pinned to the bottom as
+                 a tap-to-expand "peek" bar on mobile.
+                 ══════════════════════════════════════════════════════════ -->
+            <div class="pos-fixed-top" id="pos-fixed-top">
+
+                <!-- ── Register status strip (shown when register IS open) ── -->
+                <div class="register-strip hidden" id="register-strip">
+                    <div class="register-strip-info">
+                        <span class="register-status-dot"></span>
+                        <strong>Register OPEN</strong>
+                        <span class="register-strip-sep">·</span>
+                        <span>Opened <strong id="reg-opening-cash">₱0.00</strong> at <span id="reg-opened-time">—</span></span>
+                    </div>
+                    <div class="register-strip-totals">
+                        <span>Cash Sales: <strong id="reg-cash-sales">₱0.00</strong></span>
+                        <span>Expected in Drawer: <strong id="reg-expected-cash">₱0.00</strong></span>
+                    </div>
+                    <div class="register-strip-actions">
+                        <button class="btn btn-sm btn-light" id="btn-cash-in">➕ Cash In</button>
+                        <button class="btn btn-sm btn-light" id="btn-cash-out">➖ Cash Out</button>
+                        <button class="btn btn-sm btn-outline" id="btn-close-register">Close Register</button>
+                    </div>
+                </div>
+
+                <div class="pos-search-bar">
+                    <div class="search-input-wrap">
+                        <span class="search-icon">🔍</span>
+                        <input type="text" id="pos-search" class="form-control"
+                               placeholder="Search product name…" autocomplete="off">
+                    </div>
+                    <button class="btn-barcode" id="btn-barcode-scan">
+                        📷 Scan Barcode
+                    </button>
+                    <button class="btn-barcode" id="btn-camera-scan">
+                        🎥 Use Camera
+                    </button>
+                </div>
+
+                <!-- Barcode scanner simulation row -->
+                <div class="barcode-input-row" id="barcode-input-row">
+                    <span>📷</span>
+                    <input type="text" id="barcode-input"
+                           placeholder="Scan or type barcode → Enter"
+                           autocomplete="off">
+                    <button class="btn btn-sm btn-light" onclick="document.getElementById('barcode-input-row').classList.remove('active')">✕</button>
+                </div>
+            </div>
+
+            <!-- ── Blocking card when register is CLOSED (replaces the whole POS layout) ── -->
+            <div class="register-blocker hidden" id="register-blocker">
+                <div class="register-blocker-card">
+                    <div class="register-blocker-icon">🗄️</div>
+                    <h2>Register is Closed</h2>
+                    <p>You need to open your register with a starting cash amount before you can process any sales.</p>
+                    <button class="btn btn-primary btn-lg" id="btn-open-register">Open Register</button>
+                </div>
+            </div>
+
+            <div class="pos-layout" id="pos-layout">
                 <div class="pos-left">
-                    <div class="pos-search-bar">
-                        <div class="search-input-wrap">
-                            <span class="search-icon">🔍</span>
-                            <input type="text" id="pos-search" class="form-control"
-                                   placeholder="Search product name…" autocomplete="off">
-                        </div>
-                        <button class="btn-barcode" id="btn-barcode-scan">
-                            📷 Scan Barcode
-                        </button>
-                    </div>
-
-                    <!-- Barcode scanner simulation row -->
-                    <div class="barcode-input-row" id="barcode-input-row">
-                        <span>📷</span>
-                        <input type="text" id="barcode-input"
-                               placeholder="Scan or type barcode → Enter"
-                               autocomplete="off">
-                        <button class="btn btn-sm btn-light" onclick="document.getElementById('barcode-input-row').classList.remove('active')">✕</button>
-                    </div>
-
                     <div class="product-grid" id="product-grid">
                         <div class="loading-overlay" style="grid-column:1/-1">
                             <div class="spinner"></div> Loading products…
                         </div>
                     </div>
                 </div>
+            </div><!-- /.pos-layout -->
 
-                <!-- ── Right: Cart Panel ───────────────────────── -->
-                <div class="pos-right">
+            <!-- Right: Cart Panel
+                 On MOBILE widths, pos.css pins this panel to the
+                 bottom of the screen as a tap-to-expand "peek" bar
+                 (see #cart-toggle-btn below), so it never overlaps
+                 the product grid or scrolls away with it.
+                 On DESKTOP/LAPTOP (901px and up), this is a grid item
+                 that spans BOTH rows of .pos-fixed-height's grid (the
+                 toolbar row AND the product-grid row combined) instead
+                 of sitting only next to the product grid -- moved out
+                 of #pos-layout for exactly this reason, since a nested
+                 grid item can't span rows of its own OUTER grid. This
+                 gives the cart the toolbar's old vertical footprint
+                 too, instead of starting below it, so it has more room
+                 before it ever needs to scroll or crowd the JotForm
+                 widget at the bottom. Still shown/hidden together with
+                 #pos-layout by renderRegisterUI() in pos.js (see
+                 cartPanel there), so register-closed behavior is
+                 unchanged. -->
+            <div class="cart-mobile-overlay" id="cart-mobile-overlay"></div>
+            <div class="pos-right">
                     <div class="cart-header">
-                        <h3>🛒 Cart</h3>
-                        <span class="cart-item-count" id="cart-count">0</span>
+                        <div class="cart-header-title">
+                            <h3>🛒 Cart</h3>
+                            <span class="cart-item-count" id="cart-count">0</span>
+                        </div>
+                        <button class="cart-toggle-btn" id="cart-toggle-btn" aria-expanded="false" aria-label="Expand cart">
+                            <span id="cart-toggle-icon">▲</span>
+                        </button>
                     </div>
 
                     <div class="cart-items" id="cart-items">
@@ -106,27 +181,13 @@
                         </div>
                     </div>
 
-                    <!-- AI Suggestion Section (Prototype) -->
-                    <div class="ai-suggestion-section">
-                        <h4>🤖 AI Suggestion <span class="prototype-badge">PROTOTYPE</span></h4>
-                        <div class="d-flex gap-8">
-                            <input type="text" id="ai-symptoms-input" class="form-control"
-                                   placeholder="Enter symptoms (e.g. headache, fever)…"
-                                   style="flex:1;height:36px;font-size:0.83rem">
-                            <button class="btn btn-primary btn-sm" id="btn-ai-suggest">Ask</button>
-                        </div>
-                        <div id="ai-result" class="ai-result"></div>
-                    </div>
-
-                    <!-- Payment method -->
+                    <!-- Payment method: cash-only for now (see the commented
+                         buttons that used to live here), so there's nothing
+                         for the cashier to actually choose -- the label and
+                         button were just static, unclickable-in-effect UI
+                         taking up cart space. cart.paymentMethod in pos.js
+                         still defaults to 'cash' with no button needed. -->
                     <div class="payment-section">
-                        <label>Payment Method</label>
-                        <div class="payment-methods">
-                            <button class="pay-method-btn active" data-method="cash">💵 Cash</button>
-                            <!-- <button class="pay-method-btn" data-method="card">💳 Card</button>
-                            <button class="pay-method-btn" data-method="gcash">📱 GCash</button>
-                            <button class="pay-method-btn" data-method="maya">🏦 Maya</button> -->
-                        </div>
                         <div class="form-row" style="gap:8px;align-items:end">
                             <div class="form-group" style="margin-bottom:0">
                                 <label class="form-label" style="font-size:0.75rem">Discount</label>
@@ -164,8 +225,6 @@
                         <button class="btn-void-full" id="btn-void">↩ Void Last Transaction</button>
                     </div>
                 </div>
-
-            </div><!-- /.pos-layout -->
         </main>
     </div>
 </div>
@@ -185,9 +244,116 @@
     </div>
 </div>
 
+<div class="modal-overlay" id="open-register-modal">
+    <div class="modal" style="max-width:380px">
+        <div class="modal-header"><h3>🗄️ Open Register</h3></div>
+        <div class="modal-body">
+            <div class="form-group">
+                <label class="form-label">Opening Cash (₱)</label>
+                <input type="number" id="open-register-amount" class="form-control" min="0" step="0.01" placeholder="0.00" autocomplete="off">
+            </div>
+            <p style="font-size:0.8rem;color:var(--secondary)">Count the cash currently in your drawer and enter the total starting amount.</p>
+        </div>
+        <div class="modal-footer">
+            <button class="btn btn-light" onclick="Modal.close('open-register-modal')">Cancel</button>
+            <button class="btn btn-primary" id="btn-confirm-open-register">Open Register</button>
+        </div>
+    </div>
+</div>
+
+<div class="modal-overlay" id="cash-in-modal">
+    <div class="modal" style="max-width:380px">
+        <div class="modal-header"><h3>➕ Cash In</h3></div>
+        <div class="modal-body">
+            <div class="form-group">
+                <label class="form-label">Amount (₱)</label>
+                <input type="number" id="cash-in-amount" class="form-control" min="0.01" step="0.01" placeholder="0.00" autocomplete="off">
+            </div>
+            <div class="form-group">
+                <label class="form-label">Reason</label>
+                <input type="text" id="cash-in-reason" class="form-control" placeholder="e.g. Additional change fund" autocomplete="off">
+            </div>
+        </div>
+        <div class="modal-footer">
+            <button class="btn btn-light" onclick="Modal.close('cash-in-modal')">Cancel</button>
+            <button class="btn btn-primary" id="btn-confirm-cash-in">Add Cash</button>
+        </div>
+    </div>
+</div>
+
+<div class="modal-overlay" id="cash-out-modal">
+    <div class="modal" style="max-width:380px">
+        <div class="modal-header"><h3>➖ Cash Out</h3></div>
+        <div class="modal-body">
+            <div class="form-group">
+                <label class="form-label">Amount (₱)</label>
+                <input type="number" id="cash-out-amount" class="form-control" min="0.01" step="0.01" placeholder="0.00" autocomplete="off">
+            </div>
+            <div class="form-group">
+                <label class="form-label">Reason</label>
+                <input type="text" id="cash-out-reason" class="form-control" placeholder="e.g. Delivery rider expense" autocomplete="off">
+            </div>
+        </div>
+        <div class="modal-footer">
+            <button class="btn btn-light" onclick="Modal.close('cash-out-modal')">Cancel</button>
+            <button class="btn btn-danger" id="btn-confirm-cash-out">Remove Cash</button>
+        </div>
+    </div>
+</div>
+
+<div class="modal-overlay" id="close-register-modal">
+    <div class="modal" style="max-width:420px">
+        <div class="modal-header"><h3>🔒 Close Register</h3></div>
+        <div class="modal-body">
+            <div class="close-reg-summary" id="close-reg-summary"></div>
+            <div class="form-group" style="margin-top:14px">
+                <label class="form-label">Actual Cash Counted (₱)</label>
+                <input type="number" id="close-register-actual" class="form-control" min="0" step="0.01" placeholder="0.00" autocomplete="off">
+            </div>
+            <div class="close-reg-variance" id="close-reg-variance"></div>
+        </div>
+        <div class="modal-footer">
+            <button class="btn btn-light" onclick="Modal.close('close-register-modal')">Cancel</button>
+            <button class="btn btn-danger" id="btn-confirm-close-register">Close Register</button>
+        </div>
+    </div>
+</div>
+
+<div class="modal-overlay" id="camera-scan-modal">
+    <div class="modal" style="max-width:480px">
+        <div class="modal-header">
+            <h3>🎥 Scan with Camera</h3>
+            <button class="btn-close" id="btn-camera-close">✕</button>
+        </div>
+        <div class="modal-body">
+            <div id="camera-select-wrap" class="form-group hidden">
+                <label class="form-label">Camera</label>
+                <select id="camera-device-select" class="form-control"></select>
+            </div>
+            <div class="camera-preview-box">
+                <video id="camera-scan-video" autoplay playsinline muted></video>
+            </div>
+            <p style="font-size:0.8rem;color:var(--secondary);margin-top:10px;text-align:center">
+                Point the camera at a product's barcode. It will be added to the cart automatically once recognized.
+            </p>
+        </div>
+        <div class="modal-footer">
+            <button class="btn btn-light" id="btn-camera-cancel">Cancel</button>
+        </div>
+    </div>
+</div>
+
 <div id="toast-container" class="toast-container"></div>
+<script src="https://unpkg.com/@zxing/library@latest"></script>
+<script src="https://unpkg.com/@zxing/browser@latest"></script>
 <script src="../js/main.js"></script>
 <script src="../js/offlineSync.js"></script>
 <script src="../js/pos.js"></script>
+
+<!-- JotForm AI Agent — real AI-powered medicine/symptom assistant.
+     Loaded on the POS page ONLY, per requirement. Renders as a floating
+     chat widget (bottom-right); this is JotForm's own embed behavior,
+     not something this codebase controls. -->
+<script src='https://cdn.jotfor.ms/agent/embedjs/019d04459081787ab768462d70dfe683b58b/embed.js'></script>
 </body>
 </html>

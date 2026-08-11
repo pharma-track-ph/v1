@@ -218,6 +218,16 @@
                     <textarea id="field-description" name="description"
                               class="form-control" rows="2" placeholder="Optional notes…"></textarea>
                 </div>
+                <!-- Barcode preview — EDIT mode only. Every product always has a
+                     real, scannable barcode value (auto-generated if none was
+                     set), rendered here as an actual CODE128 image. -->
+                <div class="form-group hidden" id="field-barcode-preview">
+                    <label class="form-label">Product Barcode</label>
+                    <div class="barcode-preview-box">
+                        <svg id="barcode-svg"></svg>
+                        <div class="barcode-value-text" id="barcode-value-text">—</div>
+                    </div>
+                </div>
             </form>
         </div>
         <div class="modal-footer">
@@ -228,6 +238,7 @@
 </div>
 
 <div id="toast-container" class="toast-container"></div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jsbarcode/3.12.3/JsBarcode.all.min.js"></script>
 <script src="../js/main.js"></script>
 <script src="../js/offlineSync.js"></script>
 <script src="../js/inventory.js"></script>

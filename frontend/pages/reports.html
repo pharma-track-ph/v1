@@ -116,6 +116,21 @@
 
             <!-- EXPIRED TAB -->
             <div id="tab-expired" style="display:none">
+                <div class="toolbar-row">
+                    <button class="period-btn active" data-expired-range="1">Last 1 Month</button>
+                    <button class="period-btn" data-expired-range="3">Last 3 Months</button>
+                    <button class="period-btn" data-expired-range="6">Last 6 Months</button>
+                    <button class="period-btn" data-expired-range="all">All Time</button>
+                    <button class="period-btn" data-expired-range="custom">Custom</button>
+
+                    <div id="expired-custom-dates">
+                        <label>From</label>
+                        <input type="date" id="expired-start">
+                        <label>To</label>
+                        <input type="date" id="expired-end">
+                        <button class="btn btn-primary btn-sm" id="btn-run-expired">Apply</button>
+                    </div>
+                </div>
                 <div class="expired-stats" id="expired-stats"></div>
                 <div class="card" style="padding:0">
                     <div class="table-container">
@@ -132,6 +147,20 @@
             </div>
             <!-- VOID TAB -->
             <div id="tab-void" style="display:none">
+                <div class="toolbar-row">
+                    <button class="period-btn active" data-void-period="daily">Daily</button>
+                    <button class="period-btn" data-void-period="weekly">Weekly</button>
+                    <button class="period-btn" data-void-period="monthly">Monthly</button>
+                    <button class="period-btn" data-void-period="custom">Custom</button>
+
+                    <div id="void-custom-dates">
+                        <label>From</label>
+                        <input type="date" id="void-start">
+                        <label>To</label>
+                        <input type="date" id="void-end">
+                        <button class="btn btn-primary btn-sm" id="btn-run-void">Generate Report</button>
+                    </div>
+                </div>
                 <div class="card" style="padding:0">
                     <div class="table-container">
                         <table class="table">
@@ -313,18 +342,52 @@ document.addEventListener('DOMContentLoaded', () => {
             document.getElementById('tab-sales').style.display   = id === 'sales'   ? '' : 'none';
             document.getElementById('tab-expired').style.display = id === 'expired' ? '' : 'none';
             document.getElementById('tab-void').style.display    = id === 'void'    ? '' : 'none';
-            if (id === 'expired') loadExpiredReport();
-            if (id === 'void')    loadVoidReport();
+            if (id === 'expired') loadExpiredReport({ months: '1' });
+            if (id === 'void') {
+                const r = getDateRange('daily');
+                voidStartInput.value = r.start;
+                voidEndInput.value   = r.end;
+                loadVoidReport(r.start, r.end);
+            }
         });
     });
 
     // ── Expired Inventory ─────────────────────────────────────
-    async function loadExpiredReport() {
+    const expiredStartInput  = document.getElementById('expired-start');
+    const expiredEndInput    = document.getElementById('expired-end');
+    const expiredCustomDates = document.getElementById('expired-custom-dates');
+
+    document.querySelectorAll('[data-expired-range]').forEach(btn => {
+        btn.addEventListener('click', () => {
+            document.querySelectorAll('[data-expired-range]').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            const range = btn.dataset.expiredRange;
+
+            if (range === 'custom') {
+                expiredCustomDates.classList.add('visible');
+                return;
+            }
+
+            expiredCustomDates.classList.remove('visible');
+            loadExpiredReport(range === 'all' ? {} : { months: range });
+        });
+    });
+
+    document.getElementById('btn-run-expired')?.addEventListener('click', () => {
+        const s = expiredStartInput.value, e = expiredEndInput.value;
+        if (!s || !e) { Toast.show('Select both dates.', 'warning'); return; }
+        if (s > e)    { Toast.show('Start date must be before end date.', 'warning'); return; }
+        loadExpiredReport({ start_date: s, end_date: e });
+    });
+
+    async function loadExpiredReport(params) {
+        params = params || {};
         const tbody = document.getElementById('expired-tbody');
         tbody.innerHTML = '<tr><td colspan="8" class="text-center" style="padding:24px"><div class="spinner" style="margin:0 auto"></div></td></tr>';
         document.getElementById('expired-stats').innerHTML = '';
 
-        const data = await API.get('/reports/expired');
+        const qs = new URLSearchParams(params).toString();
+        const data = await API.get('/reports/expired' + (qs ? '?' + qs : ''));
         if (!data?.success) {
             Toast.show('Failed to load expired inventory.', 'error');
             tbody.innerHTML = '<tr><td colspan="8" class="text-center text-muted" style="padding:24px">Failed to load data.</td></tr>';
@@ -337,7 +400,7 @@ document.addEventListener('DOMContentLoaded', () => {
             <div class="expired-stat-card"><div class="stat-label">Total Value Lost</div><div class="stat-value">${Fmt.currency(summary.total_value_lost)}</div></div>`;
 
         if (!expired.length) {
-            tbody.innerHTML = '<tr><td colspan="8" class="text-center text-muted" style="padding:24px">✅ No expired products on record.</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="8" class="text-center text-muted" style="padding:24px">✅ No expired products for this period.</td></tr>';
             return;
         }
         tbody.innerHTML = expired.map(p => `
@@ -353,11 +416,47 @@ document.addEventListener('DOMContentLoaded', () => {
             </tr>`).join('');
     }
 
-    async function loadVoidReport() {
+    const voidStartInput  = document.getElementById('void-start');
+    const voidEndInput    = document.getElementById('void-end');
+    const voidCustomDates = document.getElementById('void-custom-dates');
+
+    document.querySelectorAll('[data-void-period]').forEach(btn => {
+        btn.addEventListener('click', () => {
+            document.querySelectorAll('[data-void-period]').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            const period = btn.dataset.voidPeriod;
+
+            if (period === 'custom') {
+                voidCustomDates.classList.add('visible');
+                if (!voidStartInput.value) {
+                    const t = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Manila', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
+                    voidStartInput.value = voidEndInput.value = t;
+                }
+                return;
+            }
+
+            voidCustomDates.classList.remove('visible');
+            const range = getDateRange(period);
+            if (range) { voidStartInput.value = range.start; voidEndInput.value = range.end; loadVoidReport(range.start, range.end); }
+        });
+    });
+
+    document.getElementById('btn-run-void')?.addEventListener('click', () => {
+        const s = voidStartInput.value, e = voidEndInput.value;
+        if (!s || !e) { Toast.show('Select both dates.', 'warning'); return; }
+        if (s > e)    { Toast.show('Start date must be before end date.', 'warning'); return; }
+        loadVoidReport(s, e);
+    });
+
+    async function loadVoidReport(start, end) {
         const tbody = document.getElementById('void-tbody');
         tbody.innerHTML = '<tr><td colspan="7" class="text-center" style="padding:24px"><div class="spinner" style="margin:0 auto"></div></td></tr>';
 
-        const data = await API.get('/reports/void?limit=500');
+        const params = new URLSearchParams({ limit: 500 });
+        if (start) params.set('start_date', start);
+        if (end)   params.set('end_date', end);
+
+        const data = await API.get('/reports/void?' + params.toString());
         if (!data?.success) {
             Toast.show('Failed to load void report.', 'error');
             tbody.innerHTML = '<tr><td colspan="7" class="text-center text-muted" style="padding:24px">Failed to load data.</td></tr>';
@@ -366,7 +465,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         const voidData = data.data || [];
         if (!voidData.length) {
-            tbody.innerHTML = '<tr><td colspan="7" class="text-center text-muted" style="padding:24px">✅ No voided transactions on record.</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="7" class="text-center text-muted" style="padding:24px">✅ No voided transactions for this period.</td></tr>';
             return;
         }
 

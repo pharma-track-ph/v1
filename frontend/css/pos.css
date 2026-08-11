@@ -1,23 +1,73 @@
-/* ============================================================
-   POS Module Styles - FIXED for visibility at 100% zoom
-   ============================================================ */
+/* POS Module Styles */
+
+:root {
+    --cart-width:        360px;
+    --cart-gap:          16px;
+    --page-pad:          24px;
+    --fixed-top-gap:     16px;      /* small breathing room below the header, both mobile and desktop toolbars */
+    /* JotForm's collapsed bubble is a small, fixed-size circular launcher
+       docked in the bottom-right corner -- it doesn't change size, so
+       these two numbers (its diameter, and its default margin from the
+       screen edges) are plain fixed values rather than something to
+       measure at runtime. Both the desktop cart's reserved bottom
+       clearance and the mobile cart bar's position are derived from
+       these, so there's only ONE place to adjust if either number turns
+       out to be slightly off in practice. */
+    --jotform-size:      70px;
+    --jotform-margin:    24px;
+    --cart-peek-height:  40px;      /* mobile collapsed cart bar, matches toolbar controls */
+}
+
+/* Robust safety net: explicitly cap EVERY level of the ancestor chain at
+   exactly 100dvh with overflow:hidden, rather than relying on the
+   internal flex/height math below being pixel-perfect. Even if some part
+   of that internal chain is slightly off, the page physically cannot
+   show a scrollbar once every level from body down is hard-capped like
+   this -- any tiny overflow just gets clipped instead of becoming a
+   scrollbar. Applies at EVERY width (mobile included) since both now use
+   the same "confine the page, only the product grid scrolls" approach --
+   100dvh (not 100vh) matters most here on mobile, where 100vh is
+   notoriously larger than the actually-visible area whenever the
+   browser's address bar is on screen. */
+body.pos-page {
+    height:   100dvh;
+    overflow: hidden;
+}
+body.pos-page .app-container {
+    height:   100dvh;
+    overflow: hidden;
+}
+body.pos-page .main-wrapper {
+    height:     100dvh;
+    min-height: 0;
+    overflow:   hidden;
+}
 
 .pos-layout {
     display: grid;
     grid-template-columns: 1fr 360px;
     gap:    16px;
-    height: calc(100vh - var(--header-height) - 48px);
     min-width: 0;
 }
 
-/* ── Product Search Panel ────────────────────────────────── */
 .pos-left {
     display:        flex;
     flex-direction: column;
     gap:            10px;
-    overflow:       hidden;
-    min-height: 0;
     min-width:  0;
+}
+
+/* Base layout for the toolbar (register strip + search bar + barcode
+   row). Plain flex child at every width now -- see the min-width:901px
+   and max-width:900px blocks below .pos-right for how the fixed-height
+   confinement is structured in each case. */
+.pos-fixed-top {
+    display:        flex;
+    flex-direction: column;
+    gap:            14px;
+    flex-shrink:    0;
+    container-type: inline-size;
+    container-name: fixed-top;
 }
 
 .pos-search-bar {
@@ -97,15 +147,12 @@
 
 .product-grid {
     display:          grid;
-    grid-template-columns: repeat(auto-fill, minmax(150px, 190px));
+    /* auto-fit/minmax: as many 150px+ columns as fit, stretched to fill the row */
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
     align-items:      start;
     align-content:    start;
-    justify-content:  start;
     gap:              10px;
-    overflow-y:       auto;
     padding:          4px 2px;
-    flex: 1;
-    min-height: 0;
 }
 
 .product-card {
@@ -119,8 +166,10 @@
     flex-direction:column;
     gap:           4px;
     user-select:   none;
-    height:        128px;   /* uniform size for every card, regardless of content */
-    overflow:      hidden;
+    /* min-height not height: grows for long names instead of clipping them */
+    min-height:    128px;
+    height:        auto;
+    overflow:      visible;
 }
 
 .product-card:hover {
@@ -142,14 +191,12 @@
 }
 
 .product-card .p-name {
-    font-size:   0.8rem;
+    font-size:   clamp(0.72rem, 0.4vw + 0.62rem, 0.85rem);
     font-weight: 600;
     color:       var(--dark);
     line-height: 1.3;
-    display:         -webkit-box;
-    -webkit-line-clamp: 2;
-    -webkit-box-orient: vertical;
-    overflow:        hidden;
+    display:     block;
+    overflow:    visible;
 }
 
 .product-card .p-generic {
@@ -160,7 +207,7 @@
 }
 
 .product-card .p-price {
-    font-size:   0.95rem;
+    font-size:   clamp(0.85rem, 0.6vw + 0.7rem, 1rem);
     font-weight: 700;
     color:       var(--primary);
 }
@@ -176,7 +223,7 @@
     font-weight: 600;
 }
 
-/* ── Cart Panel (right) — FIXED HEIGHT LAYOUT ─────────────── */
+/* -- Cart Panel (right) -- */
 .pos-right {
     display:        flex;
     flex-direction: column;
@@ -184,10 +231,101 @@
     border-radius:  var(--border-radius-lg);
     box-shadow:     var(--shadow-sm);
     border:         1px solid var(--gray-200);
-    overflow:       hidden;
-    height: 100%;
-    min-height: 0;
+    overflow-y: auto;
     min-width:  0;
+    container-type: inline-size;
+    container-name: cart-panel;
+}
+
+@media (min-width: 901px) {
+    /* Grid instead of flex-column: the toolbar (#pos-fixed-top) and the
+       product grid (#pos-layout) share the LEFT column, stacked in their
+       own two rows, while the cart (.pos-right) is a single grid item
+       spanning BOTH those rows in the RIGHT column. That's what lets the
+       cart start at the very top (level with the Register OPEN box)
+       instead of only starting below the toolbar -- it picks up the
+       toolbar's old vertical footprint as extra room for itself, rather
+       than that space being reserved for a full-width toolbar it never
+       actually needed above its own column. Nothing needs measuring:
+       grid-template-rows: auto 1fr sizes the toolbar row to its real
+       content height automatically, same as flexbox did before. */
+    .pos-fixed-height {
+        display:               grid;
+        grid-template-columns: 1fr var(--cart-width);
+        grid-template-rows:    auto 1fr;
+        grid-template-areas:   "top  cart"
+                                "grid cart";
+        gap:            16px;      /* row gap AND column gap: toolbar-to-grid spacing, and grid-to-cart spacing */
+        padding-top:    20px;      /* breathing room below the header */
+        box-sizing:     border-box;
+        min-height:     0;         /* CRITICAL: .pos-fixed-height is ITSELF a flex
+           child of .main-wrapper (global stylesheet). Flex items default to
+           min-height:auto, meaning "never shrink below my content's natural
+           size" -- without this override, the explicit height below gets
+           silently ignored the moment the toolbar+product-grid's combined
+           content wants to be taller than it, which is exactly what let
+           the whole page keep scrolling together despite the height/overflow
+           rules below. Same pattern already used on .pos-left, #pos-layout,
+           and .product-grid further down -- missed applying it here too. */
+        /* Reserved gap at the bottom so the cart's Void button never
+           sits flush against the JotForm bubble. Derived from JotForm's
+           fixed size + margin (see :root) instead of one more guessed
+           "clearance" number -- header + JotForm's own margin-from-bottom
+           + JotForm's height + a small buffer above its top edge. */
+        height:   calc(100dvh - var(--header-height) - var(--jotform-margin) - var(--jotform-size) - var(--fixed-top-gap));
+        overflow: hidden;
+    }
+
+    #pos-fixed-top {
+        grid-area: top;
+    }
+
+    #pos-layout {
+        grid-area:      grid;
+        display:        flex;
+        flex-direction: column;
+        min-height:     0;
+    }
+
+    /* Spans BOTH columns on its own row -- the cart (normally the right
+       column) is hidden right along with #pos-layout whenever this is
+       shown (see renderRegisterUI() in pos.js), so this reclaims that
+       column too, keeping the "Register is Closed" card centered across
+       the full width exactly like before this became a grid. */
+    .register-blocker {
+        grid-row:    2;
+        grid-column: 1 / -1;
+        min-height:  0;
+        overflow-y:  auto;
+    }
+
+    .pos-left {
+        flex:       1;
+        overflow:   hidden;
+        min-height: 0;
+    }
+
+    .product-grid {
+        flex:       1;
+        min-height: 0;
+        overflow-y: auto;
+    }
+
+    .pos-right {
+        grid-area:  cart;
+        min-height: 0;
+    }
+
+    /* Guarantees at least enough room to see 1-2 cart items comfortably
+       even on a shorter monitor, where flex:1 alone could otherwise
+       shrink this down to almost nothing once Payment/Totals/Actions
+       (all flex-shrink:0) take their fixed space first. If content still
+       doesn't fully fit on a very short screen, .pos-right's own
+       overflow-y:auto (base rule) is the safety net that lets the WHOLE
+       panel scroll a little rather than silently clipping anything. */
+    .cart-items {
+        min-height: 90px;
+    }
 }
 
 .cart-header {
@@ -200,6 +338,26 @@
 }
 
 .cart-header h3 { font-size: 0.9rem; font-weight: 700; }
+
+.cart-header-title { display: flex; align-items: center; gap: 8px; }
+
+.cart-toggle-btn {
+    display:         none;   /* shown only on mobile, expand/collapse the cart */
+    align-items:     center;
+    justify-content: center;
+    width:           28px;
+    height:          28px;
+    border:          none;
+    background:      var(--gray-100);
+    border-radius:   50%;
+    cursor:          pointer;
+    color:           var(--gray-700);
+    font-size:       0.75rem;
+    transition:      var(--transition);
+    flex-shrink:     0;
+}
+
+.cart-toggle-btn:hover { background: var(--gray-200); }
 
 .cart-item-count {
     background:    var(--primary);
@@ -214,7 +372,6 @@
     font-weight:   700;
 }
 
-/* CRITICAL FIX: cart-items must flex-grow and scroll internally */
 .cart-items {
     flex:       1;
     overflow-y: auto;
@@ -243,6 +400,12 @@
     border-radius: var(--border-radius);
     border-bottom: 1px solid var(--gray-100);
     transition:    var(--transition);
+}
+
+/* Stack item rows below this container width (narrow cart tier or mobile) */
+@container cart-panel (max-width: 320px) {
+    .cart-item { flex-wrap: wrap; }
+    .cart-item-info { flex-basis: 100%; }
 }
 
 .cart-item:hover { background: var(--gray-100); }
@@ -303,44 +466,6 @@
 
 .btn-remove-item:hover { color: var(--danger); }
 
-/* ── AI Suggestion — compact ─────────────────────────────── */
-.ai-suggestion-section {
-    margin:        8px 12px;
-    padding:       10px 12px;
-    background:    linear-gradient(135deg, #f0f7ff, #e8f0fe);
-    border-radius: var(--border-radius);
-    border:        1px dashed var(--primary);
-    flex-shrink:   0;
-}
-
-.ai-suggestion-section h4 {
-    font-size:     0.73rem;
-    font-weight:   700;
-    color:         var(--primary-dark);
-    margin-bottom: 6px;
-    display:       flex;
-    align-items:   center;
-    gap:           6px;
-}
-
-.ai-suggestion-section .prototype-badge {
-    font-size:     0.6rem;
-    background:    var(--primary);
-    color:         #fff;
-    padding:       1px 5px;
-    border-radius: 4px;
-}
-
-.ai-result {
-    font-size:  0.75rem;
-    color:      var(--success);
-    font-weight:600;
-    margin-top: 6px;
-}
-
-.ai-disclaimer { font-size: 0.65rem; color: var(--secondary); margin-top: 3px; font-style: italic; }
-
-/* ── Payment section — compact ───────────────────────────── */
 .payment-section {
     padding:     8px 14px;
     border-top:  1px solid var(--gray-200);
@@ -364,7 +489,15 @@
 
 .pay-method-btn.active { background: var(--primary); color: #fff; border-color: var(--primary); }
 
-/* ── Cart Totals — compact ───────────────────────────────── */
+/* Keeps Discount and Amount Paid side by side at every width. global.css
+   stacks .form-row to a single column at max-width:768px for forms in
+   general (most forms need that on narrow screens), but that costs the
+   cart real estate it can't spare -- more specific selector wins
+   regardless of viewport, no media query needed here. */
+.payment-section .form-row {
+    grid-template-columns: 1fr 1fr;
+}
+
 .cart-totals {
     padding:      10px 14px;
     border-top:   1px solid var(--gray-200);
@@ -401,7 +534,8 @@
 
 .cart-actions .btn { flex: 1; justify-content: center; }
 
-/* Void button spans the same total width as Clear + Checkout combined */
+.cart-actions:last-child { margin-bottom: 16px; }
+
 .btn-void-full {
     width:         100%;
     padding:       10px;
@@ -429,7 +563,6 @@
 .discount-row { display: flex; gap: 6px; align-items: center; padding: 0 0 6px; }
 .discount-row input { width: 80px; padding: 4px 8px; text-align: right; }
 
-/* ── Discount toggle (20% flat) ──────────────────────── */
 .discount-toggle-btn {
     display:       flex;
     align-items:   center;
@@ -485,16 +618,346 @@
 
 .discount-toggle-btn.active .toggle-label { color: var(--success); }
 
-/* Responsive POS */
-@media (max-width: 1100px) {
-    .pos-layout { grid-template-columns: 1fr 320px; }
+/* Medium laptop tier: narrower fixed cart width keeps the grid usable */
+@media (min-width: 901px) and (max-width: 1300px) {
+    :root { --cart-width: 300px; }
 }
 
 @media (max-width: 900px) {
-    .pos-layout {
-        grid-template-columns: 1fr;
-        height:                auto;
+    /* Same principle as desktop now: one fixed-height column where ONLY
+       the product grid scrolls internally. #pos-fixed-top is normal
+       flow here too (not position:fixed) since there's no page-level
+       scroll left for it to need to survive -- the product grid can
+       never show through behind it, so the old opaque background/
+       shadow/border-radius (needed only to mask that see-through
+       effect) are gone; the base .pos-fixed-top rule above already
+       covers everything it needs as a plain flex child here. 100dvh
+       (not 100vh) matters here specifically: 100vh is the LARGER value
+       that ignores the mobile browser's address bar, which is exactly
+       what was letting the page grow taller than the visible screen and
+       scroll as a whole -- including the toolbar right off the top. */
+    .pos-fixed-height {
+        display:        flex;
+        flex-direction: column;
+        height:         calc(100dvh - var(--header-height));
+        overflow:       hidden;
+        padding-top:    var(--fixed-top-gap);
+        box-sizing:     border-box;
+        gap:            var(--fixed-top-gap);
     }
-    .product-grid { max-height: 320px; }
-    .pos-right { max-height: none; height: auto; }
+
+    #pos-layout {
+        display:        flex;
+        flex-direction: column;
+        flex:           1;
+        min-height:     0;
+    }
+
+    .register-blocker {
+        flex:       1;
+        min-height: 0;
+        overflow-y: auto;
+    }
+
+    .pos-left {
+        display:        flex;
+        flex-direction: column;
+        flex:           1;
+        overflow:       hidden;
+        min-height:     0;
+    }
+
+    .product-grid {
+        flex:           1;
+        min-height:     0;
+        overflow-y:     auto;
+        /* Reserves room at the bottom of the SCROLLING area (not the
+           page) so the last row of products can still scroll fully into
+           view above the floating cart peek bar below. */
+        padding-bottom: calc(var(--cart-peek-height) + var(--fixed-top-gap));
+    }
+
+    .register-strip-actions {
+        margin-left: 0;
+        width:       100%;
+    }
+    .register-strip-actions .btn { flex: 1; justify-content: center; }
+
+    /* PINNED: collapsed cart is a bar (icon/Cart/count/toggle only),
+       docked at the SAME bottom margin as the JotForm bubble, with its
+       right edge stopping just short of JotForm's circle -- the two sit
+       side by side on the same row instead of one stacked above the
+       other. Tapping it expands to a full-screen panel. */
+    .pos-right {
+        position:      fixed;
+        left:          16px;
+        right:         calc(var(--jotform-size) + var(--jotform-margin) + 8px);
+        bottom:        var(--jotform-margin);
+        width:         auto;
+        max-height:    var(--cart-peek-height);
+        border-radius: 16px;
+        z-index:       50;
+        transition:    max-height 0.25s ease, border-radius 0.25s ease,
+                        left 0.25s ease, right 0.25s ease, top 0.25s ease,
+                        bottom 0.25s ease;
+    }
+
+    /* Expanded: full-screen, above header/sidebar, toggle stays reachable */
+    .pos-right.cart-expanded {
+        left:          0;
+        right:         0;
+        top:           0;
+        bottom:        0;
+        max-height:    100dvh;
+        border-radius: 0;
+        z-index:       1500;
+    }
+
+    /* While the cart is expanded it should be the ONLY floating thing on
+       screen -- the JotForm bubble renders at an even higher z-index
+       than our own overlays (outside this codebase's control), so it
+       has to be explicitly hidden rather than just out-stacked. */
+    body:has(.pos-right.cart-expanded) [id^="JotformAgent-"] {
+        display: none !important;
+    }
+
+    /* Collapsed: only the header row shows */
+    .pos-right:not(.cart-expanded) .cart-items,
+    .pos-right:not(.cart-expanded) .cart-totals,
+    .pos-right:not(.cart-expanded) .payment-section,
+    .pos-right:not(.cart-expanded) .cart-actions {
+        display: none;
+    }
+
+    .pos-right:not(.cart-expanded) .cart-header {
+        height:        var(--cart-peek-height);
+        padding:       0 14px;
+        border-bottom: none;
+    }
+
+    .cart-toggle-btn { display: flex; }
+}
+
+/* Backdrop behind the expanded mobile cart; tap to collapse */
+.cart-mobile-overlay {
+    display:    none;
+    position:   fixed;
+    inset:      0;
+    background: rgba(0,0,0,0.45);
+    z-index:    1499;
+}
+
+@media (max-width: 900px) {
+    .cart-mobile-overlay.active { display: block; }
+}
+
+.register-strip {
+    display:         flex;
+    align-items:     center;
+    flex-wrap:       wrap;
+    gap:             16px;
+    background:      var(--success-light);
+    border:          1px solid var(--success);
+    border-radius:   var(--border-radius-lg);
+    padding:         10px 16px;
+    font-size:       0.85rem;
+}
+
+@media (min-width: 901px) {
+    .register-strip {
+        min-height: 56px;  /* room to wrap to a 2nd line without clipping */
+        box-sizing: border-box;
+    }
+}
+
+.register-strip-info {
+    display:      flex;
+    align-items:  center;
+    gap:          8px;
+    color:        var(--dark);
+    white-space:  nowrap;
+    flex-shrink:  0;
+}
+
+.register-status-dot {
+    width:         9px;
+    height:        9px;
+    border-radius: 50%;
+    background:    var(--success);
+    display:       inline-block;
+    flex-shrink:   0;
+}
+
+.register-strip-sep { color: var(--secondary); }
+
+.register-strip-totals {
+    display:     flex;
+    gap:         14px;
+    flex-shrink: 0;
+    color:       var(--dark);
+    font-size:   0.8rem;
+}
+
+.register-strip-totals span {
+    white-space: nowrap;
+}
+
+.register-strip-actions {
+    display:     flex;
+    gap:         8px;
+    flex-shrink: 0;
+    white-space: nowrap;
+    margin-left: auto;
+}
+
+/* Reflows the register strip/search bar to fit the toolbar's own width */
+@container fixed-top (max-width: 720px) {
+    .register-strip {
+        flex-direction: column;
+        align-items:    flex-start;
+        gap:            8px;
+    }
+    .register-strip-totals { flex-wrap: wrap; gap: 8px 14px; }
+    .register-strip-actions { margin-left: 0; width: 100%; }
+    .register-strip-actions .btn { flex: 1; justify-content: center; }
+}
+
+@container fixed-top (max-width: 480px) {
+    .register-strip-info,
+    .register-strip-totals span {
+        white-space: normal;
+    }
+    .pos-search-bar { flex-wrap: wrap; }
+    .btn-barcode { flex: 1; justify-content: center; }
+}
+
+.register-blocker {
+    display:         flex;
+    align-items:     center;
+    justify-content: center;
+    min-height:      calc(100dvh - var(--header-height) - 80px);
+}
+
+.register-blocker-card {
+    background:    var(--white);
+    border:        1px solid var(--gray-200);
+    border-radius: var(--border-radius-lg);
+    box-shadow:    var(--shadow);
+    padding:       48px 40px;
+    text-align:    center;
+    width: min(420px, 90vw);
+}
+
+.register-blocker-icon { font-size: 3rem; margin-bottom: 12px; }
+
+.register-blocker-card h2 { font-size: 1.3rem; font-weight: 700; margin-bottom: 8px; color: var(--dark); }
+
+.register-blocker-card p {
+    font-size:     0.88rem;
+    color:         var(--secondary);
+    margin-bottom: 22px;
+    line-height:   1.5;
+}
+
+.close-reg-summary {
+    background:    var(--light-blue);
+    border-radius: var(--border-radius);
+    padding:       12px 14px;
+    font-size:     0.85rem;
+}
+
+.close-reg-summary .crs-row {
+    display:         flex;
+    justify-content: space-between;
+    padding:         3px 0;
+    color:           var(--secondary);
+}
+
+.close-reg-summary .crs-row.crs-total {
+    font-weight:   700;
+    color:         var(--dark);
+    border-top:    1px solid var(--gray-300);
+    margin-top:    6px;
+    padding-top:   8px;
+}
+
+.close-reg-variance {
+    margin-top:    10px;
+    font-weight:   700;
+    font-size:     0.95rem;
+    text-align:    center;
+    padding:       8px;
+    border-radius: var(--border-radius);
+}
+
+.close-reg-variance.zero     { background: var(--success-light); color: var(--success); }
+.close-reg-variance.shortage { background: var(--danger-light);  color: var(--danger);  }
+.close-reg-variance.overage  { background: var(--warning-light); color: #92400e;        }
+
+.camera-preview-box {
+    background:    #000;
+    border-radius: var(--border-radius);
+    overflow:      hidden;
+    aspect-ratio:  4 / 3;
+    display:       flex;
+    align-items:   center;
+    justify-content: center;
+}
+
+.camera-preview-box video {
+    width:      100%;
+    height:     100%;
+    object-fit: cover;
+}
+
+/* Short-viewport compacting for the cart panel.
+   On desktop widths (901px+) but a shorter monitor/window, the fixed
+   sections inside .pos-right (cart-header, payment-section, cart-totals,
+   both .cart-actions rows) add up to close to the panel's ENTIRE
+   available height on their own, before .cart-items gets any space at
+   all. That forces .cart-items down to its 90px floor and then still
+   overflows the total, which trips .pos-right's own overflow-y:auto
+   safety net (base rule, above) -- the whole panel scrolls instead of
+   just the item list, which is what read as "cramped/overlapping"
+   between the added item and Payment Method.
+   This tightens the fixed sections' padding/margins and lowers the
+   cart-items floor so everything fits inside the available height
+   without the panel-level scroll kicking in. Pure spacing change, same
+   structure/content. 850px is a deliberate margin above the ~805px
+   viewport height measured on the affected monitor, so it reliably
+   triggers there without touching the taller monitor where the
+   un-compacted spacing already looked fine. */
+@media (min-width: 901px) and (max-height: 850px) {
+    .cart-header {
+        padding: 8px 16px;
+    }
+
+    .payment-section {
+        padding: 6px 14px;
+    }
+
+    .cart-totals {
+        padding: 8px 12px;
+    }
+
+    .totals-row {
+        padding: 2px 0;
+    }
+
+    .totals-row.total-final {
+        margin-top:  4px;
+        padding-top: 6px;
+    }
+
+    .cart-actions {
+        padding: 6px 14px;
+    }
+
+    .cart-actions:last-child {
+        margin-bottom: 8px;
+    }
+
+    .cart-items {
+        min-height: 64px;
+    }
 }

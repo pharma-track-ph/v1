@@ -32,16 +32,16 @@ const Order = {
         const {
             order_number, cashier_id, subtotal, discount = 0,
             tax = 0, total, payment_method, amount_tendered, change_amount,
-            notes = null
+            notes = null, cash_session_id = null
         } = orderData;
 
         const [result] = await executor.query(
             `INSERT INTO orders
              (order_number, cashier_id, subtotal, discount, tax, total,
-              payment_method, amount_tendered, change_amount, notes)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+              payment_method, amount_tendered, change_amount, notes, cash_session_id)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
             [order_number, cashier_id, subtotal, discount, tax, total,
-             payment_method, amount_tendered, change_amount, notes]
+             payment_method, amount_tendered, change_amount, notes, cash_session_id]
         );
         return result.insertId;
     },

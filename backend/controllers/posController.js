@@ -7,6 +7,7 @@ const Product      = require('../models/Product');
 const Order        = require('../models/Order');
 const OrderItem    = require('../models/OrderItem');
 const User         = require('../models/User');
+const CashSession  = require('../models/CashSession');
 const { logAudit } = require('../middleware/authMiddleware');
 
 function getManilaDateString() {
@@ -98,8 +99,27 @@ const searchProducts = async (req, res, next) => {
  *   payment_method: 'cash',
  *   amount_tendered: 500,
  *   discount: 0,
- *   notes: ''
+ *   notes: '',
+ *   cash_session_id: 12   // the OPEN register this sale belongs to
  * }
+ *
+ * ── Cash register gating ──────────────────────────────────────
+ * A sale can only be completed while the cashier has an OPEN cash
+ * session ("register"). The frontend sends the `cash_session_id` it
+ * had cached at the moment Checkout was clicked — this matters for
+ * offline mode: if a sale is queued while offline and only syncs
+ * later (possibly after that shift has since closed and a new one
+ * opened), we must NOT silently attach it to whatever session happens
+ * to be open at sync time. Instead we verify the *specific* session ID
+ * the sale was originally meant for is still open, and reject cleanly
+ * if not, rather than misattributing it to the wrong shift's totals.
+ *
+ * The check is done via SELECT ... FOR UPDATE inside this transaction,
+ * so it's impossible for a concurrent "Close Register" request to slip
+ * in between the check and the order being created — whichever request
+ * (checkout or close) begins its transaction first, InnoDB makes the
+ * other one wait until the first commits, so there's no window where
+ * a sale can be silently lost from a shift's totals.
  *
  * Cart lines represent a *product family* (grouped across batches in the
  * UI), not a single exact batch row. Each line carries an ordered
@@ -108,18 +128,9 @@ const searchProducts = async (req, res, next) => {
  * first, spilling into the next batch only if needed — this keeps
  * unit_cost accurate per batch actually sold, so profit reporting stays
  * correct even when a single sale spans multiple batches.
- *
- * ── Transaction flow ──────────────────────────────────────────
- * 1. Validate each item (resolve FEFO across batches, check stock)
- * 2. BEGIN TRANSACTION
- * 3. Create order header
- * 4. Create order items (snapshots of price/batch/cost, one per batch used)
- * 5. Decrement stock for each batch actually consumed
- * 6. COMMIT
- * 7. Return receipt data
  */
 const checkout = async (req, res, next) => {
-    const { items, payment_method = 'cash', amount_tendered, discount = 0, notes = '' } = req.body;
+    const { items, payment_method = 'cash', amount_tendered, discount = 0, notes = '', cash_session_id } = req.body;
 
     if (!items || !items.length) {
         return res.status(400).json({ success: false, message: 'Cart is empty.' });
@@ -209,6 +220,38 @@ const checkout = async (req, res, next) => {
     try {
         await connection.beginTransaction();
 
+        // Row-lock this cashier's open session for the duration of this
+        // transaction. If a concurrent Close Register request is also in
+        // flight, InnoDB serializes them — whichever started first wins,
+        // the other waits, so a sale can never be silently dropped from a
+        // shift's totals due to a timing coincidence.
+        const openSession = await CashSession.lockOpenByCashier(req.user.id, connection);
+
+        if (!openSession) {
+            await connection.rollback();
+            return res.status(400).json({
+                success: false,
+                blocked: true,
+                reason: 'no_open_register',
+                message: 'Please open your register before processing sales.'
+            });
+        }
+
+        // If the frontend had a specific session cached (the normal case,
+        // and the important case for offline-queued sales), it must match
+        // the session that's ACTUALLY open right now. A mismatch means the
+        // original shift this sale was meant for is no longer open — reject
+        // cleanly rather than silently attaching it to a different shift.
+        if (cash_session_id && parseInt(cash_session_id) !== openSession.id) {
+            await connection.rollback();
+            return res.status(409).json({
+                success: false,
+                blocked: true,
+                reason: 'session_mismatch',
+                message: 'Your register session has changed since this sale was started. Please refresh and try again.'
+            });
+        }
+
         const order_number = await Order.generateOrderNumber();
 
         // Create order header
@@ -222,7 +265,8 @@ const checkout = async (req, res, next) => {
             payment_method,
             amount_tendered: tenderedAmount,
             change_amount:  change,
-            notes
+            notes,
+            cash_session_id: openSession.id
         }, connection);
 
         // Create order items
@@ -355,6 +399,13 @@ const getVoidCandidate = async (req, res, next) => {
  * - Admins/super_admins void on their own authority (no approval needed),
  *   but only their OWN current-session transactions — same rule as anyone
  *   else.
+ * - NEW: if the order belongs to a cash register session that has already
+ *   been CLOSED, the void is blocked entirely. Once a shift is closed, its
+ *   variance report has already been calculated and potentially handed to
+ *   the owner — silently changing the totals underneath that report after
+ *   the fact would make it wrong without anyone knowing. Orders from
+ *   before this feature existed have no cash_session_id at all, so this
+ *   rule simply doesn't apply to them (nothing to check).
  * - Stock is restored per batch (order_items.product_id is the exact batch
  *   row consumed at checkout time), not just added back to "the product"
  *   generically — so batch-level stock stays accurate.
@@ -387,7 +438,7 @@ const voidLastOrder = async (req, res, next) => {
         }
 
         // The void is attributed to the APPROVING admin/owner, not the cashier
-        // who requested it — they're the one who authorized it.
+        // who requested it — they're the one who actually authorized it.
         approverId   = manager.id;
         approverName = manager.name;
     }
@@ -402,6 +453,20 @@ const voidLastOrder = async (req, res, next) => {
         if (!order) {
             connection.release();
             return res.status(404).json({ success: false, message: 'No transaction from this session available to void.' });
+        }
+
+        // NEW: block voiding once the order's cash register shift is closed.
+        // Historical orders (before this feature existed) have no
+        // cash_session_id at all, so this check is simply skipped for them.
+        if (order.cash_session_id) {
+            const cashSession = await CashSession.findById(order.cash_session_id);
+            if (cashSession && cashSession.status === 'CLOSED') {
+                connection.release();
+                return res.status(409).json({
+                    success: false,
+                    message: 'This transaction belongs to a closed register session and cannot be voided.'
+                });
+            }
         }
 
         const items = await OrderItem.findByOrderId(order.id);

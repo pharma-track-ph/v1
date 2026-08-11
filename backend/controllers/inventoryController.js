@@ -49,10 +49,18 @@ const getProduct = async (req, res, next) => {
 
 /**
  * POST /api/inventory  [Admin+]
+ * If no barcode is supplied, one is auto-generated and persisted
+ * immediately after insert, so every product always has a scannable code
+ * from the moment it's created — never left blank.
  */
 const createProduct = async (req, res, next) => {
     try {
         const id = await Product.create(req.body);
+
+        if (!req.body.barcode) {
+            await Product.ensureBarcode(id);
+        }
+
         await logAudit(req.user.id, 'CREATE_PRODUCT', 'products', id, req.body, req.ip);
         res.status(201).json({ success: true, message: 'Product created.', id });
     } catch (err) {
@@ -197,7 +205,31 @@ const importCSV = async (req, res, next) => {
     } catch (err) { next(err); }
 };
 
+/**
+ * GET /api/inventory/:id/barcode  [Admin+]
+ * Returns the product's barcode, auto-generating and persisting one
+ * first if it doesn't already have one (see Product.ensureBarcode).
+ * Used by the Edit Product modal to guarantee a real, scannable value
+ * always exists before rendering the barcode image.
+ */
+const getBarcode = async (req, res, next) => {
+    try {
+        const barcode = await Product.ensureBarcode(req.params.id);
+        if (barcode === null) {
+            return res.status(404).json({ success: false, message: 'Product not found.' });
+        }
+        res.json({ success: true, barcode });
+    } catch (err) {
+        if (err.code === 'ER_DUP_ENTRY') {
+            // Astronomically unlikely (see ensureBarcode comment), but handled
+            // cleanly rather than surfacing a raw SQL error.
+            return res.status(409).json({ success: false, message: 'Could not generate a unique barcode. Please set one manually.' });
+        }
+        next(err);
+    }
+};
+
 module.exports = {
     getProducts, getProduct, createProduct, updateProduct,
-    deleteProduct, getAlertSummary, importCSV
+    deleteProduct, getAlertSummary, importCSV, getBarcode
 };
