@@ -1,6 +1,17 @@
 // ============================================================
 // Offline Sync Module
 // IndexedDB-based offline-first data sync for PharmaTrack
+//
+// Covers: product/inventory browsing, the CURRENT cash register session,
+// and POS checkout -- all three keep working with no internet, and sync
+// back once the connection returns. Built for a single-cashier pharmacy
+// (see pos.js), so this deliberately does NOT try to reconcile
+// simultaneous multi-cashier stock conflicts -- it optimistically trusts
+// the locally cached numbers while offline, and the server still has
+// final say once synced. If a queued sale is ever rejected at sync time
+// (e.g. stock genuinely ran out in the meantime), it's recorded in
+// `failed_syncs` instead of silently vanishing -- see recordFailedSync()
+// and OfflineAPI.getFailedSyncs().
 // ============================================================
 
 class OfflineSync {
@@ -13,7 +24,11 @@ class OfflineSync {
 
     async initDB() {
         return new Promise((resolve, reject) => {
-            const request = indexedDB.open('pharmatrack_offline', 1);
+            // Bumped 1 -> 2 to add the `session` and `failed_syncs` stores
+            // below. onupgradeneeded only fires for browsers that still
+            // have the old version 1 database, so existing cached
+            // products/sync_queue data is untouched by this bump.
+            const request = indexedDB.open('pharmatrack_offline', 2);
 
             request.onerror = () => reject(request.error);
             request.onsuccess = () => {
@@ -37,6 +52,22 @@ class OfflineSync {
                 if (!db.objectStoreNames.contains('orders')) {
                     db.createObjectStore('orders', { keyPath: 'id' });
                 }
+
+                // Single-row cache of "the cashier's currently open register"
+                // (see OfflineAPI.cacheCurrentSession) -- keyPath 'key' with
+                // one fixed record ('current'), same pattern as any small
+                // singleton cache.
+                if (!db.objectStoreNames.contains('session')) {
+                    db.createObjectStore('session', { keyPath: 'key' });
+                }
+
+                // Sync attempts that got permanently discarded (rejected by
+                // the server, or gave up after repeated failures) land here
+                // instead of just disappearing -- see recordFailedSync().
+                if (!db.objectStoreNames.contains('failed_syncs')) {
+                    const failedStore = db.createObjectStore('failed_syncs', { keyPath: 'id', autoIncrement: true });
+                    failedStore.createIndex('timestamp', 'timestamp', { unique: false });
+                }
             };
         });
     }
@@ -57,15 +88,24 @@ class OfflineSync {
     showOfflineBanner(show) {
         let banner = document.getElementById('offline-banner');
         if (show && !banner) {
+            const topHeader   = document.querySelector('.top-header');
+            const headerRight = document.querySelector('.header-right');
+            if (!topHeader) return; // no header on this page (e.g. login) -- nothing to show it in
+
             banner = document.createElement('div');
             banner.id = 'offline-banner';
-            banner.style.cssText = `
-                position: fixed; top: 0; left: 0; right: 0; z-index: 1000;
-                background: #f59e0b; color: white; text-align: center; padding: 8px;
-                font-size: 14px; font-weight: 500;
-            `;
-            banner.textContent = 'Offline mode: changes will sync when connection returns.';
-            document.body.appendChild(banner);
+            banner.textContent = 'Offline Mode';
+
+            // Inserted BEFORE .header-right (not just appended) so it lands
+            // in the middle of the header's own flex layout
+            // (justify-content:space-between between .header-left and
+            // .header-right) -- the empty gap that's already there on
+            // every page, rather than overlaying anything.
+            if (headerRight) {
+                topHeader.insertBefore(banner, headerRight);
+            } else {
+                topHeader.appendChild(banner);
+            }
         } else if (!show && banner) {
             banner.remove();
         }
@@ -107,6 +147,18 @@ class OfflineSync {
         });
     }
 
+    async delete(table, id) {
+        if (!this.db) await this.initDB();
+        return new Promise((resolve, reject) => {
+            const transaction = this.db.transaction([table], 'readwrite');
+            const store = transaction.objectStore(table);
+            const request = store.delete(id);
+
+            request.onerror = () => reject(request.error);
+            request.onsuccess = () => resolve(request.result);
+        });
+    }
+
     async addToSyncQueue(operation) {
         if (!this.db) await this.initDB();
         const queueItem = {
@@ -125,6 +177,29 @@ class OfflineSync {
         });
     }
 
+    /**
+     * Records a sync attempt that's being permanently given up on (rejected
+     * by the server, or repeated failures) so it doesn't just silently
+     * vanish -- OfflineAPI.getFailedSyncs() surfaces these on the POS page
+     * for the cashier/owner to review and handle manually if needed.
+     */
+    async recordFailedSync(item, reason) {
+        return new Promise((resolve, reject) => {
+            const transaction = this.db.transaction(['failed_syncs'], 'readwrite');
+            const store = transaction.objectStore('failed_syncs');
+            const request = store.add({
+                endpoint:  item.endpoint,
+                method:    item.method,
+                body:      item.body,
+                reason,
+                timestamp: Date.now()
+            });
+
+            request.onerror = () => reject(request.error);
+            request.onsuccess = () => resolve(request.result);
+        });
+    }
+
     async processSyncQueue() {
         if (!this.isOnline || !this.db) return;
 
@@ -132,6 +207,7 @@ class OfflineSync {
         if (!queue.length) return;
 
         let syncedCount = 0;
+        let failedCount = 0;
 
         for (const item of queue) {
             try {
@@ -161,7 +237,10 @@ class OfflineSync {
                 }
 
                 if (response.status >= 400 && response.status < 500) {
+                    const data = await parseJsonSafely(response);
+                    await this.recordFailedSync(item, data?.message || `Server rejected this (HTTP ${response.status}).`);
                     await this.deleteFromQueue(item.id);
+                    failedCount++;
                     console.warn('Discarding sync item after client error:', item, response.status);
                     continue;
                 }
@@ -170,7 +249,9 @@ class OfflineSync {
                 if (item.retries < 3) {
                     await this.put('sync_queue', item);
                 } else {
+                    await this.recordFailedSync(item, 'Server kept returning errors after 3 attempts.');
                     await this.deleteFromQueue(item.id);
+                    failedCount++;
                     console.warn('Sync item failed after 3 retries:', item);
                 }
             } catch (error) {
@@ -179,25 +260,34 @@ class OfflineSync {
                 if (item.retries < 3) {
                     await this.put('sync_queue', item);
                 } else {
+                    await this.recordFailedSync(item, 'Could not reach the server after 3 attempts.');
                     await this.deleteFromQueue(item.id);
+                    failedCount++;
                 }
             }
         }
 
         if (syncedCount > 0) {
-            Toast.show('Data synced successfully!', 'success');
+            Toast.show(`${syncedCount} offline change${syncedCount === 1 ? '' : 's'} synced successfully!`, 'success');
         }
+        if (failedCount > 0) {
+            Toast.show(
+                `${failedCount} offline change${failedCount === 1 ? '' : 's'} could not sync. Check "Offline Sync Issues" on the POS page.`,
+                'error'
+            );
+        }
+
+        // Lets any page listening (see pos.js's FailedSyncPanel) refresh
+        // itself right after a sync pass -- both to show/hide the failed-
+        // sync banner, and to re-pull the server's now-authoritative stock/
+        // session numbers instead of the offline cache's approximation.
+        window.dispatchEvent(new CustomEvent('pharmatrack:sync-complete', {
+            detail: { syncedCount, failedCount }
+        }));
     }
 
     async deleteFromQueue(id) {
-        return new Promise((resolve, reject) => {
-            const transaction = this.db.transaction(['sync_queue'], 'readwrite');
-            const store = transaction.objectStore('sync_queue');
-            const request = store.delete(id);
-
-            request.onerror = () => reject(request.error);
-            request.onsuccess = () => resolve(request.result);
-        });
+        return this.delete('sync_queue', id);
     }
 }
 
@@ -250,6 +340,14 @@ function isInventoryListEndpoint(endpoint) {
 
 function isPosProductsEndpoint(endpoint) {
     return endpoint === '/pos/products' || endpoint.startsWith('/pos/products?');
+}
+
+function isCashSessionEndpoint(endpoint) {
+    return endpoint === '/pos/cash-session/current';
+}
+
+function isCheckoutEndpoint(endpoint) {
+    return endpoint === '/pos/checkout';
 }
 
 function normalizeStatusFilter(status) {
@@ -384,6 +482,66 @@ const OfflineAPI = {
         };
     },
 
+    /**
+     * Caches "the cashier's currently open register" (or null, if there
+     * isn't one) every time it's successfully fetched online, so Checkout
+     * still knows the register is open -- and which session ID to attach
+     * the sale to -- once offline. See getCachedSession() for the
+     * offline-read side.
+     */
+    async cacheCurrentSession(session) {
+        await offlineSync.put('session', { key: 'current', data: session ?? null, cachedAt: Date.now() });
+    },
+
+    async getCachedSession() {
+        const record = await offlineSync.get('session', 'current');
+        return { success: true, data: record?.data ?? null, cached: true };
+    },
+
+    /**
+     * Applied when a checkout is queued for later sync (whether truly
+     * offline, or the server errored while nominally online -- see
+     * OfflineAPI.post below). Decrements the CACHED product-family entry
+     * (keyed by product_id, the same id /pos/products groups batches
+     * under) by the quantity just sold, so a second offline sale of the
+     * same product sees accurate remaining stock instead of the
+     * pre-sale number. This is a display-side approximation, not a
+     * batch-exact mirror of the server's FEFO consumption -- fine for
+     * keeping the offline UI honest; the server still does the real,
+     * exact stock deduction once this sale actually syncs.
+     */
+    async decrementCachedStockForCheckout(items = []) {
+        for (const item of items) {
+            const cached = await offlineSync.get('products', item.product_id);
+            if (!cached) continue;
+
+            const available = Number(cached.stock_quantity) || 0;
+            cached.stock_quantity = Math.max(0, available - (Number(item.quantity) || 0));
+            delete cached.stock_status; // force normalizeCachedProduct to recompute it from the new quantity
+
+            await offlineSync.put('products', normalizeCachedProduct(cached));
+        }
+    },
+
+    async getFailedSyncs() {
+        const all = await offlineSync.getAll('failed_syncs');
+        return all.sort((a, b) => b.timestamp - a.timestamp);
+    },
+
+    async clearFailedSync(id) {
+        await offlineSync.delete('failed_syncs', id);
+    },
+
+    async clearAllFailedSyncs() {
+        const all = await this.getFailedSyncs();
+        for (const item of all) await offlineSync.delete('failed_syncs', item.id);
+    },
+
+    async getQueueCount() {
+        const queue = await offlineSync.getAll('sync_queue');
+        return queue.length;
+    },
+
     async get(endpoint) {
         if (offlineSync.isOnline) {
             const controller = new AbortController();
@@ -413,6 +571,10 @@ const OfflineAPI = {
                     await this.cacheProducts(data?.data || []);
                 }
 
+                if (isCashSessionEndpoint(endpoint)) {
+                    await this.cacheCurrentSession(data?.data ?? null);
+                }
+
                 return data;
             } catch (error) {
                 console.warn('Request failed, falling back to cache:', error.message);
@@ -432,6 +594,10 @@ const OfflineAPI = {
 
         if (isInventoryListEndpoint(endpoint) || isPosProductsEndpoint(endpoint)) {
             return this.getCachedProducts(endpoint);
+        }
+
+        if (isCashSessionEndpoint(endpoint)) {
+            return this.getCachedSession();
         }
 
         throw new Error('Offline and no cache available');
@@ -457,18 +623,27 @@ const OfflineAPI = {
                 }
 
                 if (!response.ok) {
-                    return data || { success: false, message: `HTTP ${response.status}` };
-                }
+                    if (response.status >= 500) {
+                        // Server reachable but broken server-side (e.g. its DB
+                        // connection is down) -- treat exactly like a network
+                        // failure below: queue it instead of showing whatever
+                        // internal error the server returned.
+                        console.warn(`Server error ${response.status} on ${endpoint}, queuing for later sync.`);
+                        this.showFallbackWarning('Server error. Request queued for sync.');
+                    } else {
+                        return data || { success: false, message: `HTTP ${response.status}` };
+                    }
+                } else {
+                    if (endpoint === '/inventory' && data?.id) {
+                        await offlineSync.put('products', normalizeCachedProduct({
+                            ...body,
+                            id: data.id,
+                            is_active: 1
+                        }));
+                    }
 
-                if (endpoint === '/inventory' && data?.id) {
-                    await offlineSync.put('products', normalizeCachedProduct({
-                        ...body,
-                        id: data.id,
-                        is_active: 1
-                    }));
+                    return data;
                 }
-
-                return data;
             } catch (error) {
                 console.warn('Network error, queuing for later:', error.message);
                 Toast.show('Network error. Request queued for sync.', 'warning');
@@ -494,7 +669,12 @@ const OfflineAPI = {
             }));
         }
 
-        return { success: true, message: 'Queued for sync', queued: true };
+        if (isCheckoutEndpoint(endpoint) && Array.isArray(body?.items)) {
+            await this.decrementCachedStockForCheckout(body.items);
+        }
+
+        const queueCount = await this.getQueueCount();
+        return { success: true, message: 'Queued for sync', queued: true, queueCount };
     },
 
     async put(endpoint, body) {
@@ -517,19 +697,24 @@ const OfflineAPI = {
                 }
 
                 if (!response.ok) {
-                    return data || { success: false, message: `HTTP ${response.status}` };
-                }
+                    if (response.status >= 500) {
+                        console.warn(`Server error ${response.status} on ${endpoint}, queuing for later sync.`);
+                        this.showFallbackWarning('Server error. Request queued for sync.');
+                    } else {
+                        return data || { success: false, message: `HTTP ${response.status}` };
+                    }
+                } else {
+                    if (endpoint.includes('/inventory/')) {
+                        const id = endpoint.split('/').pop();
+                        await offlineSync.put('products', normalizeCachedProduct({
+                            ...body,
+                            id: parseInt(id, 10),
+                            is_active: 1
+                        }));
+                    }
 
-                if (endpoint.includes('/inventory/')) {
-                    const id = endpoint.split('/').pop();
-                    await offlineSync.put('products', normalizeCachedProduct({
-                        ...body,
-                        id: parseInt(id, 10),
-                        is_active: 1
-                    }));
+                    return data;
                 }
-
-                return data;
             } catch (error) {
                 console.warn('Network error, queuing for later:', error.message);
                 Toast.show('Network error. Request queued for sync.', 'warning');
@@ -576,19 +761,24 @@ const OfflineAPI = {
                 }
 
                 if (!response.ok) {
-                    return data || { success: false, message: `HTTP ${response.status}` };
-                }
-
-                if (endpoint.includes('/inventory/')) {
-                    const id = endpoint.split('/').pop();
-                    const cached = await offlineSync.get('products', parseInt(id, 10));
-                    if (cached) {
-                        cached.is_active = 0;
-                        await offlineSync.put('products', cached);
+                    if (response.status >= 500) {
+                        console.warn(`Server error ${response.status} on ${endpoint}, queuing for later sync.`);
+                        this.showFallbackWarning('Server error. Request queued for sync.');
+                    } else {
+                        return data || { success: false, message: `HTTP ${response.status}` };
                     }
-                }
+                } else {
+                    if (endpoint.includes('/inventory/')) {
+                        const id = endpoint.split('/').pop();
+                        const cached = await offlineSync.get('products', parseInt(id, 10));
+                        if (cached) {
+                            cached.is_active = 0;
+                            await offlineSync.put('products', cached);
+                        }
+                    }
 
-                return data;
+                    return data;
+                }
             } catch (error) {
                 console.warn('Network error, queuing for later:', error.message);
                 Toast.show('Network error. Request queued for sync.', 'warning');

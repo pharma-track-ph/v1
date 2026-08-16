@@ -10,9 +10,9 @@ const Product = {
             SELECT *,
                    DATEDIFF(expiry_date, CURDATE()) AS days_until_expiry,
                    CASE
+                       WHEN stock_quantity <= 0                                THEN 'out_of_stock'
                        WHEN expiry_date < CURDATE()                            THEN 'expired'
                        WHEN DATEDIFF(expiry_date, CURDATE()) <= 30             THEN 'near_expiry'
-                       WHEN stock_quantity <= 0                                THEN 'out_of_stock'
                        WHEN stock_quantity <= low_stock_threshold              THEN 'low_stock'
                        ELSE 'in_stock'
                    END AS stock_status
@@ -35,13 +35,23 @@ const Product = {
         if (status) {
             switch (status) {
                 case 'low_stock':
-                    sql += ' AND stock_quantity <= low_stock_threshold AND stock_quantity > 0';
+                    // Must mirror findAll's CASE priority: a batch that's ALSO
+                    // expired/near-expiry/out-of-stock is categorized under
+                    // that higher-priority status instead, so exclude those
+                    // here too, or this filter would double-count rows that
+                    // display under a different badge.
+                    sql += ' AND stock_quantity > 0 AND stock_quantity <= low_stock_threshold AND expiry_date >= CURDATE() AND DATEDIFF(expiry_date, CURDATE()) > 30';
                     break;
                 case 'expiring':
-                    sql += ' AND expiry_date >= CURDATE() AND DATEDIFF(expiry_date, CURDATE()) <= 30';
+                    // A batch that's sold out (stock 0) is never "expiring soon"
+                    // from a business standpoint — there's no stock left to lose.
+                    sql += ' AND expiry_date >= CURDATE() AND DATEDIFF(expiry_date, CURDATE()) <= 30 AND stock_quantity > 0';
                     break;
                 case 'expired':
-                    sql += ' AND expiry_date < CURDATE()';
+                    // Once a batch hits 0 stock it's "Sold Out", not "Expired" —
+                    // there's nothing left that could still spoil/be wasted, so
+                    // it should never show up in an expired-inventory view.
+                    sql += ' AND expiry_date < CURDATE() AND stock_quantity > 0';
                     break;
                 case 'out_of_stock':
                     sql += ' AND stock_quantity <= 0';
@@ -52,7 +62,15 @@ const Product = {
             }
         }
 
-        sql += ' ORDER BY expiry_date ASC, name ASC';
+        // Out-of-stock items sort to the very bottom regardless of their
+        // expiry_date -- otherwise a sold-out batch with a past expiry date
+        // would sort as if it were the MOST urgently expiring item (since a
+        // plain expiry_date ASC sort treats "in the past" as "earliest"),
+        // when it's actually a Out of Stock status, not an expiry concern at
+        // all. Everything else keeps the original expiry_date/name order.
+        sql += ` ORDER BY
+                    CASE WHEN stock_quantity <= 0 THEN 1 ELSE 0 END,
+                    expiry_date ASC, name ASC`;
         const [rows] = await db.query(sql, params);
         return rows;
     },
@@ -136,7 +154,7 @@ const Product = {
 
     getLowStockCount: async () => {
         // Must mirror the exact priority order used in findAll()'s CASE expression
-        // (expired > near_expiry > out_of_stock > low_stock) so this count always
+        // (out_of_stock > expired > near_expiry > low_stock) so this count always
         // matches what Inventory shows when filtered to "Low Stock" — otherwise a
         // product that's both low-stock AND expiring soon would get double-counted
         // here while only showing up under "Near Expiry" in the actual table.
@@ -152,32 +170,38 @@ const Product = {
     },
 
     getNearExpiryCount: async () => {
+        // Excludes sold-out batches (stock 0) — see findAll's CASE priority:
+        // out_of_stock now outranks near_expiry, so a 0-stock batch should
+        // never be double-counted here too.
         const [rows] = await db.query(
             `SELECT COUNT(*) AS count FROM products
              WHERE is_active = 1
                AND expiry_date >= CURDATE()
-               AND DATEDIFF(expiry_date, CURDATE()) <= 30`
+               AND DATEDIFF(expiry_date, CURDATE()) <= 30
+               AND stock_quantity > 0`
         );
         return rows[0].count;
     },
 
     getExpiredCount: async () => {
+        // Once a batch's stock hits 0 it's "Sold Out", not "Expired" — see
+        // findAll's CASE priority (out_of_stock is checked before expired).
+        // There's no remaining stock left to have gone to waste, so it
+        // shouldn't count towards (or appear in) the expired-inventory view.
         const [rows] = await db.query(
             `SELECT COUNT(*) AS count FROM products
-             WHERE is_active = 1 AND expiry_date < CURDATE()`
+             WHERE is_active = 1 AND expiry_date < CURDATE() AND stock_quantity > 0`
         );
         return rows[0].count;
     },
 
     getOutOfStockCount: async () => {
-        // Same priority rule as above — a product that's both out of stock AND
-        // expiring within 30 days is categorized as near_expiry, not out_of_stock.
+        // Out of stock is now the TOP-priority status (see findAll's CASE) —
+        // a 0-stock batch is "Sold Out" regardless of its expiry date, so no
+        // expiry-related conditions apply here anymore.
         const [rows] = await db.query(
             `SELECT COUNT(*) AS count FROM products
-             WHERE is_active = 1
-               AND expiry_date >= CURDATE()
-               AND DATEDIFF(expiry_date, CURDATE()) > 30
-               AND stock_quantity <= 0`
+             WHERE is_active = 1 AND stock_quantity <= 0`
         );
         return rows[0].count;
     },

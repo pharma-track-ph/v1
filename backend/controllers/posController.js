@@ -391,16 +391,20 @@ const getVoidCandidate = async (req, res, next) => {
  *   way, and can't even reach their OWN transactions from a previous login.
  * - Cashiers cannot void on their own authority: an admin or super_admin
  *   ("owner") must approve by entering their own email + password in the
- *   request body (manager_email / manager_password). The void is then
- *   attributed to that approving admin/owner in the audit log — not the
- *   cashier — since they're the one who actually authorized it. Approval
- *   does NOT change which order gets targeted — it's still whatever the
- *   cashier's OWN current session last completed.
+ *   request body (manager_email / manager_password).
+ * - The audit log entry is attributed to the CASHIER whose transaction it
+ *   actually is (req.user.id) — not the approving admin/owner. This was a
+ *   real bug found in testing: an earlier version logged it under the
+ *   approver's id, so Audit Logs/reports showed the admin/owner as the
+ *   "User" for a void that genuinely belongs to the cashier's shift. The
+ *   approver authorized it, they didn't perform it — their name/id goes in
+ *   `details` (approved_by / approved_by_id) instead, same pattern used for
+ *   Cash In/Out/Open/Close in cashController.js.
  * - Admins/super_admins void on their own authority (no approval needed),
  *   but only their OWN current-session transactions — same rule as anyone
  *   else.
- * - NEW: if the order belongs to a cash register session that has already
- *   been CLOSED, the void is blocked entirely. Once a shift is closed, its
+ * - If the order belongs to a cash register session that has already been
+ *   CLOSED, the void is blocked entirely. Once a shift is closed, its
  *   variance report has already been calculated and potentially handed to
  *   the owner — silently changing the totals underneath that report after
  *   the fact would make it wrong without anyone knowing. Orders from
@@ -412,8 +416,8 @@ const getVoidCandidate = async (req, res, next) => {
  */
 const voidLastOrder = async (req, res, next) => {
     const isCashier = req.user.role === 'cashier';
-    let approverId   = req.user.id;
-    let approverName = req.user.name;
+    let approverId   = null;  // stays null unless a cashier's void needed manager approval
+    let approverName = null;
 
     // ── Manager/owner override required for cashiers ──────────
     if (isCashier) {
@@ -437,8 +441,6 @@ const voidLastOrder = async (req, res, next) => {
             return res.status(401).json({ success: false, message: 'Invalid admin/owner credentials.' });
         }
 
-        // The void is attributed to the APPROVING admin/owner, not the cashier
-        // who requested it — they're the one who actually authorized it.
         approverId   = manager.id;
         approverName = manager.name;
     }
@@ -455,7 +457,7 @@ const voidLastOrder = async (req, res, next) => {
             return res.status(404).json({ success: false, message: 'No transaction from this session available to void.' });
         }
 
-        // NEW: block voiding once the order's cash register shift is closed.
+        // Block voiding once the order's cash register shift is closed.
         // Historical orders (before this feature existed) have no
         // cash_session_id at all, so this check is simply skipped for them.
         if (order.cash_session_id) {
@@ -495,11 +497,14 @@ const voidLastOrder = async (req, res, next) => {
 
         await connection.commit();
 
-        await logAudit(approverId, 'VOID_ORDER', 'orders', order.id,
+        // Attributed to the cashier whose transaction this is (req.user.id),
+        // not the approver — see docstring above. Approver's name/id (when
+        // there is one) lives in details instead.
+        await logAudit(req.user.id, 'VOID_ORDER', 'orders', order.id,
             {
                 order_number: order.order_number,
                 total: order.total,
-                ...(isCashier ? { requested_by: req.user.name, requested_by_id: req.user.id } : {})
+                ...(approverName ? { approved_by: approverName, approved_by_id: approverId } : {})
             },
             req.ip);
 

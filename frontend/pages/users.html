@@ -31,6 +31,7 @@
             <ul>
                 <li class="nav-item active" data-roles="super_admin"><a href="users.html"><span class="nav-icon"></span> Users</a></li>
                 <li class="nav-item" data-roles="super_admin"><a href="audit.html"><span class="nav-icon"></span> Audit Logs</a></li>
+                <li class="nav-item" data-roles="super_admin"><a href="backup.html"><span class="nav-icon"></span> Backup & Restore</a></li>
                 <li class="nav-item"><a href="#" data-action="logout"><span class="nav-icon"></span> Sign Out</a></li>
             </ul>
         </nav>
@@ -189,6 +190,13 @@
                         <option value="0">🔴 Inactive</option>
                     </select>
                 </div>
+
+                <!-- Shown only when editing your OWN account -- explains why
+                     Role/Status above are greyed out (see users.js's
+                     openEditModal) -->
+                <p class="hidden" id="self-edit-note" style="font-size:0.78rem;color:var(--secondary);margin-top:8px">
+                    ℹ️ Role and Account Status can't be changed on your own account, to prevent accidentally locking yourself out.
+                </p>
             </form>
         </div>
         <div class="modal-footer">

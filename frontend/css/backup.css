@@ -1,0 +1,66 @@
+/* ── Backup & Restore page styles ──────────────────────── */
+
+.backup-schedule-card {
+    padding:       18px 20px;
+    margin-bottom: 20px;
+}
+
+.backup-schedule-row {
+    display:               grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap:                   16px;
+    margin-bottom:         14px;
+    align-items:           end;
+}
+
+.backup-schedule-label {
+    font-size:   0.75rem;
+    color:       var(--secondary);
+    margin-bottom: 4px;
+}
+
+.backup-schedule-value {
+    font-size:   0.95rem;
+    font-weight: 700;
+    color:       var(--dark);
+}
+
+.backup-schedule-edit {
+    display:     flex;
+    gap:         8px;
+    align-items: center;
+}
+
+.backup-schedule-note {
+    font-size:   0.8rem;
+    color:       var(--secondary);
+    line-height: 1.5;
+    padding-top: 12px;
+    border-top:  1px solid var(--gray-200);
+    margin:      0;
+}
+
+/* Backup type pill (manual / scheduled / pre-restore safety) */
+.backup-type-badge {
+    display:       inline-block;
+    padding:       2px 10px;
+    border-radius: 50px;
+    font-size:     0.72rem;
+    font-weight:   600;
+    white-space:   nowrap;
+}
+
+.backup-type-badge.manual        { background: var(--primary-light); color: var(--primary-dark); }
+.backup-type-badge.scheduled     { background: var(--success-light); color: var(--success); }
+.backup-type-badge.pre-restore-safety { background: var(--warning-light); color: #92400e; }
+
+.action-cell { white-space: nowrap; }
+
+/* Labeled action buttons in the backup table -- text alongside the icon so
+   the purpose is clear at a glance, not just on hover. */
+.backup-action-btn {
+    display:      inline-flex;
+    align-items:  center;
+    gap:          5px;
+    white-space:  nowrap;
+}

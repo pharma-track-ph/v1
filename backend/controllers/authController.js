@@ -106,14 +106,39 @@ const createUser = async (req, res, next) => {
 
 /**
  * PUT /api/auth/users/:id  [Admin+]
+ *
+ * Self-edit: allowed for Name/Email/Password, but NOT Role or Active-status
+ * -- letting someone change their own role or deactivate their own account
+ * risks locking themselves out with no one else able to undo it in the
+ * moment. This mirrors the frontend's users.js, which disables those two
+ * fields when editing your own row, but it's enforced here too so it can't
+ * be bypassed with a direct API call.
+ *
+ * Other-owner accounts remain fully protected regardless (unchanged).
  */
 const updateUser = async (req, res, next) => {
     try {
         const { id } = req.params;
         const { name, email, role, is_active, password } = req.body;
+        const isSelf = parseInt(id) === req.user.id;
 
-        if (parseInt(id) === req.user.id) {
-            return res.status(400).json({ success: false, message: 'Cannot modify your own account here.' });
+        if (isSelf) {
+            if (role !== req.user.role) {
+                return res.status(400).json({ success: false, message: 'You cannot change your own role.' });
+            }
+            if (parseInt(is_active) !== 1) {
+                return res.status(400).json({ success: false, message: 'You cannot deactivate your own account.' });
+            }
+        } else {
+            // Owner (super_admin) accounts can only be managed by the account
+            // holder themselves, never by another owner.
+            const target = await User.findById(id);
+            if (!target) {
+                return res.status(404).json({ success: false, message: 'User not found.' });
+            }
+            if (target.role === 'super_admin') {
+                return res.status(403).json({ success: false, message: 'Owner accounts can only be managed by the account holder.' });
+            }
         }
 
         const affected = await User.update(id, { name, email, role, is_active });
@@ -142,6 +167,15 @@ const deleteUser = async (req, res, next) => {
 
         if (parseInt(id) === req.user.id) {
             return res.status(400).json({ success: false, message: 'Cannot delete your own account.' });
+        }
+
+        // Same owner-protection rule as updateUser above.
+        const target = await User.findById(id);
+        if (!target) {
+            return res.status(404).json({ success: false, message: 'User not found.' });
+        }
+        if (target.role === 'super_admin') {
+            return res.status(403).json({ success: false, message: 'Owner accounts can only be managed by the account holder.' });
         }
 
         await User.softDelete(id);

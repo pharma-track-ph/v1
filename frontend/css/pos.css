@@ -910,6 +910,64 @@ body.pos-page .main-wrapper {
     object-fit: cover;
 }
 
+/* Quantity-per-scan stepper, shown below the camera preview */
+.camera-qty-row {
+    display:         flex;
+    align-items:     center;
+    justify-content: space-between;
+    gap:             10px;
+    margin-top:      12px;
+}
+
+.camera-qty-row .form-label {
+    margin-bottom: 0;
+    white-space:   nowrap;
+}
+
+.camera-qty-stepper {
+    display:     flex;
+    align-items: center;
+    gap:         6px;
+}
+
+.camera-qty-stepper .qty-btn {
+    width:  32px;
+    height: 32px;
+}
+
+.camera-qty-stepper input {
+    width:       56px;
+    text-align:  center;
+    padding:     6px 4px;
+    font-weight: 700;
+}
+
+/* Feedback for the most recent scan (success/error), shown below the
+   stepper since the camera modal now stays open across multiple scans */
+.camera-scan-feedback {
+    min-height:    20px;
+    margin-top:    10px;
+    text-align:    center;
+    font-size:     0.85rem;
+    font-weight:   600;
+    border-radius: var(--border-radius);
+    padding:       0 8px;
+}
+
+.camera-scan-feedback:empty { display: none; }
+
+.camera-scan-feedback.success {
+    padding:    8px;
+    background: var(--success-light);
+    color:      var(--success);
+}
+
+.camera-scan-feedback.error {
+    padding:    8px;
+    background: var(--danger-light);
+    color:      var(--danger);
+}
+
 /* Short-viewport compacting for the cart panel.
    On desktop widths (901px+) but a shorter monitor/window, the fixed
    sections inside .pos-right (cart-header, payment-section, cart-totals,
@@ -960,4 +1018,53 @@ body.pos-page .main-wrapper {
     .cart-items {
         min-height: 64px;
     }
+}
+
+/* Offline Sync Issues -- small floating banner, only shown when there's
+   at least one permanently-failed sync (see offlineSync.js /
+   OfflineAPI.getFailedSyncs). Bottom-left so it doesn't compete with the
+   cart (bottom-right on mobile) or the JotForm bubble. */
+.failed-sync-banner {
+    position:      fixed;
+    left:          16px;
+    bottom:        16px;
+    z-index:       1200;
+    background:    var(--danger);
+    color:         #fff;
+    border:        none;
+    border-radius: 999px;
+    padding:       10px 18px;
+    font-size:     0.82rem;
+    font-weight:   600;
+    cursor:        pointer;
+    box-shadow:    var(--shadow);
+    max-width:     calc(100vw - 32px);
+}
+
+.failed-sync-banner:hover { filter: brightness(1.08); }
+
+.failed-sync-item {
+    padding:       12px 0;
+    border-bottom: 1px solid var(--gray-200);
+}
+
+.failed-sync-item:last-child { border-bottom: none; }
+
+.failed-sync-item-header {
+    display:         flex;
+    justify-content: space-between;
+    align-items:     center;
+    margin-bottom:   4px;
+}
+
+.failed-sync-reason {
+    font-size:   0.82rem;
+    color:       var(--danger);
+    margin-bottom: 4px;
+}
+
+.failed-sync-detail {
+    font-size:     0.78rem;
+    color:         var(--secondary);
+    margin-bottom: 8px;
 }

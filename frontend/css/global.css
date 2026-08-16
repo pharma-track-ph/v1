@@ -782,6 +782,7 @@ body { overflow-x: hidden; }
 tr.row-expired   td { background: #fff0f0 !important; }
 tr.row-expiring  td { background: #fffbf0 !important; }
 tr.row-low-stock td { background: #f0f0ff !important; }
+tr.row-soldout   td { background: #f4f4f5 !important; }
 
 /* ── Utility classes ───────────────────────────────────────── */
 .text-center  { text-align: center; }
@@ -918,3 +919,20 @@ tr.row-low-stock td { background: #f0f0ff !important; }
 }
 
 .sidebar-overlay.active { display: block; }
+
+/* ── Offline indicator (persistent, while the browser has no connection) ──
+   A normal child of .top-header now, inserted between .header-left and
+   .header-right (see offlineSync.js's showOfflineBanner) -- .top-header's
+   own justify-content:space-between naturally centers it in the gap
+   that's already empty there on every page, so it never overlaps
+   anything (the earlier position:fixed version did, on both the header
+   and whatever page content sat directly below it). */
+#offline-banner {
+    background:    #f59e0b;
+    color:         #fff;
+    padding:       6px 16px;
+    border-radius: 999px;
+    font-size:     0.8rem;
+    font-weight:   600;
+    white-space:   nowrap;
+}

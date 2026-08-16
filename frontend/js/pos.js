@@ -14,12 +14,12 @@ document.addEventListener('DOMContentLoaded', () => {
         paymentMethod:    'cash',
         amountTendered:   0,
 
-        addItem(product) {
+        addItem(product, qty = 1) {
             const existing = this.items.find(i => i.product.id === product.id);
             if (existing) {
-                existing.quantity++;
+                existing.quantity += qty;
             } else {
-                this.items.push({ product, quantity: 1 });
+                this.items.push({ product, quantity: qty });
             }
             renderCart();
             saveCartToStorage();
@@ -109,6 +109,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // ── DOM References ────────────────────────────────────────
     const productGrid     = document.getElementById('product-grid');
+    const posSearchBar    = document.getElementById('pos-search-bar');
     const searchInput     = document.getElementById('pos-search');
     const barcodeRow      = document.getElementById('barcode-input-row');
     const barcodeInput    = document.getElementById('barcode-input');
@@ -163,6 +164,110 @@ document.addEventListener('DOMContentLoaded', () => {
     loadCashSession();
     restoreCartUI();
 
+    const FailedSyncPanel = {
+        async refresh() {
+            const failed = await OfflineAPI.getFailedSyncs();
+            this.render(failed.length);
+        },
+
+        render(count) {
+            let banner = document.getElementById('failed-sync-banner');
+            if (count > 0) {
+                if (!banner) {
+                    banner = document.createElement('button');
+                    banner.id = 'failed-sync-banner';
+                    banner.className = 'failed-sync-banner';
+                    banner.type = 'button';
+                    banner.addEventListener('click', () => this.openModal());
+                    document.body.appendChild(banner);
+                }
+                banner.textContent = `${count} Sync Issue${count === 1 ? '' : 's'} – Tap to view`;
+            } else if (banner) {
+                banner.remove();
+            }
+        },
+
+        ensureModal() {
+            if (document.getElementById('failed-sync-modal')) return;
+            const overlay = document.createElement('div');
+            overlay.className = 'modal-overlay';
+            overlay.id = 'failed-sync-modal';
+            overlay.innerHTML = `
+                <div class="modal" style="max-width:480px">
+                    <div class="modal-header">
+                        <h3>Offline Sync Issues</h3>
+                        <button class="btn-close" id="btn-close-failed-sync">X</button>
+                    </div>
+                    <div class="modal-body" id="failed-sync-body" style="max-height:400px;overflow-y:auto"></div>
+                    <div class="modal-footer">
+                        <button class="btn btn-light" id="btn-dismiss-all-failed">Dismiss All</button>
+                        <button class="btn btn-primary" id="btn-close-failed-sync-2">Close</button>
+                    </div>
+                </div>`;
+            document.body.appendChild(overlay);
+
+            overlay.addEventListener('click', (e) => { if (e.target === overlay) Modal.close('failed-sync-modal'); });
+            document.getElementById('btn-close-failed-sync')?.addEventListener('click', () => Modal.close('failed-sync-modal'));
+            document.getElementById('btn-close-failed-sync-2')?.addEventListener('click', () => Modal.close('failed-sync-modal'));
+            document.getElementById('btn-dismiss-all-failed')?.addEventListener('click', async () => {
+                const confirmed = await ConfirmDialog.show({
+                    title:       'Dismiss All',
+                    message:     'Clear this list? Only do this after you\'ve checked each item.',
+                    confirmText: 'Dismiss All'
+                });
+                if (!confirmed) return;
+                await OfflineAPI.clearAllFailedSyncs();
+                Modal.close('failed-sync-modal');
+                this.refresh();
+            });
+        },
+
+        async openModal() {
+            const failed = await OfflineAPI.getFailedSyncs();
+            this.ensureModal();
+            const body = document.getElementById('failed-sync-body');
+
+            if (!failed.length) {
+                body.innerHTML = `<p class="text-muted" style="text-align:center;padding:20px">No sync issues.</p>`;
+            } else {
+                body.innerHTML = failed.map(item => {
+                    const isCheckout = item.endpoint === '/pos/checkout';
+                    const itemsSummary = isCheckout
+                        ? (item.body?.items || []).map(i => `x${i.quantity} (product #${i.product_id})`).join(', ')
+                        : '';
+                    return `
+                    <div class="failed-sync-item">
+                        <div class="failed-sync-item-header">
+                            <strong>${isCheckout ? 'Checkout' : escHtml(item.endpoint)}</strong>
+                            <span class="text-muted" style="font-size:0.75rem">${Fmt.datetime(new Date(item.timestamp).toISOString())}</span>
+                        </div>
+                        <div class="failed-sync-reason">${escHtml(item.reason)}</div>
+                        ${isCheckout ? `<div class="failed-sync-detail">Items: ${escHtml(itemsSummary)} -- Total tendered: ${Fmt.currency(item.body?.amount_tendered)}</div>` : ''}
+                        <button class="btn btn-light btn-sm btn-dismiss-failed" data-id="${item.id}">Dismiss</button>
+                    </div>`;
+                }).join('');
+
+                body.querySelectorAll('.btn-dismiss-failed').forEach(btn => {
+                    btn.addEventListener('click', async () => {
+                        await OfflineAPI.clearFailedSync(parseInt(btn.dataset.id));
+                        this.openModal();
+                        this.refresh();
+                    });
+                });
+            }
+
+            Modal.open('failed-sync-modal');
+        }
+    };
+
+    FailedSyncPanel.refresh();
+
+    window.addEventListener('pharmatrack:sync-complete', () => {
+        FailedSyncPanel.refresh();
+        loadPOSProducts();
+        loadCashSession();
+    });
+
     // ── Load all available products ───────────────────────────
     // Every card here represents one product *family* — batches of the
     // same product name are combined server-side into a single card with
@@ -195,6 +300,7 @@ document.addEventListener('DOMContentLoaded', () => {
             registerBlocker.classList.add('hidden');
             posLayout.classList.remove('hidden');
             cartPanel?.classList.remove('hidden');
+            posSearchBar?.classList.remove('hidden');
 
             const openedTime = new Date(currentCashSession.opened_at).toLocaleTimeString('en-PH', {
                 hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Manila'
@@ -209,6 +315,11 @@ document.addEventListener('DOMContentLoaded', () => {
             registerBlocker.classList.remove('hidden');
             posLayout.classList.add('hidden');
             cartPanel?.classList.add('hidden');
+            // Nothing to search or scan for until a register session is
+            // open — hide the whole search/scan toolbar, and make sure the
+            // simulated barcode input row isn't left open behind it either.
+            posSearchBar?.classList.add('hidden');
+            barcodeRow?.classList.remove('active');
         }
     }
 
@@ -237,16 +348,52 @@ document.addEventListener('DOMContentLoaded', () => {
         });
         if (!confirmed) return;
 
-        btn.disabled = true;
-        const result = await API.post('/pos/cash-session/open', { opening_cash: amount });
-        btn.disabled = false;
+        const isCashier = Auth.getUser()?.role === 'cashier';
 
-        if (result?.success) {
-            Modal.close('open-register-modal');
-            Toast.show('Register opened.', 'success');
-            await loadCashSession();
+        if (isCashier) {
+            // Manager/owner approval required to open too now -- same retry
+            // loop pattern as Cash In/Out/Close/Void.
+            let promptMessage = 'Opening the register requires an admin or owner to approve.';
+
+            while (true) {
+                const creds = await ManagerApprovalDialog.show(promptMessage);
+                if (!creds) return; // cashier cancelled
+
+                btn.disabled = true;
+                const result = await API.post('/pos/cash-session/open', {
+                    opening_cash: amount,
+                    manager_email: creds.email,
+                    manager_password: creds.password
+                });
+                btn.disabled = false;
+
+                if (result?.success) {
+                    Modal.close('open-register-modal');
+                    Toast.show('Register opened.', 'success');
+                    await loadCashSession();
+                    return;
+                }
+
+                if (result?.message?.toLowerCase().includes('credentials')) {
+                    promptMessage = `❌ ${result.message} Please try again.`;
+                    continue;
+                }
+
+                Toast.show(result?.message || 'Could not open register.', 'error');
+                return;
+            }
         } else {
-            Toast.show(result?.message || 'Could not open register.', 'error');
+            btn.disabled = true;
+            const result = await API.post('/pos/cash-session/open', { opening_cash: amount });
+            btn.disabled = false;
+
+            if (result?.success) {
+                Modal.close('open-register-modal');
+                Toast.show('Register opened.', 'success');
+                await loadCashSession();
+            } else {
+                Toast.show(result?.message || 'Could not open register.', 'error');
+            }
         }
     });
 
@@ -484,7 +631,7 @@ document.addEventListener('DOMContentLoaded', () => {
             return `
             <div class="product-card ${cardClass}"
                  data-id="${p.id}"
-                 title="${isOOS ? 'Out of stock' : 'Click to add'}">
+                 title="${isOOS ? 'Sold out' : 'Click to add'}">
                 <div class="p-name">${escHtml(p.name)}</div>
                 ${p.generic_name ? `<div class="p-generic text-muted">${escHtml(p.generic_name)}</div>` : ''}
                 <div class="p-price">${Fmt.currency(p.price)}</div>
@@ -506,15 +653,24 @@ document.addEventListener('DOMContentLoaded', () => {
     // Expired batches are never returned by the backend at all, so no
     // client-side expiry check is needed here — the checkout endpoint
     // still re-validates server-side as a final safety net regardless.
-    function addToCart(product) {
+    function addToCart(product, qty = 1) {
+        qty = Math.max(1, parseInt(qty) || 1);
+
         // Stock check against the combined total across all non-expired batches
         const currentQty = cart.items.find(i => i.product.id === product.id)?.quantity || 0;
         if (currentQty >= product.stock_quantity) {
             Toast.show(`Only ${product.stock_quantity} units available.`, 'warning');
-            return;
+            return false;
+        }
+        if (currentQty + qty > product.stock_quantity) {
+            const room = product.stock_quantity - currentQty;
+            Toast.show(`Only ${room} more unit${room === 1 ? '' : 's'} of ${product.name} available — added ${room} instead of ${qty}.`, 'warning');
+            cart.addItem(product, room);
+            return true;
         }
 
-        cart.addItem(product);
+        cart.addItem(product, qty);
+        return true;
     }
 
     // ── Render cart ───────────────────────────────────────────
@@ -635,9 +791,41 @@ document.addEventListener('DOMContentLoaded', () => {
     // camera instead of a keyboard.
     let zxingControls = null;
 
+    // Quantity-per-scan stepper (camera modal). Read fresh on every
+    // successful scan (see handleScannedCode), so changing it mid-session
+    // (e.g. from 1 to 50 for the next product) applies immediately without
+    // needing to reopen the scanner.
+    const cameraQtyInput = document.getElementById('camera-scan-qty');
+    const cameraFeedback = document.getElementById('camera-scan-feedback');
+
+    function getCameraScanQty() {
+        const val = parseInt(cameraQtyInput?.value);
+        return (!val || val < 1) ? 1 : val;
+    }
+
+    document.getElementById('camera-qty-dec')?.addEventListener('click', () => {
+        if (!cameraQtyInput) return;
+        cameraQtyInput.value = Math.max(1, getCameraScanQty() - 1);
+    });
+    document.getElementById('camera-qty-inc')?.addEventListener('click', () => {
+        if (!cameraQtyInput) return;
+        cameraQtyInput.value = getCameraScanQty() + 1;
+    });
+    cameraQtyInput?.addEventListener('input', () => {
+        if (cameraQtyInput.value !== '' && getCameraScanQty() < 1) cameraQtyInput.value = 1;
+    });
+
     document.getElementById('btn-camera-scan')?.addEventListener('click', openCameraScanner);
-    document.getElementById('btn-camera-cancel')?.addEventListener('click', closeCameraScanner);
+    document.getElementById('btn-camera-done')?.addEventListener('click', closeCameraScanner);
     document.getElementById('btn-camera-close')?.addEventListener('click', closeCameraScanner);
+
+    // main.js's generic overlay-click handler just calls Modal.close() by
+    // id, which would leave the camera stream running in the background if
+    // someone clicks the dimmed backdrop instead of Done/✕ — make sure the
+    // camera actually stops in that case too.
+    document.getElementById('camera-scan-modal')?.addEventListener('click', (e) => {
+        if (e.target.id === 'camera-scan-modal') closeCameraScanner();
+    });
 
     async function openCameraScanner() {
         console.log('[Camera Scanner] Opening... ZXingBrowser loaded?', typeof ZXingBrowser !== 'undefined');
@@ -650,6 +838,12 @@ document.addEventListener('DOMContentLoaded', () => {
 
         Modal.open('camera-scan-modal');
         const videoEl = document.getElementById('camera-scan-video');
+
+        // Fresh state for this scanning session — quantity defaults back to
+        // 1 and any leftover "Added X" feedback from a previous visit to
+        // this modal is cleared.
+        if (cameraQtyInput) cameraQtyInput.value = 1;
+        if (cameraFeedback) { cameraFeedback.textContent = ''; cameraFeedback.className = 'camera-scan-feedback'; }
 
         // Explicitly telling ZXing which formats to look for, plus TRY_HARDER,
         // is the documented, recommended way to use this library — confirmed
@@ -698,18 +892,34 @@ document.addEventListener('DOMContentLoaded', () => {
         // identically twice in a row, so this filters out false positives
         // while adding only a fraction of a second of perceived delay for a
         // real, steady scan. `scanLocked` additionally blocks any further
-        // frame callbacks the instant a code IS confirmed, closing the small
-        // race window between calling closeCameraScanner() and the camera
-        // stream actually finishing its stop().
+        // frame callbacks the instant a code IS confirmed.
+        //
+        // The scanner now stays open across multiple scans (see
+        // handleScannedCode below) instead of closing after the first one,
+        // so a code being confirmed is no longer the end of this session —
+        // scanLocked/lastDecodedText/consecutiveMatches get RESET on a short
+        // cooldown afterwards (see resetScanState) rather than staying
+        // locked forever. That cooldown is what stops the same barcode,
+        // still sitting in front of the camera, from being immediately
+        // re-added a second time before the person has had a chance to move
+        // on to the next product.
         const REQUIRED_CONSECUTIVE_MATCHES = 2;
+        const SCAN_COOLDOWN_MS             = 1200;
         let lastDecodedText     = null;
         let consecutiveMatches  = 0;
         let scanLocked          = false;
+        let cooldownTimer       = null;
+
+        function resetScanState() {
+            lastDecodedText    = null;
+            consecutiveMatches = 0;
+            scanLocked         = false;
+        }
 
         function handleDecodeResult(result, err) {
             frameCount++;
             if (result) {
-                if (scanLocked) return; // already confirmed/closing — ignore stray in-flight frames
+                if (scanLocked) return; // in cooldown after a confirmed scan — ignore stray in-flight frames
 
                 const text = result.getText();
                 if (text === lastDecodedText) {
@@ -724,7 +934,11 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (consecutiveMatches >= REQUIRED_CONSECUTIVE_MATCHES) {
                     scanLocked = true;
                     console.log('[Camera Scanner] CONFIRMED:', text);
+                    clearTimeout(cooldownTimer);
                     handleScannedCode(text);
+                    // Give the person a beat to move to the next product before
+                    // the same code in frame could be confirmed again.
+                    cooldownTimer = setTimeout(resetScanState, SCAN_COOLDOWN_MS);
                 }
             } else if (err && frameCount % 30 === 0) {
                 // ZXing calls this back on EVERY frame, even when nothing is
@@ -797,15 +1011,27 @@ document.addEventListener('DOMContentLoaded', () => {
         Modal.close('camera-scan-modal');
     }
 
+    // Camera stays open after a successful scan — no closeCameraScanner()
+    // call here — so the cashier can keep scanning the next product without
+    // reopening the modal each time. The quantity stepper is read fresh on
+    // every call, so it's added at whatever quantity was set for THIS scan.
     async function handleScannedCode(code) {
-        closeCameraScanner();
-
+        const qty  = getCameraScanQty();
         const data = await OfflineAPI.get(`/pos/products?barcode=${encodeURIComponent(code)}`);
 
         if (data?.success && data.data.length) {
-            addToCart(data.data[0]);
+            const product = data.data[0];
+            const added   = addToCart(product, qty);
+            if (added && cameraFeedback) {
+                cameraFeedback.textContent = `✅ Added ${product.name} ×${qty}`;
+                cameraFeedback.className   = 'camera-scan-feedback success';
+            }
         } else {
             Toast.show(`Barcode "${code}" not found.`, 'warning');
+            if (cameraFeedback) {
+                cameraFeedback.textContent = `❌ Barcode "${code}" not found.`;
+                cameraFeedback.className   = 'camera-scan-feedback error';
+            }
         }
     }
 
@@ -987,8 +1213,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
         if (result?.success) {
             if (result.queued) {
-                // Offline checkout queued
-                Toast.show('Checkout queued for sync when online', 'info');
+                Toast.show(
+                    `Checkout queued for sync${result.queueCount ? ` (${result.queueCount} pending)` : ''}.`,
+                    'info'
+                );
                 cart.clear();
                 loadPOSProducts();
             } else {

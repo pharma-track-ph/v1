@@ -35,12 +35,19 @@ const CashSession = {
         return rows[0] || null;
     },
 
-    create: async (cashierId, openingCash, connection) => {
+    /**
+     * @param {number|null} openedApprovedBy - the admin/owner who approved
+     *   this cashier opening their register, or null when the requester is
+     *   already an admin/owner (self-authority, same pattern as Cash In/Out
+     *   and Close) or for historical sessions from before this feature
+     *   existed.
+     */
+    create: async (cashierId, openingCash, openedApprovedBy, connection) => {
         const executor = connection || db;
         const [result] = await executor.query(
-            `INSERT INTO cash_sessions (cashier_id, opening_cash, status)
-             VALUES (?, ?, 'OPEN')`,
-            [cashierId, openingCash]
+            `INSERT INTO cash_sessions (cashier_id, opening_cash, status, opened_approved_by)
+             VALUES (?, ?, 'OPEN', ?)`,
+            [cashierId, openingCash, openedApprovedBy]
         );
         return result.insertId;
     },
@@ -102,6 +109,35 @@ const CashSession = {
             [cashierId]
         );
         return rows[0] || null;
+    },
+
+    /**
+     * GET /api/reports/register — every session (open or closed), newest
+     * first, with human-readable names for the cashier and both approvers
+     * (opening and closing) instead of raw user IDs.
+     */
+    findAllForReport: async ({ startDate, endDate, limit = 500, offset = 0 } = {}) => {
+        let sql = `
+            SELECT cs.*,
+                   cashier.name  AS cashier_name,
+                   opener.name   AS opened_approved_by_name,
+                   closer.name   AS closed_approved_by_name
+            FROM cash_sessions cs
+            JOIN users cashier      ON cashier.id = cs.cashier_id
+            LEFT JOIN users opener  ON opener.id  = cs.opened_approved_by
+            LEFT JOIN users closer  ON closer.id  = cs.closed_approved_by
+            WHERE 1=1
+        `;
+        const params = [];
+
+        if (startDate) { sql += ' AND DATE(cs.opened_at) >= ?'; params.push(startDate); }
+        if (endDate)   { sql += ' AND DATE(cs.opened_at) <= ?'; params.push(endDate);   }
+
+        sql += ' ORDER BY cs.opened_at DESC LIMIT ? OFFSET ?';
+        params.push(parseInt(limit), parseInt(offset));
+
+        const [rows] = await db.query(sql, params);
+        return rows;
     }
 };
 

@@ -30,6 +30,7 @@
             <ul>
                 <li class="nav-item" data-roles="super_admin"><a href="users.html"><span class="nav-icon"></span> Users</a></li>
                 <li class="nav-item" data-roles="super_admin"><a href="audit.html"><span class="nav-icon"></span> Audit Logs</a></li>
+                <li class="nav-item" data-roles="super_admin"><a href="backup.html"><span class="nav-icon"></span> Backup & Restore</a></li>
                 <li class="nav-item"><a href="#" data-action="logout"><span class="nav-icon"></span> Sign Out</a></li>
             </ul>
         </nav>
@@ -69,6 +70,7 @@
                 <button class="report-tab active" data-tab="sales">Sales Report</button>
                 <button class="report-tab" data-tab="expired">Expired Inventory</button>
                 <button class="report-tab" data-tab="void">Void Report</button>
+                <button class="report-tab" data-tab="register">Register Report</button>
             </div>
 
             <!-- SALES TAB -->
@@ -169,6 +171,53 @@
                             </thead>
                             <tbody id="void-tbody">
                                 <tr><td colspan="7" class="text-center" style="padding:24px"><div class="spinner" style="margin:0 auto"></div></td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <!-- REGISTER TAB -->
+            <div id="tab-register" style="display:none">
+                <div class="toolbar-row">
+                    <button class="period-btn active" data-register-period="daily">Daily</button>
+                    <button class="period-btn" data-register-period="weekly">Weekly</button>
+                    <button class="period-btn" data-register-period="monthly">Monthly</button>
+                    <button class="period-btn" data-register-period="custom">Custom</button>
+
+                    <div id="register-custom-dates">
+                        <label>From</label>
+                        <input type="date" id="register-start">
+                        <label>To</label>
+                        <input type="date" id="register-end">
+                        <button class="btn btn-primary btn-sm" id="btn-run-register">Generate Report</button>
+                    </div>
+                </div>
+
+                <div class="summary-chips" id="register-summary-chips" style="display:none">
+                    <div class="summary-chip"><div class="chip-label">Sessions</div><div class="chip-value" id="chip-register-count">0</div></div>
+                    <div class="summary-chip"><div class="chip-label">Currently Open</div><div class="chip-value" id="chip-register-open">0</div></div>
+                    <div class="summary-chip"><div class="chip-label">Total Opening Cash</div><div class="chip-value" id="chip-register-opened">₱0</div></div>
+                    <div class="summary-chip"><div class="chip-label">Total Variance</div><div class="chip-value" id="chip-register-variance">₱0</div></div>
+                </div>
+
+                <div class="card" style="padding:0">
+                    <div class="table-container">
+                        <table class="table">
+                            <thead>
+                                <tr>
+                                    <th>Cashier</th>
+                                    <th>Opened At</th>
+                                    <th>Opening Cash</th>
+                                    <th>Opened Approved By</th>
+                                    <th>Status</th>
+                                    <th>Closed At</th>
+                                    <th>Variance</th>
+                                    <th>Closed Approved By</th>
+                                </tr>
+                            </thead>
+                            <tbody id="register-tbody">
+                                <tr><td colspan="8" class="text-center" style="padding:24px"><div class="spinner" style="margin:0 auto"></div></td></tr>
                             </tbody>
                         </table>
                     </div>
@@ -339,15 +388,22 @@ document.addEventListener('DOMContentLoaded', () => {
             document.querySelectorAll('.report-tab').forEach(t => t.classList.remove('active'));
             tab.classList.add('active');
             const id = tab.dataset.tab;
-            document.getElementById('tab-sales').style.display   = id === 'sales'   ? '' : 'none';
-            document.getElementById('tab-expired').style.display = id === 'expired' ? '' : 'none';
-            document.getElementById('tab-void').style.display    = id === 'void'    ? '' : 'none';
+            document.getElementById('tab-sales').style.display    = id === 'sales'    ? '' : 'none';
+            document.getElementById('tab-expired').style.display  = id === 'expired'  ? '' : 'none';
+            document.getElementById('tab-void').style.display     = id === 'void'     ? '' : 'none';
+            document.getElementById('tab-register').style.display = id === 'register' ? '' : 'none';
             if (id === 'expired') loadExpiredReport({ months: '1' });
             if (id === 'void') {
                 const r = getDateRange('daily');
                 voidStartInput.value = r.start;
                 voidEndInput.value   = r.end;
                 loadVoidReport(r.start, r.end);
+            }
+            if (id === 'register') {
+                const r = getDateRange('daily');
+                registerStartInput.value = r.start;
+                registerEndInput.value   = r.end;
+                loadRegisterReport(r.start, r.end);
             }
         });
     });
@@ -509,6 +565,90 @@ document.addEventListener('DOMContentLoaded', () => {
                 btn.textContent = isHidden ? '▼' : '▶';
             });
         });
+    }
+
+    // ── Register Report ───────────────────────────────────────
+    const registerStartInput  = document.getElementById('register-start');
+    const registerEndInput    = document.getElementById('register-end');
+    const registerCustomDates = document.getElementById('register-custom-dates');
+
+    document.querySelectorAll('[data-register-period]').forEach(btn => {
+        btn.addEventListener('click', () => {
+            document.querySelectorAll('[data-register-period]').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            const period = btn.dataset.registerPeriod;
+
+            if (period === 'custom') {
+                registerCustomDates.classList.add('visible');
+                if (!registerStartInput.value) {
+                    const t = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Manila', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
+                    registerStartInput.value = registerEndInput.value = t;
+                }
+                return;
+            }
+
+            registerCustomDates.classList.remove('visible');
+            const range = getDateRange(period);
+            if (range) { registerStartInput.value = range.start; registerEndInput.value = range.end; loadRegisterReport(range.start, range.end); }
+        });
+    });
+
+    document.getElementById('btn-run-register')?.addEventListener('click', () => {
+        const s = registerStartInput.value, e = registerEndInput.value;
+        if (!s || !e) { Toast.show('Select both dates.', 'warning'); return; }
+        if (s > e)    { Toast.show('Start date must be before end date.', 'warning'); return; }
+        loadRegisterReport(s, e);
+    });
+
+    async function loadRegisterReport(start, end) {
+        const tbody = document.getElementById('register-tbody');
+        tbody.innerHTML = '<tr><td colspan="8" class="text-center" style="padding:24px"><div class="spinner" style="margin:0 auto"></div></td></tr>';
+        document.getElementById('register-summary-chips').style.display = 'none';
+
+        const params = new URLSearchParams({ limit: 500 });
+        if (start) params.set('start_date', start);
+        if (end)   params.set('end_date', end);
+
+        const data = await API.get('/reports/register?' + params.toString());
+        if (!data?.success) {
+            Toast.show('Failed to load register report.', 'error');
+            tbody.innerHTML = '<tr><td colspan="8" class="text-center text-muted" style="padding:24px">Failed to load data.</td></tr>';
+            return;
+        }
+
+        const sessions = data.data || [];
+        const s = data.summary || {};
+        document.getElementById('chip-register-count').textContent    = s.total_sessions || 0;
+        document.getElementById('chip-register-open').textContent     = s.open_count || 0;
+        document.getElementById('chip-register-opened').textContent   = Fmt.currency(s.total_opened || 0);
+        document.getElementById('chip-register-variance').textContent = Fmt.currency(s.total_variance || 0);
+        document.getElementById('register-summary-chips').style.display = 'flex';
+
+        if (!sessions.length) {
+            tbody.innerHTML = '<tr><td colspan="8" class="text-center text-muted" style="padding:24px">No register sessions found for this period.</td></tr>';
+            return;
+        }
+
+        tbody.innerHTML = sessions.map(s => {
+            const isOpen = s.status === 'OPEN';
+            const varianceVal = parseFloat(s.variance);
+            const varianceText = s.status === 'CLOSED' && !isNaN(varianceVal)
+                ? `${varianceVal >= 0 ? '+' : ''}${Fmt.currency(varianceVal)}`
+                : '—';
+            const varianceColor = varianceVal > 0 ? 'var(--success)' : (varianceVal < 0 ? 'var(--danger)' : 'var(--secondary)');
+
+            return `
+            <tr>
+                <td class="fw-600">${escHtml(s.cashier_name)}</td>
+                <td>${Fmt.datetime(s.opened_at)}</td>
+                <td>${Fmt.currency(s.opening_cash)}</td>
+                <td>${s.opened_approved_by_name ? escHtml(s.opened_approved_by_name) : '<span class="text-muted">—</span>'}</td>
+                <td><span class="badge ${isOpen ? 'badge-success' : 'badge-secondary'}">${isOpen ? 'Open' : 'Closed'}</span></td>
+                <td>${s.closed_at ? Fmt.datetime(s.closed_at) : '<span class="text-muted">—</span>'}</td>
+                <td style="font-weight:600;color:${varianceColor}">${varianceText}</td>
+                <td>${s.closed_approved_by_name ? escHtml(s.closed_approved_by_name) : '<span class="text-muted">—</span>'}</td>
+            </tr>`;
+        }).join('');
     }
 
     // ── Auto-load daily on open ───────────────────────────────

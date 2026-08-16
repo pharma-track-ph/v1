@@ -1,10 +1,12 @@
 // ============================================================
 // Report Controller
-// Sales summaries, expired inventory report, CSV export
+// Sales summaries, expired inventory report, void report,
+// register report, CSV export
 // ============================================================
-const Order   = require('../models/Order');
-const Product = require('../models/Product');
-const db      = require('../config/db');
+const Order       = require('../models/Order');
+const Product     = require('../models/Product');
+const CashSession  = require('../models/CashSession');
+const db          = require('../config/db');
 
 /**
  * GET /api/reports/sales
@@ -89,6 +91,10 @@ const getSalesReport = async (req, res, next) => {
 /**
  * GET /api/reports/expired
  * Returns all expired products with estimated value lost.
+ * Excludes batches that have hit 0 stock — once a batch is fully sold out
+ * there's no remaining stock to have gone to waste, so it's shown as
+ * "Out of Stock" elsewhere in the app instead of counting as an expiry
+ * loss here.
  * Query params (optional):
  *   months=1|3|6   — only products that expired within the last N*30 days
  *   start_date/end_date — custom range, filtered on the actual expiry_date
@@ -105,6 +111,7 @@ const getExpiredReport = async (req, res, next) => {
              FROM products
              WHERE expiry_date < CURDATE()
                AND is_active = 1
+               AND stock_quantity > 0
         `;
         const params = [];
 
@@ -191,6 +198,10 @@ const getDashboardKPIs = async (req, res, next) => {
  * Returns all voided transactions, with who voided them and when
  * (from audit_logs), plus items sold per order (same expand pattern
  * as the Sales Report).
+ * `voided_by_name` now correctly reflects the CASHIER whose transaction
+ * it was (see posController.js's voidLastOrder) rather than the approving
+ * admin/owner — the approver's name lives inside audit_logs.details as
+ * `approved_by` instead, for a cashier-requested void.
  */
 const getVoidReport = async (req, res, next) => {
     try {
@@ -200,7 +211,8 @@ const getVoidReport = async (req, res, next) => {
             SELECT o.id, o.order_number, o.created_at, o.total, o.subtotal, o.discount,
                    cashier.name AS cashier_name,
                    voider.name  AS voided_by_name,
-                   al.created_at AS voided_at
+                   al.created_at AS voided_at,
+                   al.details   AS void_details
             FROM orders o
             JOIN users cashier ON cashier.id = o.cashier_id
             LEFT JOIN audit_logs al ON al.entity = 'orders'
@@ -246,4 +258,32 @@ const getVoidReport = async (req, res, next) => {
     } catch (err) { next(err); }
 };
 
-module.exports = { getSalesReport, getExpiredReport, getDashboardKPIs, getVoidReport };
+/**
+ * GET /api/reports/register
+ * Every cash register session (open or closed), newest first: who opened
+ * it, who approved the open (if a cashier needed approval — null for
+ * historical sessions from before that feature existed, or when an
+ * admin/owner opened it on their own authority), the opening amount, and
+ * the same for the close side (expected/actual/variance/approver).
+ */
+const getRegisterReport = async (req, res, next) => {
+    try {
+        const { start_date, end_date, limit = 500, offset = 0 } = req.query;
+
+        const sessions = await CashSession.findAllForReport({
+            startDate: start_date, endDate: end_date, limit, offset
+        });
+
+        const summary = sessions.reduce((acc, s) => ({
+            total_sessions: acc.total_sessions + 1,
+            total_opened:   acc.total_opened + parseFloat(s.opening_cash || 0),
+            total_variance: acc.total_variance + parseFloat(s.variance || 0),
+            open_count:     acc.open_count + (s.status === 'OPEN' ? 1 : 0)
+        }), { total_sessions: 0, total_opened: 0, total_variance: 0, open_count: 0 });
+
+        res.json({ success: true, data: sessions, summary });
+
+    } catch (err) { next(err); }
+};
+
+module.exports = { getSalesReport, getExpiredReport, getDashboardKPIs, getVoidReport, getRegisterReport };

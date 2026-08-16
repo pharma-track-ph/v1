@@ -119,13 +119,21 @@ document.addEventListener('DOMContentLoaded', () => {
             low_stock:   '<span class="badge badge-warning">Low Stock</span>',
             near_expiry: '<span class="badge badge-warning">Near Expiry</span>',
             expired:     '<span class="badge badge-danger">Expired</span>',
+            // A batch that's hit 0 stock is shown as "Out of Stock", not
+            // "Expired" -- see the backend's stock_status priority
+            // (out_of_stock now outranks expired) -- there's no remaining
+            // stock left to have gone to waste, so it's a different
+            // situation from an expired batch that still has unsold units
+            // sitting on the shelf. Label matches the status filter
+            // dropdown's wording exactly (both say "Out of Stock").
             out_of_stock:'<span class="badge badge-secondary">Out of Stock</span>'
         };
         return map[status] || `<span class="badge badge-secondary">${status}</span>`;
     }
 
     function getExpiryCell(p) {
-        const daysLeft = parseInt(p.days_until_expiry);
+        const daysLeft  = parseInt(p.days_until_expiry);
+        const isSoldOut = p.stock_status === 'out_of_stock';
         let dotClass = 'green';
         if (daysLeft < 0)        dotClass = 'red';
         else if (daysLeft <= 30) dotClass = 'amber';
@@ -133,15 +141,16 @@ document.addEventListener('DOMContentLoaded', () => {
             <div class="expiry-cell">
                 <span class="expiry-dot ${dotClass}"></span>
                 ${Fmt.date(p.expiry_date)}
-                ${daysLeft < 0 ? `<span style="font-size:0.7rem;color:var(--danger)">(Expired)</span>` : ''}
-                ${daysLeft >= 0 && daysLeft <= 30 ? `<span style="font-size:0.7rem;color:#92400e">(${daysLeft}d)</span>` : ''}
+                ${!isSoldOut && daysLeft < 0 ? `<span style="font-size:0.7rem;color:var(--danger)">(Expired)</span>` : ''}
+                ${!isSoldOut && daysLeft >= 0 && daysLeft <= 30 ? `<span style="font-size:0.7rem;color:#92400e">(${daysLeft}d)</span>` : ''}
             </div>`;
     }
 
     function getRowClass(status) {
-        if (status === 'expired')     return 'row-expired';
-        if (status === 'near_expiry') return 'row-expiring';
-        if (status === 'low_stock')   return 'row-low-stock';
+        if (status === 'expired')      return 'row-expired';
+        if (status === 'near_expiry')  return 'row-expiring';
+        if (status === 'low_stock')    return 'row-low-stock';
+        if (status === 'out_of_stock') return 'row-soldout';
         return '';
     }
 

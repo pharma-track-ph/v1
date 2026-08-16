@@ -561,7 +561,7 @@ const AlertsNav = {
                     <span class="notif-count" id="notif-count-expired">0</span>
                 </button>
                 <button class="notif-item" data-status="out_of_stock">
-                    <span>❌ Out of Stock</span>
+                    <span>❌ Sold Out</span>
                     <span class="notif-count" id="notif-count-out_of_stock">0</span>
                 </button>
             </div>`;

@@ -83,9 +83,15 @@ document.addEventListener('DOMContentLoaded', () => {
                 ? '<span class="status-dot active"></span>Active'
                 : '<span class="status-dot inactive"></span>Inactive';
 
-            // Admins can only edit/delete cashier accounts
-            const canEdit   = isSuperAdmin || u.role === 'cashier';
-            const canDelete = isSuperAdmin && !isSelf;
+            // Owners can only be managed by themselves. Editing, resetting
+            // the password of, or deleting ANOTHER owner account would let
+            // owners lock each other out or tamper with a peer's access --
+            // so peer-owner accounts are fully read-only here, regardless
+            // of who's logged in. Editing your OWN account IS allowed (see
+            // openEditModal for what stays locked even then: role/status).
+            const isOtherOwner = u.role === 'super_admin' && !isSelf;
+            const canEdit   = !isOtherOwner && (isSuperAdmin || u.role === 'cashier');
+            const canDelete = !isOtherOwner && isSuperAdmin && !isSelf;
 
             return `
             <tr class="${isSelf ? 'self-row' : ''}">
@@ -98,15 +104,15 @@ document.addEventListener('DOMContentLoaded', () => {
                 <td style="font-size:0.83rem;color:var(--secondary)">${Fmt.date(u.created_at)}</td>
                 <td class="action-cell">
                     <div class="d-flex gap-8">
-                        ${canEdit && !isSelf ? `
+                        ${canEdit ? `
                             <button class="btn btn-light btn-sm btn-edit" data-id="${u.id}" title="Edit">✏️</button>
                             <button class="btn btn-light btn-sm btn-pw" data-id="${u.id}" data-name="${escHtml(u.name)}" title="Change Password">🔒</button>
                         ` : ''}
                         ${canDelete ? `
                             <button class="btn btn-danger btn-sm btn-delete" data-id="${u.id}" data-name="${escHtml(u.name)}" title="Deactivate">🗑️</button>
                         ` : ''}
-                        ${isSelf ? `<span class="text-muted" style="font-size:0.78rem">—</span>` : ''}
-                        ${!canEdit && !isSelf ? `<span class="text-muted" style="font-size:0.78rem">—</span>` : ''}
+                        ${isOtherOwner ? `<span class="text-muted" style="font-size:0.78rem" title="Owner accounts can only be managed by the account holder.">🔒 Protected</span>` : ''}
+                        ${!canEdit && !canDelete && !isOtherOwner ? `<span class="text-muted" style="font-size:0.78rem">—</span>` : ''}
                     </div>
                 </td>
             </tr>`;
@@ -134,6 +140,15 @@ document.addEventListener('DOMContentLoaded', () => {
         document.getElementById('status-group')?.classList.add('hidden');
         document.getElementById('pw-bar').style.width = '0';
         document.getElementById('pw-hint').textContent = '';
+
+        // Reset the self-edit lock left over from any previous
+        // Edit-My-Account visit to this same shared modal.
+        const roleField   = document.getElementById('field-role');
+        const statusField = document.getElementById('field-is_active');
+        if (roleField)   roleField.disabled   = false;
+        if (statusField) statusField.disabled = false;
+        document.getElementById('self-edit-note')?.classList.add('hidden');
+
         if (submitBtn) submitBtn.textContent = 'Add User';
         Modal.open('user-modal');
     });
@@ -144,18 +159,32 @@ document.addEventListener('DOMContentLoaded', () => {
         const u = allUsers.find(x => x.id === id);
         if (!u) return;
 
-        document.getElementById('user-modal-title').textContent = `Edit: ${u.name}`;
+        const isEditingSelf = id === currentUser?.id;
+
+        document.getElementById('user-modal-title').textContent = isEditingSelf ? 'Edit My Account' : `Edit: ${u.name}`;
         document.getElementById('field-name').value      = u.name;
         document.getElementById('field-email').value     = u.email;
         document.getElementById('field-role').value      = u.role;
         document.getElementById('field-is_active').value = String(u.is_active);
-        document.getElementById('field-password').value  = '';
-        document.getElementById('field-password').required = false;
-        document.getElementById('pw-label').textContent  = 'New Password (leave blank to keep current)';
-        document.getElementById('field-password').placeholder = 'Leave blank to keep current';
+
+        // Editing your OWN account: Role and Active-status stay locked
+        // (still visible, not editable) so you can't accidentally demote or
+        // deactivate yourself with no one else able to undo it in the
+        // moment. Name/email are still editable, and password has its own
+        // separate Change Password modal below.
+        const roleField   = document.getElementById('field-role');
+        const statusField = document.getElementById('field-is_active');
+        if (roleField)   roleField.disabled   = isEditingSelf;
+        if (statusField) statusField.disabled = isEditingSelf;
+        document.getElementById('self-edit-note')?.classList.toggle('hidden', !isEditingSelf);
+
+        // Password field lives in the modal only for the Add-New-User flow
+        // now -- changing an EXISTING user's password has its own dedicated
+        // Change Password modal (openPwModal), so there's no password input
+        // to reset here anymore. See handleSubmit(), which no longer reads
+        // it either.
+        document.getElementById('pw-group')?.classList.add('hidden');
         document.getElementById('status-group')?.classList.remove('hidden');
-        document.getElementById('pw-bar').style.width = '0';
-        document.getElementById('pw-hint').textContent = '';
         if (submitBtn) submitBtn.textContent = 'Save Changes';
         Modal.open('user-modal');
     }

@@ -6,9 +6,19 @@
 // methods were never actually wired up in the POS UI.
 //
 // Manager approval (same pattern as Void): cashiers cannot open
-// their own drawer's Cash In, Cash Out, or Close without an
+// their own drawer, Cash In, Cash Out, or Close without an
 // admin/owner entering their own credentials. Admins/owners act
 // on their own authority.
+//
+// ── Audit attribution ─────────────────────────────────────
+// Every audit log entry below is attributed to the CASHIER whose
+// action it actually is (req.user.id) — never to the approving
+// manager. The approver's name/id is included in the `details` JSON
+// instead. This was a real bug found in testing: an earlier version
+// logged these under the approver's id, so Close/Cash In/Cash Out
+// showed the admin/owner as the "User" in Audit Logs and the Register
+// Report, when the row genuinely belongs to the cashier whose shift
+// it was — the approver authorized it, they didn't perform it.
 //
 // ── Concurrency discipline ──────────────────────────────────
 // EVERY operation that reads/affects a session's money totals
@@ -34,8 +44,8 @@ const ELEVATED_ROLES = ['admin', 'super_admin'];
 /**
  * Verifies manager/owner credentials supplied in the request body.
  * Returns the manager's user row on success, or null on failure.
- * Used for Cash In, Cash Out, and Close Register when the requester
- * is a cashier — mirrors the exact same check used for Void.
+ * Used for Open, Cash In, Cash Out, and Close Register when the
+ * requester is a cashier — mirrors the exact same check used for Void.
  */
 async function verifyManagerApproval(body) {
     const { manager_email, manager_password } = body;
@@ -73,9 +83,10 @@ const getCurrentSession = async (req, res, next) => {
 
 /**
  * POST /api/pos/cash-session/open
- * Body: { opening_cash }
- * No manager approval required to open — the accountability moment
- * is at Close, where the variance is calculated and recorded.
+ * Body: { opening_cash, manager_email?, manager_password? }
+ * Requires manager approval when the requester is a cashier — same
+ * pattern as Cash In/Out/Close, so an owner/admin is aware every time a
+ * shift starts, not just when it's closed or cash moves.
  */
 const openSession = async (req, res, next) => {
     const { opening_cash } = req.body;
@@ -83,6 +94,16 @@ const openSession = async (req, res, next) => {
 
     if (isNaN(openingCash) || openingCash < 0) {
         return res.status(400).json({ success: false, message: 'Opening cash must be a valid, non-negative amount.' });
+    }
+
+    const isCashier = req.user.role === 'cashier';
+    let approver = null; // stays null for self-authority (admin/owner) and for the audit "details" field
+
+    if (isCashier) {
+        approver = await verifyManagerApproval(req.body);
+        if (!approver) {
+            return res.status(401).json({ success: false, message: 'Invalid admin/owner credentials.' });
+        }
     }
 
     const connection = await db.getConnection();
@@ -101,11 +122,16 @@ const openSession = async (req, res, next) => {
             });
         }
 
-        const sessionId = await CashSession.create(req.user.id, openingCash, connection);
+        const sessionId = await CashSession.create(req.user.id, openingCash, approver?.id ?? null, connection);
         await connection.commit();
 
+        // Attributed to the cashier (req.user.id), not the approver — see
+        // file header. Approver's name/id lives in details instead.
         await logAudit(req.user.id, 'OPEN_CASH_SESSION', 'cash_sessions', sessionId,
-            { opening_cash: openingCash }, req.ip);
+            {
+                opening_cash: openingCash,
+                ...(approver ? { approved_by: approver.name, approved_by_id: approver.id } : {})
+            }, req.ip);
 
         res.status(201).json({ success: true, message: 'Register opened.', data: { id: sessionId } });
 
@@ -137,14 +163,16 @@ function makeMovementHandler(type) {
         }
 
         const isCashier = req.user.role === 'cashier';
-        let approverId = req.user.id;
+        let approverId   = req.user.id;
+        let approverName = null; // only set for cashier-requested (manager-approved) movements
 
         if (isCashier) {
             const manager = await verifyManagerApproval(req.body);
             if (!manager) {
                 return res.status(401).json({ success: false, message: 'Invalid admin/owner credentials.' });
             }
-            approverId = manager.id;
+            approverId   = manager.id;
+            approverName = manager.name;
         }
 
         const connection = await db.getConnection();
@@ -186,8 +214,15 @@ function makeMovementHandler(type) {
 
             await connection.commit();
 
-            await logAudit(approverId, type, 'cash_movements', movementId,
-                { amount: parsedAmount, reason: trimmedReason, requested_by: req.user.id }, req.ip);
+            // Attributed to the cashier who requested it (req.user.id), not
+            // the approver — see file header. Approver's name/id (when
+            // there is one) lives in details instead.
+            await logAudit(req.user.id, type, 'cash_movements', movementId,
+                {
+                    amount: parsedAmount,
+                    reason: trimmedReason,
+                    ...(approverName ? { approved_by: approverName, approved_by_id: approverId } : {})
+                }, req.ip);
 
             res.status(201).json({ success: true, message: `${type === 'CASH_IN' ? 'Cash in' : 'Cash out'} recorded.` });
 
@@ -220,14 +255,16 @@ const closeSession = async (req, res, next) => {
     }
 
     const isCashier = req.user.role === 'cashier';
-    let approverId = req.user.id;
+    let approverId   = req.user.id;
+    let approverName = null;
 
     if (isCashier) {
         const manager = await verifyManagerApproval(req.body);
         if (!manager) {
             return res.status(401).json({ success: false, message: 'Invalid admin/owner credentials.' });
         }
-        approverId = manager.id;
+        approverId   = manager.id;
+        approverName = manager.name;
     }
 
     const connection = await db.getConnection();
@@ -264,8 +301,16 @@ const closeSession = async (req, res, next) => {
 
         await connection.commit();
 
-        await logAudit(approverId, 'CLOSE_CASH_SESSION', 'cash_sessions', session.id,
-            { expected: expectedRounded, actual: actualCash, variance, cashier_id: req.user.id }, req.ip);
+        // Attributed to the cashier whose shift this is (req.user.id), not
+        // the approver — see file header. Approver's name/id (when there is
+        // one) lives in details instead.
+        await logAudit(req.user.id, 'CLOSE_CASH_SESSION', 'cash_sessions', session.id,
+            {
+                expected: expectedRounded,
+                actual: actualCash,
+                variance,
+                ...(approverName ? { approved_by: approverName, approved_by_id: approverId } : {})
+            }, req.ip);
 
         res.json({
             success: true,

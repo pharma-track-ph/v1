@@ -31,6 +31,7 @@
             <ul>
                 <li class="nav-item" data-roles="super_admin"><a href="users.html"><span class="nav-icon"></span> Users</a></li>
                 <li class="nav-item" data-roles="super_admin"><a href="audit.html"><span class="nav-icon"></span> Audit Logs</a></li>
+                <li class="nav-item" data-roles="super_admin"><a href="backup.html"><span class="nav-icon"></span> Backup & Restore</a></li>
                 <li class="nav-item"><a href="#" data-action="logout"><span class="nav-icon"></span> Sign Out</a></li>
             </ul>
         </nav>
@@ -100,7 +101,11 @@
                     </div>
                 </div>
 
-                <div class="pos-search-bar">
+                <!-- Hidden entirely while the register is closed — there's
+                     nothing to search/scan for until a session is open (see
+                     renderRegisterUI() in pos.js, which toggles this along
+                     with the rest of the register-gated UI). -->
+                <div class="pos-search-bar" id="pos-search-bar">
                     <div class="search-input-wrap">
                         <span class="search-icon">🔍</span>
                         <input type="text" id="pos-search" class="form-control"
@@ -333,12 +338,32 @@
             <div class="camera-preview-box">
                 <video id="camera-scan-video" autoplay playsinline muted></video>
             </div>
-            <p style="font-size:0.8rem;color:var(--secondary);margin-top:10px;text-align:center">
-                Point the camera at a product's barcode. It will be added to the cart automatically once recognized.
+
+            <!-- Quantity to add per scan — lets someone with 50 units of the
+                 same batch just set this once instead of scanning 50 times.
+                 The camera stays open after each successful scan (see
+                 handleScannedCode() in pos.js), so this value is read fresh
+                 for every scan rather than only the first. -->
+            <div class="camera-qty-row">
+                <label class="form-label" for="camera-scan-qty">Quantity per scan</label>
+                <div class="camera-qty-stepper">
+                    <button type="button" class="qty-btn" id="camera-qty-dec">−</button>
+                    <input type="number" id="camera-scan-qty" class="form-control" value="1" min="1" step="1">
+                    <button type="button" class="qty-btn" id="camera-qty-inc">+</button>
+                </div>
+            </div>
+
+            <!-- Feedback for the most recent successful scan — needed now that
+                 the modal stays open across multiple scans instead of closing
+                 after the first one. -->
+            <div class="camera-scan-feedback" id="camera-scan-feedback"></div>
+
+            <p style="font-size:0.8rem;color:var(--secondary);margin-top:6px;text-align:center">
+                Point the camera at a product's barcode. It's added to the cart automatically — the camera stays on so you can keep scanning.
             </p>
         </div>
         <div class="modal-footer">
-            <button class="btn btn-light" id="btn-camera-cancel">Cancel</button>
+            <button class="btn btn-primary" id="btn-camera-done">✅ Done Scanning</button>
         </div>
     </div>
 </div>

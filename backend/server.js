@@ -17,6 +17,8 @@ const inventoryRoutes   = require('./routes/inventoryRoutes');
 const posRoutes         = require('./routes/posRoutes');
 const reportRoutes      = require('./routes/reportRoutes');
 const forecastingRoutes = require('./routes/forecastingRoutes');
+const backupRoutes      = require('./routes/backupRoutes');
+const { scheduleDailyBackup } = require('./utils/backupScheduler');
 
 const app  = express();
 const PORT = process.env.PORT || 5000;
@@ -95,6 +97,7 @@ app.use('/api/inventory',   inventoryRoutes);
 app.use('/api/pos',         posRoutes);
 app.use('/api/reports',     reportRoutes);
 app.use('/api/forecasting', forecastingRoutes);
+app.use('/api/backup',      backupRoutes);
 
 // ── Health check ─────────────────────────────────────────────
 app.get('/api/health', (req, res) => {
@@ -127,9 +130,24 @@ app.use((req, res) => {
 // ── Global error handler ──────────────────────────────────────
 app.use((err, req, res, next) => {
     console.error('[ERROR]', err.stack);
-    res.status(err.statusCode || 500).json({
+
+    const statusCode = err.statusCode || 500;
+
+    // Only pass the real error message through to the client for errors
+    // that were deliberately thrown with a safe, user-facing message
+    // (statusCode < 500 -- validation/business-rule errors like "Cannot
+    // modify your own account here."). Anything else -- an unexpected
+    // exception, a DB connection failure, etc. -- can contain internal
+    // details (hostnames, SQL, stack info) that should never reach the
+    // client. Those get a generic message instead; the real detail is
+    // already in the server log line above for debugging.
+    const safeMessage = (statusCode < 500 && err.message)
+        ? err.message
+        : 'Something went wrong. Please try again.';
+
+    res.status(statusCode).json({
         success: false,
-        message: err.message || 'Internal server error',
+        message: safeMessage,
         ...(process.env.NODE_ENV === 'development' && { stack: err.stack })
     });
 });
@@ -140,6 +158,8 @@ app.listen(PORT, () => {
     console.log(`    Frontend:    http://localhost:${PORT}/pages/login.html`);
     console.log(`    Health:      http://localhost:${PORT}/api/health`);
     console.log(`    Environment: ${process.env.NODE_ENV}`);
+
+    scheduleDailyBackup();
 });
 
 module.exports = app;
