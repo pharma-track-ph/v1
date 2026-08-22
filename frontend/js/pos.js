@@ -633,7 +633,7 @@ document.addEventListener('DOMContentLoaded', () => {
                  data-id="${p.id}"
                  title="${isOOS ? 'Sold out' : 'Click to add'}">
                 <div class="p-name">${escHtml(p.name)}</div>
-                ${p.generic_name ? `<div class="p-generic text-muted">${escHtml(p.generic_name)}</div>` : ''}
+                <div class="p-generic text-muted">${p.generic_name ? escHtml(p.generic_name) : '&nbsp;'}</div>
                 <div class="p-price">${Fmt.currency(p.price)}</div>
                 <div class="p-stock">Stock: ${p.stock_quantity} ${p.unit || 'pcs'}</div>
             </div>`;
@@ -1046,16 +1046,53 @@ document.addEventListener('DOMContentLoaded', () => {
         if (confirmed) cart.clear();
     });
 
+    // ── Void: pick which transaction ───────────────
+    // Shows up to the last 10 completed sales from THIS login session (see
+    // Order.findRecentCompletedInSession on the backend -- same security
+    // scoping as before, just more than one candidate now) so a wrong item
+    // caught a sale or two late doesn't require voiding everything back to
+    // it.
     voidBtn?.addEventListener('click', async () => {
-        const candidate = await OfflineAPI.get('/pos/void-candidate');
+        const candidates = await OfflineAPI.get('/pos/void-candidates');
 
-        if (!candidate?.success || !candidate.data) {
+        if (!candidates?.success || !candidates.data?.length) {
             Toast.show('No transaction from your current session available to void.', 'info');
             return;
         }
 
-        const order = candidate.data;
+        renderVoidList(candidates.data);
+        Modal.open('void-list-modal');
+    });
 
+    function renderVoidList(orders) {
+        const body = document.getElementById('void-list-body');
+        if (!body) return;
+
+        body.innerHTML = orders.map(order => {
+            const itemsSummary = (order.items || [])
+                .map(i => `${escHtml(i.product_name)} x${i.quantity}`)
+                .join(', ');
+            return `
+            <div class="void-list-item">
+                <div class="void-list-item-header">
+                    <strong>${order.order_number}</strong>
+                    <span>${Fmt.currency(order.total)}</span>
+                </div>
+                <div class="text-muted" style="font-size:0.75rem;margin-bottom:4px">${Fmt.datetime(order.created_at)}</div>
+                <div class="void-list-item-items">${itemsSummary}</div>
+                <button class="btn btn-danger btn-sm btn-void-this" data-id="${order.id}">Void This Transaction</button>
+            </div>`;
+        }).join('');
+
+        body.querySelectorAll('.btn-void-this').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const order = orders.find(o => o.id === parseInt(btn.dataset.id));
+                if (order) confirmAndVoidOrder(order);
+            });
+        });
+    }
+
+    async function confirmAndVoidOrder(order) {
         const itemsList = (order.items || [])
             .map(i => `• ${i.product_name} x${i.quantity}`)
             .join('\n');
@@ -1070,10 +1107,9 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!confirmed) return;
 
         const isCashier = Auth.getUser()?.role === 'cashier';
-        let payload = {};
 
         if (isCashier) {
-            // Cashiers cannot void on their own authority — an admin/owner must
+            // Cashiers cannot void on their own authority -- an admin/owner must
             // approve by entering their own credentials right here. Loop so a
             // typo doesn't just silently fail; every exit path below is an
             // explicit return (success, cashier cancels, or a non-credential
@@ -1084,31 +1120,32 @@ document.addEventListener('DOMContentLoaded', () => {
                 const creds = await ManagerApprovalDialog.show(promptMessage);
                 if (!creds) return; // cashier cancelled
 
-                payload = { manager_email: creds.email, manager_password: creds.password };
-
-                voidBtn.disabled = true;
-                const result = await OfflineAPI.post('/pos/void', payload);
-                voidBtn.disabled = false;
+                const result = await OfflineAPI.post('/pos/void', {
+                    order_id: order.id,
+                    manager_email: creds.email,
+                    manager_password: creds.password
+                });
 
                 if (result?.success) {
                     Toast.show(result.message, 'success');
+                    Modal.close('void-list-modal');
                     loadPOSProducts();
                     loadCashSession(); // a void can change cash sales for the shift
                     return;
                 }
 
                 if (result?.message?.toLowerCase().includes('credentials')) {
-                    // Wrong email/password or not an admin/owner — let them retry
+                    // Wrong email/password or not an admin/owner -- let them retry
                     promptMessage = `❌ ${result.message} Please try again.`;
                     continue;
                 }
 
-                // Any other failure (already voided, no transaction, etc.) — stop
+                // Any other failure (already voided, closed session, etc.) -- stop
                 Toast.show(result?.message || 'Void failed.', 'error');
                 return;
             }
         } else {
-            // Admins/super_admins already have full authority — just a final
+            // Admins/super_admins already have full authority -- just a final
             // explicit confirmation since voiding cannot be reversed.
             const finalConfirmed = await ConfirmDialog.show({
                 title:       'Final Confirmation',
@@ -1118,19 +1155,18 @@ document.addEventListener('DOMContentLoaded', () => {
 
             if (!finalConfirmed) return;
 
-            voidBtn.disabled = true;
-            const result = await OfflineAPI.post('/pos/void', {});
-            voidBtn.disabled = false;
+            const result = await OfflineAPI.post('/pos/void', { order_id: order.id });
 
             if (result?.success) {
                 Toast.show(result.message, 'success');
+                Modal.close('void-list-modal');
                 loadPOSProducts();
                 loadCashSession(); // a void can change cash sales for the shift
             } else {
                 Toast.show(result?.message || 'Void failed.', 'error');
             }
         }
-    });
+    }
 
     // ── Checkout ──────────────────────────────────────────────
     checkoutBtn?.addEventListener('click', handleCheckout);

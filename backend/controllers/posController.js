@@ -357,12 +357,9 @@ const aiSuggest = async (req, res) => {
 
 /**
  * GET /api/pos/void-candidate
- * Returns the transaction that a Void click would target, so the frontend
- * can show a confirmation with real details before committing to anything.
- * Scoped to the CURRENT LOGIN SESSION only — every role (including
- * admin/super_admin) can only ever reach THEIR OWN most recent completed
- * sale, made after their current session began. Nothing system-wide,
- * nothing from before this login.
+ * Returns just the single MOST RECENT transaction (kept for backward
+ * compatibility) — new code should use GET /api/pos/void-candidates
+ * instead, which returns a list to choose from.
  */
 const getVoidCandidate = async (req, res, next) => {
     try {
@@ -379,9 +376,39 @@ const getVoidCandidate = async (req, res, next) => {
 };
 
 /**
+ * GET /api/pos/void-candidates
+ * Returns up to the last 10 completed transactions from the CURRENT LOGIN
+ * SESSION (same scoping as the single-candidate version — see
+ * Order.findRecentCompletedInSession), each with its item list attached,
+ * so the cashier can pick which one to void instead of only ever being
+ * able to void the very last sale. Useful when a wrong item (e.g. the
+ * wrong medicine) wasn't caught until a sale or two later.
+ */
+const getVoidCandidates = async (req, res, next) => {
+    try {
+        const orders = await Order.findRecentCompletedInSession(req.user.id, req.user.session_iat, 10);
+
+        if (!orders.length) {
+            return res.json({ success: true, data: [] });
+        }
+
+        const withItems = await Promise.all(
+            orders.map(async (order) => ({
+                ...order,
+                items: await OrderItem.findByOrderId(order.id)
+            }))
+        );
+
+        res.json({ success: true, data: withItems });
+    } catch (err) { next(err); }
+};
+
+/**
  * POST /api/pos/void
- * Voids the same transaction returned by /void-candidate, restoring stock
- * to the exact batches it was originally deducted from.
+ * Voids a specific transaction (body: { order_id }), restoring stock to
+ * the exact batches it was originally deducted from. Falls back to "the
+ * last transaction" if no order_id is given, for backward compatibility
+ * with anything still calling this the old way.
  *
  * ── Rules ──────────────────────────────────────────────────
  * - Scoped to the CURRENT LOGIN SESSION, for every role. This is stricter
@@ -389,6 +416,10 @@ const getVoidCandidate = async (req, res, next) => {
  *   logging out and back in (even as the same person) starts a fresh
  *   boundary. An admin/owner can never reach a cashier's transaction this
  *   way, and can't even reach their OWN transactions from a previous login.
+ *   Picking a SPECIFIC order_id doesn't relax this at all — it's checked
+ *   with the exact same WHERE clause as "the last one" (see
+ *   Order.findByIdInSession), just for a chosen id instead of always the
+ *   newest.
  * - Cashiers cannot void on their own authority: an admin or super_admin
  *   ("owner") must approve by entering their own email + password in the
  *   request body (manager_email / manager_password).
@@ -416,6 +447,7 @@ const getVoidCandidate = async (req, res, next) => {
  */
 const voidLastOrder = async (req, res, next) => {
     const isCashier = req.user.role === 'cashier';
+    const { order_id } = req.body;
     let approverId   = null;  // stays null unless a cashier's void needed manager approval
     let approverName = null;
 
@@ -447,14 +479,17 @@ const voidLastOrder = async (req, res, next) => {
 
     const connection = await db.getConnection();
     try {
-        // Always scoped to the REQUESTING session's own user + own session
-        // start — manager approval authorizes the void, it does not expand
-        // which order is reachable.
-        const order = await Order.findLastCompletedInSession(req.user.id, req.user.session_iat);
+        // A specific order_id picks exactly that transaction (still fully
+        // scoped to this login session — see Order.findByIdInSession);
+        // omitting it falls back to "the last one", for anything still
+        // calling this the old way.
+        const order = order_id
+            ? await Order.findByIdInSession(order_id, req.user.id, req.user.session_iat)
+            : await Order.findLastCompletedInSession(req.user.id, req.user.session_iat);
 
         if (!order) {
             connection.release();
-            return res.status(404).json({ success: false, message: 'No transaction from this session available to void.' });
+            return res.status(404).json({ success: false, message: 'That transaction is not available to void.' });
         }
 
         // Block voiding once the order's cash register shift is closed.
@@ -523,4 +558,4 @@ const voidLastOrder = async (req, res, next) => {
     }
 };
 
-module.exports = { searchProducts, checkout, aiSuggest, getVoidCandidate, voidLastOrder };
+module.exports = { searchProducts, checkout, aiSuggest, getVoidCandidate, getVoidCandidates, voidLastOrder };

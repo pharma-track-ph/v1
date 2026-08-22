@@ -63,6 +63,40 @@
  * BATCH-X-001,Vitamin C 500mg,Ascorbic Acid,Vitamins,Supplier Name,4800001099001,15.00,7.00,100,20,2025-12-31
  */
 
+/* ── Export dropdown ─────────────────────────── */
+.export-dropdown {
+    position: relative;
+}
+
+.export-menu {
+    position:      absolute;
+    top:           calc(100% + 6px);
+    left:          0;
+    z-index:       50;
+    background:    var(--white);
+    border:        1px solid var(--gray-200);
+    border-radius: var(--border-radius);
+    box-shadow:    var(--shadow);
+    min-width:     170px;
+    padding:       6px;
+}
+
+.export-menu-item {
+    display:       block;
+    width:         100%;
+    text-align:    left;
+    background:    none;
+    border:        none;
+    padding:       8px 10px;
+    border-radius: 6px;
+    font-size:     0.85rem;
+    cursor:        pointer;
+    color:         var(--dark);
+    transition:    var(--transition);
+}
+
+.export-menu-item:hover { background: var(--gray-100); }
+
 /* ── Barcode preview (Edit Product modal) ────────── */
 .barcode-preview-box {
     display:         flex;

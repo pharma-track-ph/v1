@@ -195,8 +195,19 @@ body.pos-page .main-wrapper {
     font-weight: 600;
     color:       var(--dark);
     line-height: 1.3;
-    display:     block;
-    overflow:    visible;
+    /* Reserves exactly 2 lines of height for EVERY card, whether the name
+       is short ("Aspirin 80mg") or long ("Ascorbic Acid 500mg (Vitamin
+       C)"). Without this, a short name leaves the row shorter than one
+       with a wrapped 2-line name, so price/stock end up sitting at
+       different heights from card to card in the same row -- clamping to
+       2 lines (with an ellipsis if it somehow needs a 3rd) and reserving
+       that space up front keeps every card's internal layout identical. */
+    display:            -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient:  vertical;
+    overflow:            hidden;
+    text-overflow:       ellipsis;
+    min-height:          2.6em; /* 2 lines at line-height 1.3 */
 }
 
 .product-card .p-generic {
@@ -204,6 +215,7 @@ body.pos-page .main-wrapper {
     white-space:  nowrap;
     overflow:     hidden;
     text-overflow:ellipsis;
+    min-height:   1em; /* reserved even when empty -- see pos.js's render, which always outputs this line */
 }
 
 .product-card .p-price {
@@ -1067,4 +1079,26 @@ body.pos-page .main-wrapper {
     font-size:     0.78rem;
     color:         var(--secondary);
     margin-bottom: 8px;
+}
+
+/* Void: list of recent transactions to pick from */
+.void-list-item {
+    padding:       12px 0;
+    border-bottom: 1px solid var(--gray-200);
+}
+
+.void-list-item:last-child { border-bottom: none; }
+
+.void-list-item-header {
+    display:         flex;
+    justify-content: space-between;
+    align-items:     center;
+    margin-bottom:   4px;
+}
+
+.void-list-item-items {
+    font-size:     0.78rem;
+    color:         var(--secondary);
+    margin-bottom: 8px;
+    line-height:   1.5;
 }

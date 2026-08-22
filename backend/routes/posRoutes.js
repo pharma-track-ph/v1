@@ -1,6 +1,8 @@
 const express = require('express');
 const router  = express.Router();
-const { searchProducts, checkout, aiSuggest, getVoidCandidate, voidLastOrder } = require('../controllers/posController');
+const {
+    searchProducts, checkout, aiSuggest, getVoidCandidate, getVoidCandidates, voidLastOrder
+} = require('../controllers/posController');
 const { getCurrentSession, openSession, cashIn, cashOut, closeSession } = require('../controllers/cashController');
 const { verifyToken, requireRole } = require('../middleware/authMiddleware');
 
@@ -11,8 +13,9 @@ router.get('/products',    verifyToken, searchProducts);
 // Use an explicit allowlist so all three operational roles can process sales.
 router.post('/checkout',   verifyToken, requireRole('cashier', 'admin', 'super_admin'), checkout);
 
-router.get('/void-candidate', verifyToken, requireRole('cashier', 'admin', 'super_admin'), getVoidCandidate);
-router.post('/void',          verifyToken, requireRole('cashier', 'admin', 'super_admin'), voidLastOrder);
+router.get('/void-candidate',  verifyToken, requireRole('cashier', 'admin', 'super_admin'), getVoidCandidate);
+router.get('/void-candidates', verifyToken, requireRole('cashier', 'admin', 'super_admin'), getVoidCandidates);
+router.post('/void',           verifyToken, requireRole('cashier', 'admin', 'super_admin'), voidLastOrder);
 
 router.post('/ai-suggest', verifyToken, aiSuggest);
 

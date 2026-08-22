@@ -38,6 +38,66 @@ document.addEventListener('DOMContentLoaded', () => {
     importInput?.addEventListener('change', handleCSVImport);
     submitBtn?.addEventListener('click', handleFormSubmit);
 
+    // ── Export dropdown (Excel / PDF / Word) ─────────────────
+    const exportToggleBtn = document.getElementById('btn-export-toggle');
+    const exportMenu       = document.getElementById('export-menu');
+
+    exportToggleBtn?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        exportMenu?.classList.toggle('hidden');
+    });
+
+    document.addEventListener('click', (e) => {
+        if (exportMenu && !exportMenu.classList.contains('hidden') && !e.target.closest('#export-dropdown')) {
+            exportMenu.classList.add('hidden');
+        }
+    });
+
+    document.querySelectorAll('.export-menu-item').forEach(btn => {
+        btn.addEventListener('click', () => {
+            exportMenu?.classList.add('hidden');
+            downloadExport(btn.dataset.format);
+        });
+    });
+
+    const EXPORT_FILE_INFO = {
+        excel: { path: 'excel', filename: 'PharmaTrack_Inventory_Report.xlsx' },
+        pdf:   { path: 'pdf',   filename: 'PharmaTrack_Inventory_Report.pdf'  },
+        word:  { path: 'word',  filename: 'PharmaTrack_Inventory_Report.docx' }
+    };
+
+    // Uses fetch (not a plain <a href>) since the endpoint needs the
+    // Authorization header — same pattern as backup.js's download and this
+    // page's own CSV import.
+    async function downloadExport(format) {
+        const info = EXPORT_FILE_INFO[format];
+        if (!info) return;
+
+        Toast.show('Preparing report…', 'info');
+
+        const config = typeof getRuntimeConfig === 'function' ? getRuntimeConfig() : CONFIG;
+        const token  = typeof Auth !== 'undefined' ? Auth.getToken() : localStorage.getItem(config.TOKEN_KEY);
+
+        try {
+            const res = await fetch(`${config.API_BASE}/inventory/export/${info.path}`, {
+                headers: token ? { 'Authorization': `Bearer ${token}` } : {}
+            });
+            if (!res.ok) throw new Error('Export failed.');
+
+            const blob = await res.blob();
+            const url  = URL.createObjectURL(blob);
+            const a    = document.createElement('a');
+            a.href     = url;
+            a.download = info.filename;
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+            URL.revokeObjectURL(url);
+        } catch (err) {
+            Toast.show('Export failed. Check your connection.', 'error');
+        }
+    }
+
     // ── Modal close ───────────────────────────────────────────
     document.querySelectorAll('.btn-close-modal').forEach(btn => {
         btn.addEventListener('click', () => Modal.close('product-modal'));

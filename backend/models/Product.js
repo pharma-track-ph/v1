@@ -68,9 +68,24 @@ const Product = {
         // plain expiry_date ASC sort treats "in the past" as "earliest"),
         // when it's actually a Out of Stock status, not an expiry concern at
         // all. Everything else keeps the original expiry_date/name order.
-        sql += ` ORDER BY
-                    CASE WHEN stock_quantity <= 0 THEN 1 ELSE 0 END,
-                    expiry_date ASC, name ASC`;
+        let orderBy = 'CASE WHEN stock_quantity <= 0 THEN 1 ELSE 0 END';
+
+        if (search) {
+            // Same relevance ranking as findAllForPOS — a short/common search
+            // term shouldn't look like it barely filtered anything just
+            // because it matches dozens of products somewhere in the middle
+            // of their name/generic name.
+            orderBy += `,
+                CASE
+                    WHEN name LIKE ?         THEN 0
+                    WHEN generic_name LIKE ? THEN 1
+                    ELSE 2
+                END`;
+            const startsWith = `${search}%`;
+            params.push(startsWith, startsWith);
+        }
+
+        sql += ` ORDER BY ${orderBy}, expiry_date ASC, name ASC`;
         const [rows] = await db.query(sql, params);
         return rows;
     },
@@ -222,10 +237,26 @@ const Product = {
             sql += ' AND (name LIKE ? OR generic_name LIKE ? OR batch_number LIKE ? OR barcode = ?)';
             const like = `%${search}%`;
             params.push(like, like, like, search);
+
+            // A short or common search term (e.g. just "a") can match
+            // dozens of products via a substring buried in the middle of a
+            // name or generic name, which makes the search look like it
+            // barely filtered anything even though it technically did. This
+            // ranks products whose name/generic name STARTS WITH the term
+            // above everything else, so the most relevant matches always
+            // surface first regardless of how short the search is.
+            sql += ` ORDER BY
+                        CASE
+                            WHEN name LIKE ?         THEN 0
+                            WHEN generic_name LIKE ? THEN 1
+                            ELSE 2
+                        END,
+                        name ASC, expiry_date ASC`;
+            const startsWith = `${search}%`;
+            params.push(startsWith, startsWith);
+        } else {
+            sql += ' ORDER BY name ASC, expiry_date ASC';
         }
-        // Ordered by name then expiry ASC so the earliest-expiring batch of
-        // each product always comes first — this gives us FEFO ordering for free.
-        sql += ' ORDER BY name ASC, expiry_date ASC';
         const [rows] = await db.query(sql, params);
         return rows;
     },

@@ -3,7 +3,6 @@
 // Manual/scheduled backup, restore, list, delete, download, schedule.
 // All routes are super_admin ("owner") only — see routes/backupRoutes.js.
 // ============================================================
-const path            = require('path');
 const backupService   = require('../services/backupService');
 const AppSetting      = require('../models/AppSetting');
 const { SETTING_KEY, DEFAULT_TIME, TIME_PATTERN, rescheduleNow } = require('../utils/backupScheduler');
@@ -63,15 +62,12 @@ const remove = async (req, res, next) => {
  */
 const download = async (req, res, next) => {
     try {
-        backupService.validateFilename(req.params.filename);
-        const filepath = path.join(backupService.BACKUP_DIR, req.params.filename);
-        res.type('application/sql');
-        res.download(filepath, req.params.filename, (err) => {
-            // res.download() may fail AFTER headers are already partially
-            // sent (e.g. file deleted mid-request) — only forward to the
-            // error handler if a response hasn't gone out yet.
-            if (err && !res.headersSent) next(err);
+        const content = await backupService.getBackupContent(req.params.filename);
+        res.set({
+            'Content-Type': 'application/sql',
+            'Content-Disposition': `attachment; filename="${req.params.filename}"`
         });
+        res.send(content);
     } catch (err) { next(err); }
 };
 

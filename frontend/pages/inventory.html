@@ -69,6 +69,14 @@
                 </div>
                 <div class="d-flex gap-8">
                     <button class="btn btn-outline" id="btn-import-csv">📤 Import CSV</button>
+                    <div class="export-dropdown" id="export-dropdown">
+                        <button class="btn btn-outline" id="btn-export-toggle">📄 Export ▾</button>
+                        <div class="export-menu hidden" id="export-menu">
+                            <button class="export-menu-item" data-format="excel">📊 Excel (.xlsx)</button>
+                            <button class="export-menu-item" data-format="pdf">📄 PDF</button>
+                            <button class="export-menu-item" data-format="word">📝 Word (.docx)</button>
+                        </div>
+                    </div>
                     <button class="btn btn-primary" id="btn-add-product">＋ Add Product</button>
                     <input type="file" id="csv-import-input" accept=".csv" style="display:none">
                 </div>

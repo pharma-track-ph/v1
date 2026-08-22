@@ -227,10 +227,24 @@
                         <button class="btn btn-success btn-lg" id="btn-checkout">✅ Checkout</button>
                     </div>
                     <div class="cart-actions" style="padding-top:0">
-                        <button class="btn-void-full" id="btn-void">↩ Void Last Transaction</button>
+                        <button class="btn-void-full" id="btn-void">↩ Void a Transaction</button>
                     </div>
                 </div>
         </main>
+    </div>
+</div>
+
+<!-- ── Void: pick which transaction ───────────────── -->
+<div class="modal-overlay" id="void-list-modal">
+    <div class="modal" style="max-width:480px">
+        <div class="modal-header">
+            <h3>↩ Void a Transaction</h3>
+            <button class="btn-close" onclick="Modal.close('void-list-modal')">✕</button>
+        </div>
+        <div class="modal-body" id="void-list-body" style="max-height:420px;overflow-y:auto"></div>
+        <div class="modal-footer">
+            <button class="btn btn-light" onclick="Modal.close('void-list-modal')">Close</button>
+        </div>
     </div>
 </div>
 
