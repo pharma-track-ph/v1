@@ -495,6 +495,7 @@ img { max-width: 100%; display: block; }
 .btn {
     display:       inline-flex;
     align-items:   center;
+    justify-content: center;
     gap:           6px;
     padding:       8px 16px;
     border-radius: var(--border-radius);
@@ -592,7 +593,7 @@ select.form-control { appearance: none; background-image: url("data:image/svg+xm
 
 .table thead th {
     background:    var(--light-blue);
-    padding:       11px 14px;
+    padding:       10px 16px;
     text-align:    left;
     font-size:     0.75rem;
     font-weight:   700;
@@ -603,7 +604,7 @@ select.form-control { appearance: none; background-image: url("data:image/svg+xm
 }
 
 .table tbody td {
-    padding:      11px 14px;
+    padding:      10px 16px;
     border-bottom: 1px solid var(--gray-100);
     color:        var(--dark);
 }
@@ -781,6 +782,7 @@ body { overflow-x: hidden; }
 /* ── Expiry row coloring in tables ─────────────────────────── */
 tr.row-expired   td { background: #fff0f0 !important; }
 tr.row-expiring  td { background: #fffbf0 !important; }
+tr.row-expiring-3mo td { background: #f0f9ff !important; }
 tr.row-low-stock td { background: #f0f0ff !important; }
 tr.row-soldout   td { background: #f4f4f5 !important; }
 
@@ -936,3 +938,105 @@ tr.row-soldout   td { background: #f4f4f5 !important; }
     font-weight:   600;
     white-space:   nowrap;
 }
+
+/* ── Profile dropdown (avatar, top-right) ─────────────── */
+.profile-wrap { position: relative; }
+
+.profile-dropdown {
+    position:      absolute;
+    top:           calc(100% + 8px);
+    right:         0;
+    width:         220px;
+    background:    var(--white);
+    border:        1px solid var(--gray-200);
+    border-radius: var(--border-radius-lg);
+    box-shadow:    var(--shadow-lg);
+    z-index:       200;
+    overflow:      hidden;
+    padding:       6px;
+}
+
+.profile-dropdown-item {
+    width:           100%;
+    display:         flex;
+    align-items:     center;
+    justify-content: space-between;
+    gap:             10px;
+    padding:         10px 12px;
+    background:      none;
+    border:          none;
+    border-radius:   8px;
+    font-size:       0.85rem;
+    font-family:     var(--font-family);
+    color:           var(--dark);
+    cursor:          pointer;
+    text-align:      left;
+    transition:      var(--transition);
+}
+
+.profile-dropdown-item:hover { background: var(--gray-100); }
+
+.profile-toggle-track {
+    position:      relative;
+    width:         34px;
+    height:        18px;
+    background:    var(--gray-300);
+    border-radius: 999px;
+    flex-shrink:   0;
+    transition:    var(--transition);
+}
+
+.profile-toggle-track.active { background: var(--primary); }
+
+.profile-toggle-thumb {
+    position:      absolute;
+    top:           2px;
+    left:          2px;
+    width:         14px;
+    height:        14px;
+    background:    var(--white);
+    border-radius: 50%;
+    transition:    var(--transition);
+}
+
+.profile-toggle-track.active .profile-toggle-thumb { transform: translateX(16px); }
+
+/* ── Edit Profile modal ──────────────────────── */
+.edit-profile-avatar-preview {
+    width:           84px;
+    height:          84px;
+    border-radius:   50%;
+    background:      var(--primary);
+    background-size: cover;
+    background-position: center;
+    display:         flex;
+    align-items:     center;
+    justify-content: center;
+    color:           #fff;
+    font-weight:     700;
+    font-size:       1.8rem;
+    margin:          0 auto;
+    border:          3px solid var(--gray-200);
+}
+
+/* ── Dark Mode ────────────────────────────────────
+   Overrides the shared design tokens most of the UI is already built
+   from (cards, tables, forms, modals, the header) -- a real, working
+   theme for the majority of the app, but a nice-to-have, not an
+   exhaustive per-page repaint: a few page-specific hardcoded colors
+   (charts, some POS-specific styling) may not fully adapt. */
+body.dark-mode {
+    --white:      #1e2130;
+    --light:      #262a3d;
+    --light-blue: #181b28;
+    --dark:       #e8e8ec;
+    --gray-100:   #262a3d;
+    --gray-200:   #333850;
+    --gray-300:   #40465f;
+    --gray-500:   #7b8199;
+    --gray-700:   #c5c9d6;
+    background-color: var(--light-blue);
+}
+
+body.dark-mode .table tbody tr:hover { background: var(--gray-100); }
+body.dark-mode ::-webkit-scrollbar-thumb { background: var(--gray-300); }

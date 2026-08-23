@@ -35,10 +35,6 @@
                 <li class="nav-item"><a href="#" data-action="logout"><span class="nav-icon"></span> Sign Out</a></li>
             </ul>
         </nav>
-        <div class="sidebar-footer">
-            <div id="sidebar-user-name" class="fw-600">—</div>
-            <div id="sidebar-user-role" style="font-size:0.7rem;opacity:0.7">—</div>
-        </div>
     </aside>
     <div class="sidebar-overlay" id="sidebar-overlay"></div>
 
@@ -62,15 +58,7 @@
         </header>
 
         <main class="page-content">
-            <div class="page-header">
-                <div>
-                    <h2>🔍 Audit Logs</h2>
-                    <p>Full trail of all system actions — create, update, delete, login, checkout.</p>
-                </div>
-                <button class="btn btn-outline" id="btn-export-audit">📥 Export CSV</button>
-            </div>
-
-            <!-- ── Stats ────────────────────────────────────── -->
+            <!-- Stats -->
             <div class="audit-stats">
                 <div class="audit-stat-card">
                     <div class="audit-stat-icon blue">📋</div>
@@ -102,7 +90,7 @@
                 </div>
             </div>
 
-            <!-- ── Toolbar ──────────────────────────────────── -->
+            <!-- Toolbar -->
             <div class="audit-toolbar">
                 <div class="search-wrap">
                     <span class="search-icon">🔍</span>
@@ -129,7 +117,21 @@
                 <button class="btn btn-primary" id="btn-refresh">↻ Refresh</button>
             </div>
 
-            <!-- ── Audit Table ──────────────────────────────── -->
+            <!-- Export button -- moved down to sit between the toolbar and
+                 the table, closing the gap that used to sit empty at the
+                 top of the page. -->
+            <div class="page-header" style="justify-content:flex-end;margin-bottom:12px">
+                <div class="export-dropdown" id="export-dropdown">
+                    <button class="btn btn-outline" id="btn-export-toggle">📄 Export ▾</button>
+                    <div class="export-menu hidden" id="export-menu">
+                        <button class="export-menu-item" data-format="excel">📊 Excel (.xlsx)</button>
+                        <button class="export-menu-item" data-format="pdf">📄 PDF</button>
+                        <button class="export-menu-item" data-format="word">📝 Word (.docx)</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Audit Table -->
             <div class="card" style="padding:0">
                 <div class="table-container">
                     <table class="table">
@@ -152,7 +154,7 @@
                 </div>
             </div>
 
-            <!-- ── Pagination ─────────────────────────────────── -->
+            <!-- Pagination -->
             <div class="pagination" id="pagination"></div>
         </main>
     </div>

@@ -34,10 +34,6 @@
                 <li class="nav-item"><a href="#" data-action="logout"><span class="nav-icon"></span> Sign Out</a></li>
             </ul>
         </nav>
-        <div class="sidebar-footer">
-            <div id="sidebar-user-name" class="fw-600">—</div>
-            <div id="sidebar-user-role" style="font-size:0.7rem;opacity:0.7">—</div>
-        </div>
     </aside>
     <div class="sidebar-overlay" id="sidebar-overlay"></div>
 
@@ -61,10 +57,6 @@
         </header>
 
         <main class="page-content">
-            <div class="page-header">
-                <div><h2>📋 Reports</h2><p>Sales summaries, export, and expired inventory.</p></div>
-            </div>
-
             <!-- Tabs -->
             <div class="report-tabs">
                 <button class="report-tab active" data-tab="sales">Sales Report</button>
@@ -119,9 +111,9 @@
             <!-- EXPIRED TAB -->
             <div id="tab-expired" style="display:none">
                 <div class="toolbar-row">
-                    <button class="period-btn active" data-expired-range="1">Last 1 Month</button>
-                    <button class="period-btn" data-expired-range="3">Last 3 Months</button>
-                    <button class="period-btn" data-expired-range="6">Last 6 Months</button>
+                    <button class="period-btn active" data-expired-range="1">1 Month</button>
+                    <button class="period-btn" data-expired-range="3">3 Months</button>
+                    <button class="period-btn" data-expired-range="6">6 Months</button>
                     <button class="period-btn" data-expired-range="all">All Time</button>
                     <button class="period-btn" data-expired-range="custom">Custom</button>
 

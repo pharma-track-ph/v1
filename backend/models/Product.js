@@ -13,6 +13,7 @@ const Product = {
                        WHEN stock_quantity <= 0                                THEN 'out_of_stock'
                        WHEN expiry_date < CURDATE()                            THEN 'expired'
                        WHEN DATEDIFF(expiry_date, CURDATE()) <= 30             THEN 'near_expiry'
+                       WHEN DATEDIFF(expiry_date, CURDATE()) <= 90             THEN 'expiring_3mo'
                        WHEN stock_quantity <= low_stock_threshold              THEN 'low_stock'
                        ELSE 'in_stock'
                    END AS stock_status
@@ -36,16 +37,24 @@ const Product = {
             switch (status) {
                 case 'low_stock':
                     // Must mirror findAll's CASE priority: a batch that's ALSO
-                    // expired/near-expiry/out-of-stock is categorized under
-                    // that higher-priority status instead, so exclude those
-                    // here too, or this filter would double-count rows that
-                    // display under a different badge.
-                    sql += ' AND stock_quantity > 0 AND stock_quantity <= low_stock_threshold AND expiry_date >= CURDATE() AND DATEDIFF(expiry_date, CURDATE()) > 30';
+                    // expired/near-expiry/expiring-3mo/out-of-stock is
+                    // categorized under that higher-priority status instead,
+                    // so exclude those here too, or this filter would
+                    // double-count rows that display under a different badge.
+                    sql += ' AND stock_quantity > 0 AND stock_quantity <= low_stock_threshold AND expiry_date >= CURDATE() AND DATEDIFF(expiry_date, CURDATE()) > 90';
                     break;
                 case 'expiring':
                     // A batch that's sold out (stock 0) is never "expiring soon"
                     // from a business standpoint — there's no stock left to lose.
                     sql += ' AND expiry_date >= CURDATE() AND DATEDIFF(expiry_date, CURDATE()) <= 30 AND stock_quantity > 0';
+                    break;
+                case 'expiring_3mo':
+                    // Deliberately INCLUSIVE of the 1-month tier (0-90 days),
+                    // not just the 31-90 day band the per-row badge shows —
+                    // this is meant as a broader "anything needing attention
+                    // in the next 3 months" net, not a mutually-exclusive
+                    // badge match.
+                    sql += ' AND expiry_date >= CURDATE() AND DATEDIFF(expiry_date, CURDATE()) <= 90 AND stock_quantity > 0';
                     break;
                 case 'expired':
                     // Once a batch hits 0 stock it's "Sold Out", not "Expired" —
@@ -57,7 +66,7 @@ const Product = {
                     sql += ' AND stock_quantity <= 0';
                     break;
                 case 'in_stock':
-                    sql += ' AND stock_quantity > low_stock_threshold AND expiry_date >= CURDATE()';
+                    sql += ' AND stock_quantity > low_stock_threshold AND expiry_date >= CURDATE() AND DATEDIFF(expiry_date, CURDATE()) > 90';
                     break;
             }
         }
@@ -169,15 +178,16 @@ const Product = {
 
     getLowStockCount: async () => {
         // Must mirror the exact priority order used in findAll()'s CASE expression
-        // (out_of_stock > expired > near_expiry > low_stock) so this count always
-        // matches what Inventory shows when filtered to "Low Stock" — otherwise a
-        // product that's both low-stock AND expiring soon would get double-counted
-        // here while only showing up under "Near Expiry" in the actual table.
+        // (out_of_stock > expired > near_expiry > expiring_3mo > low_stock) so this
+        // count always matches what Inventory shows when filtered to "Low Stock" —
+        // otherwise a product that's both low-stock AND expiring soon would get
+        // double-counted here while only showing up under a different badge in
+        // the actual table.
         const [rows] = await db.query(
             `SELECT COUNT(*) AS count FROM products
              WHERE is_active = 1
                AND expiry_date >= CURDATE()
-               AND DATEDIFF(expiry_date, CURDATE()) > 30
+               AND DATEDIFF(expiry_date, CURDATE()) > 90
                AND stock_quantity > 0
                AND stock_quantity <= low_stock_threshold`
         );
@@ -193,6 +203,22 @@ const Product = {
              WHERE is_active = 1
                AND expiry_date >= CURDATE()
                AND DATEDIFF(expiry_date, CURDATE()) <= 30
+               AND stock_quantity > 0`
+        );
+        return rows[0].count;
+    },
+
+    // "Expiring in 3 Months" header alert / filter count — deliberately
+    // INCLUSIVE of the 1-month tier (0-90 days), matching the filter's own
+    // inclusive semantics in inventoryController.js's getProducts(), so
+    // clicking this alert and seeing the resulting list always agree on
+    // the same number.
+    getExpiring3MonthsCount: async () => {
+        const [rows] = await db.query(
+            `SELECT COUNT(*) AS count FROM products
+             WHERE is_active = 1
+               AND expiry_date >= CURDATE()
+               AND DATEDIFF(expiry_date, CURDATE()) <= 90
                AND stock_quantity > 0`
         );
         return rows[0].count;

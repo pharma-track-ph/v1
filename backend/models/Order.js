@@ -177,50 +177,54 @@ const Order = {
     },
 
     // -- Void support --------------------------------------------
-    // Scoped to the CURRENT LOGIN SESSION only -- not "today", not "any
-    // cashier system-wide". Every role, including admin/super_admin, can
-    // only reach their OWN completed sales, and only ones made after their
-    // current session's token was issued. Logging out and back in starts a
-    // brand new boundary; nothing from an earlier session is ever
-    // reachable this way, even by the same person.
-    findLastCompletedInSession: async (userId, sessionIat) => {
+    // Scoped to a rolling window (VOID_WINDOW_DAYS below) and to the
+    // cashier's OWN transactions -- not "any cashier system-wide". This
+    // used to also require the transaction be from the CURRENT login
+    // session, which meant a mistake noticed the next day (or after
+    // logging back in) could never be voided at all. That restriction is
+    // gone now on purpose: this only checks "is it yours" and "is it
+    // recent enough", regardless of which login session it happened in or
+    // whether that day's register has since been closed.
+    VOID_WINDOW_DAYS: 10,
+
+    findLastCompletedInSession: async (userId) => {
         const [rows] = await db.query(
             `SELECT o.*, u.name AS cashier_name
              FROM orders o
              JOIN users u ON u.id = o.cashier_id
              WHERE o.cashier_id = ?
                AND o.status = 'completed'
-               AND UNIX_TIMESTAMP(o.created_at) >= ?
+               AND o.created_at >= DATE_SUB(NOW(), INTERVAL ${Order.VOID_WINDOW_DAYS} DAY)
              ORDER BY o.created_at DESC LIMIT 1`,
-            [userId, sessionIat]
+            [userId]
         );
         return rows[0] || null;
     },
 
     // Same scoping as above, but returns up to `limit` recent transactions
     // instead of only the single most recent one -- lets the cashier pick
-    // WHICH one to void (e.g. a wrong medicine rung up a few sales back
-    // that wasn't caught right away), not just the very last sale.
-    findRecentCompletedInSession: async (userId, sessionIat, limit = 10) => {
+    // WHICH one to void (e.g. a wrong medicine rung up a sale or two, or a
+    // day or two, back that wasn't caught right away).
+    findRecentCompletedInSession: async (userId, limit = 10) => {
         const [rows] = await db.query(
             `SELECT o.*, u.name AS cashier_name
              FROM orders o
              JOIN users u ON u.id = o.cashier_id
              WHERE o.cashier_id = ?
                AND o.status = 'completed'
-               AND UNIX_TIMESTAMP(o.created_at) >= ?
+               AND o.created_at >= DATE_SUB(NOW(), INTERVAL ${Order.VOID_WINDOW_DAYS} DAY)
              ORDER BY o.created_at DESC LIMIT ?`,
-            [userId, sessionIat, limit]
+            [userId, limit]
         );
         return rows;
     },
 
     // Fetches ONE specific order by id, but only within the exact same
-    // session-scoping rules as above -- used when voiding a SPECIFIC
-    // chosen transaction rather than just "the last one", so the security
-    // boundary is identical either way: still your own order, still from
-    // this login, regardless of which one in the list gets picked.
-    findByIdInSession: async (orderId, userId, sessionIat) => {
+    // scoping rules as above -- used when voiding a SPECIFIC chosen
+    // transaction rather than just "the last one", so the security
+    // boundary is identical either way: still your own order, still
+    // within the window, regardless of which one in the list gets picked.
+    findByIdInSession: async (orderId, userId) => {
         const [rows] = await db.query(
             `SELECT o.*, u.name AS cashier_name
              FROM orders o
@@ -228,9 +232,9 @@ const Order = {
              WHERE o.id = ?
                AND o.cashier_id = ?
                AND o.status = 'completed'
-               AND UNIX_TIMESTAMP(o.created_at) >= ?
+               AND o.created_at >= DATE_SUB(NOW(), INTERVAL ${Order.VOID_WINDOW_DAYS} DAY)
              LIMIT 1`,
-            [orderId, userId, sessionIat]
+            [orderId, userId]
         );
         return rows[0] || null;
     }

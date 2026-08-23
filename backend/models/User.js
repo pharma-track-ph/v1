@@ -20,7 +20,7 @@ const User = {
 
     findById: async (id) => {
         const [rows] = await db.query(
-            'SELECT id, name, email, role, is_active, created_at FROM users WHERE id = ? LIMIT 1',
+            'SELECT id, name, email, role, is_active, avatar, created_at FROM users WHERE id = ? LIMIT 1',
             [id]
         );
         return rows[0] || null;
@@ -28,7 +28,7 @@ const User = {
 
     findAll: async () => {
         const [rows] = await db.query(
-            'SELECT id, name, email, role, is_active, created_at FROM users ORDER BY created_at DESC'
+            'SELECT id, name, email, role, is_active, avatar, created_at FROM users ORDER BY created_at DESC'
         );
         return rows;
     },
@@ -69,6 +69,43 @@ const User = {
 
     comparePassword: async (plain, hash) => {
         return bcrypt.compare(plain, hash);
+    },
+
+    // ── Password reset (OTP) ──────────────────
+    // The OTP itself is NEVER stored -- only a bcrypt hash of it, same as
+    // a real password, so a database leak alone doesn't expose usable
+    // codes. Attempts are tracked to rate-limit brute-forcing a 6-digit
+    // code (only ~1 million possibilities); a fresh request resets the
+    // counter since it's a new code.
+    setResetOtp: async (id, otpHash, expiresAt) => {
+        await db.query(
+            'UPDATE users SET reset_otp_hash = ?, reset_otp_expires_at = ?, reset_otp_attempts = 0 WHERE id = ?',
+            [otpHash, expiresAt, id]
+        );
+    },
+
+    incrementOtpAttempts: async (id) => {
+        await db.query('UPDATE users SET reset_otp_attempts = reset_otp_attempts + 1 WHERE id = ?', [id]);
+    },
+
+    clearResetOtp: async (id) => {
+        await db.query(
+            'UPDATE users SET reset_otp_hash = NULL, reset_otp_expires_at = NULL, reset_otp_attempts = 0 WHERE id = ?',
+            [id]
+        );
+    },
+
+    // ── Self-service profile update (name + avatar) ────
+    // Cashiers are only ever allowed to change `avatar` here -- the
+    // controller enforces that by simply not passing a new `name` for
+    // them, reusing their existing one instead, same pattern as the
+    // role/is_active self-edit lock on the Users page.
+    updateProfile: async (id, { name, avatar }) => {
+        const [result] = await db.query(
+            'UPDATE users SET name = ?, avatar = ? WHERE id = ?',
+            [name, avatar, id]
+        );
+        return result.affectedRows;
     }
 };
 

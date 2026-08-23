@@ -6,6 +6,36 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>PharmaTrack – Login</title>
     <link rel="stylesheet" href="../css/global.css">
+    <style>
+        /* Small additions specific to the Forgot Password flow -- kept
+           inline since this page doesn't load a separate page-specific
+           stylesheet (everything else here reuses global.css). */
+        .forgot-link {
+            display: block;
+            text-align: center;
+            margin-top: 14px;
+            font-size: 0.85rem;
+        }
+        .otp-input {
+            text-align: center;
+            font-size: 1.4rem;
+            letter-spacing: 8px;
+            font-weight: 700;
+        }
+        .fp-step { display: none; }
+        .fp-step.active { display: block; }
+        .fp-resend {
+            background: none;
+            border: none;
+            color: var(--primary);
+            font-size: 0.8rem;
+            cursor: pointer;
+            padding: 0;
+            margin-top: 8px;
+        }
+        .fp-resend:disabled { color: var(--secondary); cursor: not-allowed; }
+        .fp-success-icon { font-size: 2.5rem; text-align: center; margin-bottom: 8px; }
+    </style>
 </head>
 
 <body>
@@ -35,7 +65,77 @@
                 <button type="submit" class="btn btn-primary" id="login-btn">
                     Sign In
                 </button>
+
+                <a href="#" class="forgot-link" id="open-forgot-password">Forgot password?</a>
             </form>
+        </div>
+    </div>
+
+    <!-- ── Forgot Password modal (3 steps: email -> code -> new password) ── -->
+    <div class="modal-overlay" id="forgot-password-modal">
+        <div class="modal" style="max-width:380px">
+            <div class="modal-header">
+                <h3>🔑 Reset Your Password</h3>
+                <button class="btn-close" id="btn-close-forgot">✕</button>
+            </div>
+            <div class="modal-body">
+
+                <!-- Step 1: request a code -->
+                <div class="fp-step active" id="fp-step-email">
+                    <p style="font-size:0.85rem;color:var(--secondary);margin-bottom:14px">
+                        Enter the email on your account. We'll send a 6-digit code to it.
+                    </p>
+                    <div class="form-group">
+                        <label class="form-label">Email Address</label>
+                        <input type="email" id="fp-email" class="form-control" placeholder="your@email.com" autocomplete="email">
+                    </div>
+                    <p class="error-msg" id="fp-email-error" aria-live="polite"></p>
+                    <button class="btn btn-primary" style="width:100%" id="fp-send-code-btn">Send Code</button>
+                </div>
+
+                <!-- Step 2: enter the code -->
+                <div class="fp-step" id="fp-step-otp">
+                    <p style="font-size:0.85rem;color:var(--secondary);margin-bottom:14px">
+                        Enter the 6-digit code sent to <strong id="fp-otp-email-display">—</strong>. It expires in 10 minutes.
+                    </p>
+                    <div class="form-group">
+                        <label class="form-label">6-Digit Code</label>
+                        <input type="text" id="fp-otp" class="form-control otp-input" maxlength="6" inputmode="numeric" placeholder="------" autocomplete="one-time-code">
+                    </div>
+                    <p class="error-msg" id="fp-otp-error" aria-live="polite"></p>
+                    <button class="btn btn-primary" style="width:100%" id="fp-verify-otp-btn">Verify Code</button>
+                    <div style="text-align:center">
+                        <button class="fp-resend" id="fp-resend-btn">Resend code</button>
+                    </div>
+                </div>
+
+                <!-- Step 3: set a new password -->
+                <div class="fp-step" id="fp-step-password">
+                    <p style="font-size:0.85rem;color:var(--secondary);margin-bottom:14px">
+                        Code verified. Choose a new password.
+                    </p>
+                    <div class="form-group">
+                        <label class="form-label">New Password</label>
+                        <input type="password" id="fp-new-password" class="form-control" placeholder="Min. 8 characters" autocomplete="new-password">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Confirm New Password</label>
+                        <input type="password" id="fp-confirm-password" class="form-control" placeholder="Re-enter new password" autocomplete="new-password">
+                    </div>
+                    <p class="error-msg" id="fp-password-error" aria-live="polite"></p>
+                    <button class="btn btn-primary" style="width:100%" id="fp-reset-password-btn">Reset Password</button>
+                </div>
+
+                <!-- Step 4: success -->
+                <div class="fp-step" id="fp-step-success">
+                    <div class="fp-success-icon">✅</div>
+                    <p style="text-align:center;font-size:0.9rem;color:var(--dark);margin-bottom:16px">
+                        Your password has been updated. You can now sign in with your new password.
+                    </p>
+                    <button class="btn btn-primary" style="width:100%" id="fp-back-to-login-btn">Back to Sign In</button>
+                </div>
+
+            </div>
         </div>
     </div>
 
@@ -129,6 +229,163 @@
                 btn.textContent = 'Sign In';
             }
         });
+
+        // ── Forgot Password flow ──────────────────────────────────
+        // Three steps in one modal: email -> OTP -> new password. A
+        // successfully-verified OTP earns a short-lived resetToken (10 min)
+        // from the server -- THAT token is what actually authorizes step 3,
+        // not the OTP again, so the code can't be reused once verified.
+        const fpModal        = document.getElementById('forgot-password-modal');
+        let fpVerifiedEmail   = '';
+        let fpResetToken      = '';
+        let fpResendCooldown  = null;
+
+        function fpShowStep(stepId) {
+            document.querySelectorAll('.fp-step').forEach(el => el.classList.remove('active'));
+            document.getElementById(stepId)?.classList.add('active');
+        }
+
+        function fpOpen() {
+            fpVerifiedEmail = '';
+            fpResetToken    = '';
+            document.getElementById('fp-email').value = document.getElementById('email').value.trim();
+            document.getElementById('fp-otp').value = '';
+            document.getElementById('fp-new-password').value = '';
+            document.getElementById('fp-confirm-password').value = '';
+            ['fp-email-error', 'fp-otp-error', 'fp-password-error'].forEach(id => {
+                document.getElementById(id).textContent = '';
+            });
+            fpShowStep('fp-step-email');
+            fpModal.classList.add('active');
+        }
+
+        function fpClose() {
+            fpModal.classList.remove('active');
+            if (fpResendCooldown) clearInterval(fpResendCooldown);
+        }
+
+        document.getElementById('open-forgot-password').addEventListener('click', (e) => {
+            e.preventDefault();
+            fpOpen();
+        });
+        document.getElementById('btn-close-forgot').addEventListener('click', fpClose);
+        // Only the ✕ and "Back to Sign In" close this now -- clicking outside
+        // used to close it too, which was easy to trigger by accident mid-way
+        // through entering a code and lose progress.
+
+        // Step 1 -> Step 2: request the code
+        async function fpSendCode() {
+            const email = document.getElementById('fp-email').value.trim();
+            const errorEl = document.getElementById('fp-email-error');
+            const btn = document.getElementById('fp-send-code-btn');
+            errorEl.textContent = '';
+
+            if (!email) { errorEl.textContent = 'Enter your email.'; return; }
+
+            btn.disabled = true;
+            btn.textContent = 'Sending…';
+            const result = await API.post('/auth/forgot-password', { email });
+            btn.disabled = false;
+            btn.textContent = 'Send Code';
+
+            if (result?.success) {
+                fpVerifiedEmail = email;
+                document.getElementById('fp-otp-email-display').textContent = email;
+                document.getElementById('fp-otp').value = '';
+                document.getElementById('fp-otp-error').textContent = '';
+                fpShowStep('fp-step-otp');
+                fpStartResendCooldown();
+                document.getElementById('fp-otp').focus();
+            } else {
+                errorEl.textContent = result?.message || 'Something went wrong. Please try again.';
+            }
+        }
+        document.getElementById('fp-send-code-btn').addEventListener('click', fpSendCode);
+
+        function fpStartResendCooldown() {
+            const resendBtn = document.getElementById('fp-resend-btn');
+            let seconds = 30;
+            resendBtn.disabled = true;
+            resendBtn.textContent = `Resend code (${seconds}s)`;
+            if (fpResendCooldown) clearInterval(fpResendCooldown);
+            fpResendCooldown = setInterval(() => {
+                seconds--;
+                if (seconds <= 0) {
+                    clearInterval(fpResendCooldown);
+                    resendBtn.disabled = false;
+                    resendBtn.textContent = 'Resend code';
+                } else {
+                    resendBtn.textContent = `Resend code (${seconds}s)`;
+                }
+            }, 1000);
+        }
+
+        document.getElementById('fp-resend-btn').addEventListener('click', async () => {
+            const result = await API.post('/auth/forgot-password', { email: fpVerifiedEmail });
+            if (result?.success) {
+                Toast.show('A new code has been sent.', 'info');
+                fpStartResendCooldown();
+            } else {
+                Toast.show(result?.message || 'Could not resend code.', 'error');
+            }
+        });
+
+        // Step 2 -> Step 3: verify the code
+        async function fpVerifyOtp() {
+            const otp = document.getElementById('fp-otp').value.trim();
+            const errorEl = document.getElementById('fp-otp-error');
+            const btn = document.getElementById('fp-verify-otp-btn');
+            errorEl.textContent = '';
+
+            if (!/^\d{6}$/.test(otp)) { errorEl.textContent = 'Enter the 6-digit code.'; return; }
+
+            btn.disabled = true;
+            btn.textContent = 'Verifying…';
+            const result = await API.post('/auth/verify-otp', { email: fpVerifiedEmail, otp });
+            btn.disabled = false;
+            btn.textContent = 'Verify Code';
+
+            if (result?.success) {
+                fpResetToken = result.resetToken;
+                if (fpResendCooldown) clearInterval(fpResendCooldown);
+                fpShowStep('fp-step-password');
+                document.getElementById('fp-new-password').focus();
+            } else {
+                errorEl.textContent = result?.message || 'Invalid code.';
+            }
+        }
+        document.getElementById('fp-verify-otp-btn').addEventListener('click', fpVerifyOtp);
+        document.getElementById('fp-otp').addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') fpVerifyOtp();
+        });
+
+        // Step 3 -> Step 4: set the new password
+        async function fpResetPassword() {
+            const newPassword     = document.getElementById('fp-new-password').value;
+            const confirmPassword = document.getElementById('fp-confirm-password').value;
+            const errorEl = document.getElementById('fp-password-error');
+            const btn = document.getElementById('fp-reset-password-btn');
+            errorEl.textContent = '';
+
+            if (!newPassword || newPassword.length < 8) { errorEl.textContent = 'Password must be at least 8 characters.'; return; }
+            if (newPassword !== confirmPassword)         { errorEl.textContent = 'Passwords do not match.'; return; }
+
+            btn.disabled = true;
+            btn.textContent = 'Updating…';
+            const result = await API.post('/auth/reset-password', { resetToken: fpResetToken, newPassword, confirmPassword });
+            btn.disabled = false;
+            btn.textContent = 'Reset Password';
+
+            if (result?.success) {
+                document.getElementById('email').value = fpVerifiedEmail;
+                fpShowStep('fp-step-success');
+            } else {
+                errorEl.textContent = result?.message || 'Could not reset password. Please start over.';
+            }
+        }
+        document.getElementById('fp-reset-password-btn').addEventListener('click', fpResetPassword);
+
+        document.getElementById('fp-back-to-login-btn').addEventListener('click', fpClose);
     </script>
 </body>
 

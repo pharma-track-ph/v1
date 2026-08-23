@@ -363,7 +363,7 @@ const aiSuggest = async (req, res) => {
  */
 const getVoidCandidate = async (req, res, next) => {
     try {
-        const order = await Order.findLastCompletedInSession(req.user.id, req.user.session_iat);
+        const order = await Order.findLastCompletedInSession(req.user.id);
 
         if (!order) {
             return res.json({ success: true, data: null });
@@ -377,16 +377,17 @@ const getVoidCandidate = async (req, res, next) => {
 
 /**
  * GET /api/pos/void-candidates
- * Returns up to the last 10 completed transactions from the CURRENT LOGIN
- * SESSION (same scoping as the single-candidate version — see
- * Order.findRecentCompletedInSession), each with its item list attached,
- * so the cashier can pick which one to void instead of only ever being
- * able to void the very last sale. Useful when a wrong item (e.g. the
- * wrong medicine) wasn't caught until a sale or two later.
+ * Returns up to the last 10 completed transactions from the last
+ * VOID_WINDOW_DAYS days (see Order.js), regardless of login session or
+ * whether that day's register has since closed, each with its item list
+ * attached, so the cashier can pick which one to void instead of only
+ * ever being able to void the very last sale. Useful when a wrong item
+ * (e.g. the wrong medicine) wasn't caught until a sale, or a day, or two
+ * later.
  */
 const getVoidCandidates = async (req, res, next) => {
     try {
-        const orders = await Order.findRecentCompletedInSession(req.user.id, req.user.session_iat, 10);
+        const orders = await Order.findRecentCompletedInSession(req.user.id, 10);
 
         if (!orders.length) {
             return res.json({ success: true, data: [] });
@@ -411,15 +412,14 @@ const getVoidCandidates = async (req, res, next) => {
  * with anything still calling this the old way.
  *
  * ── Rules ──────────────────────────────────────────────────
- * - Scoped to the CURRENT LOGIN SESSION, for every role. This is stricter
- *   than "today" — it's tied to the JWT that was issued at THIS login, so
- *   logging out and back in (even as the same person) starts a fresh
- *   boundary. An admin/owner can never reach a cashier's transaction this
- *   way, and can't even reach their OWN transactions from a previous login.
- *   Picking a SPECIFIC order_id doesn't relax this at all — it's checked
- *   with the exact same WHERE clause as "the last one" (see
- *   Order.findByIdInSession), just for a chosen id instead of always the
- *   newest.
+ * - Scoped to a rolling window (Order.VOID_WINDOW_DAYS, currently 10
+ *   days) and to the requester's OWN transactions — not "any cashier
+ *   system-wide". This is deliberately NOT limited to the current login
+ *   session or to an still-open register anymore: a mistake noticed the
+ *   next day, or after logging back in, can now be voided too, as long
+ *   as it's within the window and it's your own transaction. Picking a
+ *   SPECIFIC order_id doesn't relax this at all — it's checked with the
+ *   exact same WHERE clause as "the last one" (see Order.findByIdInSession).
  * - Cashiers cannot void on their own authority: an admin or super_admin
  *   ("owner") must approve by entering their own email + password in the
  *   request body (manager_email / manager_password).
@@ -432,15 +432,16 @@ const getVoidCandidates = async (req, res, next) => {
  *   `details` (approved_by / approved_by_id) instead, same pattern used for
  *   Cash In/Out/Open/Close in cashController.js.
  * - Admins/super_admins void on their own authority (no approval needed),
- *   but only their OWN current-session transactions — same rule as anyone
- *   else.
- * - If the order belongs to a cash register session that has already been
- *   CLOSED, the void is blocked entirely. Once a shift is closed, its
- *   variance report has already been calculated and potentially handed to
- *   the owner — silently changing the totals underneath that report after
- *   the fact would make it wrong without anyone knowing. Orders from
- *   before this feature existed have no cash_session_id at all, so this
- *   rule simply doesn't apply to them (nothing to check).
+ *   but only their OWN transactions within the window — same rule as
+ *   anyone else.
+ * - Voiding a transaction whose cash register session has already been
+ *   CLOSED (or from a previous day) is now ALLOWED — this used to be
+ *   blocked, since it can make a variance report already generated for
+ *   that day incorrect after the fact without anyone knowing. That
+ *   tradeoff is accepted deliberately here in exchange for being able to
+ *   fix a mistake noticed late; the frontend shows a stronger warning
+ *   when voiding something from a closed/older session so it's a
+ *   conscious choice, not a silent one.
  * - Stock is restored per batch (order_items.product_id is the exact batch
  *   row consumed at checkout time), not just added back to "the product"
  *   generically — so batch-level stock stays accurate.
@@ -480,30 +481,16 @@ const voidLastOrder = async (req, res, next) => {
     const connection = await db.getConnection();
     try {
         // A specific order_id picks exactly that transaction (still fully
-        // scoped to this login session — see Order.findByIdInSession);
-        // omitting it falls back to "the last one", for anything still
-        // calling this the old way.
+        // scoped to the 10-day window + "is it yours" — see
+        // Order.findByIdInSession); omitting it falls back to "the last
+        // one", for anything still calling this the old way.
         const order = order_id
-            ? await Order.findByIdInSession(order_id, req.user.id, req.user.session_iat)
-            : await Order.findLastCompletedInSession(req.user.id, req.user.session_iat);
+            ? await Order.findByIdInSession(order_id, req.user.id)
+            : await Order.findLastCompletedInSession(req.user.id);
 
         if (!order) {
             connection.release();
             return res.status(404).json({ success: false, message: 'That transaction is not available to void.' });
-        }
-
-        // Block voiding once the order's cash register shift is closed.
-        // Historical orders (before this feature existed) have no
-        // cash_session_id at all, so this check is simply skipped for them.
-        if (order.cash_session_id) {
-            const cashSession = await CashSession.findById(order.cash_session_id);
-            if (cashSession && cashSession.status === 'CLOSED') {
-                connection.release();
-                return res.status(409).json({
-                    success: false,
-                    message: 'This transaction belongs to a closed register session and cannot be voided.'
-                });
-            }
         }
 
         const items = await OrderItem.findByOrderId(order.id);

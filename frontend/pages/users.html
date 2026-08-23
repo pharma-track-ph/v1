@@ -35,10 +35,6 @@
                 <li class="nav-item"><a href="#" data-action="logout"><span class="nav-icon"></span> Sign Out</a></li>
             </ul>
         </nav>
-        <div class="sidebar-footer">
-            <div id="sidebar-user-name" class="fw-600">—</div>
-            <div id="sidebar-user-role" style="font-size:0.7rem;opacity:0.7">—</div>
-        </div>
     </aside>
     <div class="sidebar-overlay" id="sidebar-overlay"></div>
 
@@ -62,15 +58,7 @@
         </header>
 
         <main class="page-content">
-            <div class="page-header">
-                <div>
-                    <h2>👥 Users</h2>
-                    <p>Manage staff accounts, roles, and access levels.</p>
-                </div>
-                <button class="btn btn-primary" id="btn-add-user">＋ Add User</button>
-            </div>
-
-            <!-- ── User Stats ──────────────────────────────────── -->
+            <!-- User Stats -->
             <div class="user-stats">
                 <div class="user-stat-card">
                     <div class="user-stat-icon purple">👤</div>
@@ -95,7 +83,7 @@
                 </div>
             </div>
 
-            <!-- ── Toolbar ─────────────────────────────────────── -->
+            <!-- Toolbar -->
             <div class="users-toolbar">
                 <div class="search-wrap">
                     <span class="search-icon">🔍</span>
@@ -115,7 +103,14 @@
                 </select>
             </div>
 
-            <!-- ── Users Table ─────────────────────────────────── -->
+            <!-- Add User button -- moved down to sit between the toolbar
+                 and the table, closing the gap that used to sit empty at
+                 the top of the page. -->
+            <div class="page-header" style="justify-content:flex-end;margin-bottom:12px">
+                <button class="btn btn-primary" id="btn-add-user">＋ Add User</button>
+            </div>
+
+            <!-- Users Table -->
             <div class="card" style="padding:0">
                 <div class="table-container">
                     <table class="table">
@@ -141,7 +136,7 @@
     </div>
 </div>
 
-<!-- ── Add / Edit User Modal ─────────────────────────────────── -->
+<!-- Add / Edit User Modal -->
 <div class="modal-overlay" id="user-modal">
     <div class="modal">
         <div class="modal-header">
@@ -206,7 +201,7 @@
     </div>
 </div>
 
-<!-- ── Change Password Modal ──────────────────────────────────── -->
+<!-- Change Password Modal -->
 <div class="modal-overlay" id="pw-modal">
     <div class="modal">
         <div class="modal-header">

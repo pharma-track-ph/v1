@@ -27,8 +27,14 @@ const getProducts = async (req, res, next) => {
 
         let products = await Product.findAll({ search, category });
 
-        // Apply status filter post-fetch if one was requested
-        if (normalizedStatus) {
+        if (normalizedStatus === 'expiring_3mo') {
+            // Deliberately INCLUSIVE of the 1-month tier -- this filter is a
+            // broader "anything needing attention in the next 3 months" net,
+            // covering everything within 90 days rather than only the
+            // narrower 31-90 day band the per-row badge itself shows for
+            // those specific rows.
+            products = products.filter(p => p.stock_status === 'near_expiry' || p.stock_status === 'expiring_3mo');
+        } else if (normalizedStatus) {
             products = products.filter(p => p.stock_status === normalizedStatus);
         }
 
@@ -115,9 +121,10 @@ const deleteProduct = async (req, res, next) => {
  */
 const getAlertSummary = async (req, res, next) => {
     try {
-        const [lowStock, nearExpiry, expiredCount, outOfStockCount, categories] = await Promise.all([
+        const [lowStock, nearExpiry, expiring3mo, expiredCount, outOfStockCount, categories] = await Promise.all([
             Product.getLowStockCount(),
             Product.getNearExpiryCount(),
+            Product.getExpiring3MonthsCount(),
             Product.getExpiredCount(),
             Product.getOutOfStockCount(),
             Product.getCategories()
@@ -127,6 +134,7 @@ const getAlertSummary = async (req, res, next) => {
             data: {
                 low_stock:     lowStock,
                 near_expiry:   nearExpiry,
+                expiring_3mo:  expiring3mo,
                 expired:       expiredCount,
                 out_of_stock:  outOfStockCount,
                 categories

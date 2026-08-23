@@ -349,9 +349,9 @@ document.addEventListener('DOMContentLoaded', async () => {
             if (currentAlgorithm === 'holt-winters' && productSelect?.value) runForecast();
         });
 
-        // Close modal
+        // Close modal -- only the X button closes this now, not clicking
+        // outside (consistent with every other modal in the app).
         closeModal?.addEventListener('click', () => modal?.classList.add('hidden'));
-        modal?.addEventListener('click', e => { if (e.target === modal) modal.classList.add('hidden'); });
     }
 
     function updateAlgoExplainer(algo) {

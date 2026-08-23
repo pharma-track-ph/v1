@@ -177,7 +177,8 @@ document.addEventListener('DOMContentLoaded', () => {
         const map = {
             in_stock:    '<span class="badge badge-success">In Stock</span>',
             low_stock:   '<span class="badge badge-warning">Low Stock</span>',
-            near_expiry: '<span class="badge badge-warning">Near Expiry</span>',
+            near_expiry: '<span class="badge badge-warning">Expiring This Month</span>',
+            expiring_3mo:'<span class="badge badge-info">Expiring in 3 Months</span>',
             expired:     '<span class="badge badge-danger">Expired</span>',
             // A batch that's hit 0 stock is shown as "Out of Stock", not
             // "Expired" -- see the backend's stock_status priority
@@ -197,18 +198,20 @@ document.addEventListener('DOMContentLoaded', () => {
         let dotClass = 'green';
         if (daysLeft < 0)        dotClass = 'red';
         else if (daysLeft <= 30) dotClass = 'amber';
+        else if (daysLeft <= 90) dotClass = 'blue';
         return `
             <div class="expiry-cell">
                 <span class="expiry-dot ${dotClass}"></span>
                 ${Fmt.date(p.expiry_date)}
                 ${!isSoldOut && daysLeft < 0 ? `<span style="font-size:0.7rem;color:var(--danger)">(Expired)</span>` : ''}
-                ${!isSoldOut && daysLeft >= 0 && daysLeft <= 30 ? `<span style="font-size:0.7rem;color:#92400e">(${daysLeft}d)</span>` : ''}
+                ${!isSoldOut && daysLeft >= 0 && daysLeft <= 90 ? `<span style="font-size:0.7rem;color:#92400e">(${daysLeft}d)</span>` : ''}
             </div>`;
     }
 
     function getRowClass(status) {
         if (status === 'expired')      return 'row-expired';
         if (status === 'near_expiry')  return 'row-expiring';
+        if (status === 'expiring_3mo') return 'row-expiring-3mo';
         if (status === 'low_stock')    return 'row-low-stock';
         if (status === 'out_of_stock') return 'row-soldout';
         return '';

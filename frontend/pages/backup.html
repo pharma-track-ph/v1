@@ -35,10 +35,6 @@
                 <li class="nav-item"><a href="#" data-action="logout"><span class="nav-icon"></span> Sign Out</a></li>
             </ul>
         </nav>
-        <div class="sidebar-footer">
-            <div id="sidebar-user-name" class="fw-600">—</div>
-            <div id="sidebar-user-role" style="font-size:0.7rem;opacity:0.7">—</div>
-        </div>
     </aside>
     <div class="sidebar-overlay" id="sidebar-overlay"></div>
 
@@ -62,13 +58,7 @@
         </header>
 
         <main class="page-content">
-            <div class="page-header">
-                <div>
-                    <h2>🗄️ Backup &amp; Restore</h2>
-                    <p>Back up the entire database, or restore a previous backup. Owner-only.</p>
-                </div>
-                <button class="btn btn-primary" id="btn-backup-now">💾 Backup Now</button>
-            </div>
+
 
             <!-- ── Schedule card ────────────────────────────── -->
             <div class="card backup-schedule-card">
@@ -94,12 +84,14 @@
                         <div class="backup-schedule-label">Total backups stored</div>
                         <div class="backup-schedule-value" id="backup-total-count">—</div>
                     </div>
+
+                    <div class="backup-now-cell">
+                        <button class="btn btn-primary" id="btn-backup-now">💾 Backup Now</button>
+                    </div>
+
                 </div>
-                <p class="backup-schedule-note">
-                    A backup saves a full copy of everything — products, sales, staff accounts, and more — into one file.
-                    Restoring puts your data back to that point in time. A safety copy of what you have right now is always made first, just in case.
-                    Time changes here apply right away.
-                </p>
+
+
             </div>
 
             <!-- ── Existing backups ─────────────────────────── -->

@@ -48,6 +48,7 @@
 
 .expiry-dot.red    { background: var(--danger); }
 .expiry-dot.amber  { background: var(--warning); }
+.expiry-dot.blue   { background: var(--info); }
 .expiry-dot.green  { background: var(--success); }
 
 .import-hint {

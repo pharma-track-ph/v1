@@ -107,6 +107,20 @@ const Auth = {
         localStorage.setItem(CONFIG.USER_KEY,  JSON.stringify(user));
     },
 
+    // Merges a partial update (e.g. { name, avatar } after a profile edit)
+    // into the locally-stored user object, so the header/sidebar reflect
+    // the change immediately without needing to log out and back in --
+    // the JWT itself is untouched (still valid, still has the OLD name
+    // baked in, which is fine since nothing server-side trusts the JWT's
+    // name for anything beyond display convenience).
+    updateStoredUser(patch) {
+        const user = this.getUser();
+        if (!user) return;
+        const merged = { ...user, ...patch };
+        localStorage.setItem(CONFIG.USER_KEY, JSON.stringify(merged));
+        return merged;
+    },
+
     logout() {
         localStorage.removeItem(CONFIG.TOKEN_KEY);
         localStorage.removeItem(CONFIG.USER_KEY);
@@ -266,17 +280,11 @@ const Nav = {
         // Header user info
         const nameEl   = document.getElementById('header-user-name');
         const roleEl   = document.getElementById('header-user-role');
-        const avatarEl = document.getElementById('header-avatar');
 
-        if (nameEl)   nameEl.textContent   = user.name;
-        if (roleEl)   roleEl.textContent   = roleLabel;
-        if (avatarEl) avatarEl.textContent = user.name.charAt(0).toUpperCase();
+        if (nameEl) nameEl.textContent = user.name;
+        if (roleEl) roleEl.textContent = roleLabel;
 
-        // Sidebar footer
-        const sfName = document.getElementById('sidebar-user-name');
-        const sfRole = document.getElementById('sidebar-user-role');
-        if (sfName) sfName.textContent = user.name;
-        if (sfRole) sfRole.textContent = roleLabel;
+        ProfileNav.renderAvatar(user);
     },
 
     highlightActive() {
@@ -386,10 +394,9 @@ const ConfirmDialog = {
             </div>`;
         document.body.appendChild(overlay);
 
-        // Clicking the dimmed background acts the same as Cancel
-        overlay.addEventListener('click', (e) => {
-            if (e.target === overlay) document.getElementById('confirm-dialog-cancel')?.click();
-        });
+        // Only the Cancel/Confirm buttons close this now -- see the
+        // DOMContentLoaded handler's comment for why backdrop-click was
+        // removed everywhere.
     },
 
     show({ title = 'Are you sure?', message = '', confirmText = 'Confirm', danger = true } = {}) {
@@ -457,10 +464,6 @@ const ManagerApprovalDialog = {
                 </div>
             </div>`;
         document.body.appendChild(overlay);
-
-        overlay.addEventListener('click', (e) => {
-            if (e.target === overlay) document.getElementById('manager-approval-cancel')?.click();
-        });
 
         // Enter key on either field submits
         overlay.querySelectorAll('input').forEach(input => {
@@ -556,12 +559,16 @@ const AlertsNav = {
                     <span>📅 Expiring This Month</span>
                     <span class="notif-count" id="notif-count-expiring">0</span>
                 </button>
+                <button class="notif-item" data-status="expiring_3mo">
+                    <span>🗓️ Expiring in 3 Months</span>
+                    <span class="notif-count" id="notif-count-expiring_3mo">0</span>
+                </button>
                 <button class="notif-item" data-status="expired">
                     <span>🚫 Expired</span>
                     <span class="notif-count" id="notif-count-expired">0</span>
                 </button>
                 <button class="notif-item" data-status="out_of_stock">
-                    <span>❌ Sold Out</span>
+                    <span>❌ Out of Stock</span>
                     <span class="notif-count" id="notif-count-out_of_stock">0</span>
                 </button>
             </div>`;
@@ -596,17 +603,18 @@ const AlertsNav = {
         });
     },
 
-    setCounts({ low_stock = 0, near_expiry = 0, expired = 0, out_of_stock = 0 }) {
+    setCounts({ low_stock = 0, near_expiry = 0, expiring_3mo = 0, expired = 0, out_of_stock = 0 }) {
         const set = (id, val) => {
             const el = document.getElementById(id);
             if (el) el.textContent = val;
         };
         set('notif-count-low_stock',    low_stock);
         set('notif-count-expiring',     near_expiry);
+        set('notif-count-expiring_3mo', expiring_3mo);
         set('notif-count-expired',      expired);
         set('notif-count-out_of_stock', out_of_stock);
 
-        const total = low_stock + near_expiry + expired + out_of_stock;
+        const total = low_stock + near_expiry + expiring_3mo + expired + out_of_stock;
         const badge = document.getElementById('notif-total-badge');
         if (badge) {
             badge.textContent   = total;
@@ -615,7 +623,251 @@ const AlertsNav = {
     }
 };
 
-// ── Alert Header Badges ────────────────────────────────────────
+// ── Profile Dropdown (avatar) ───────────────────
+// Wraps the existing .header-user block with a click-to-open dropdown
+// (same interaction pattern as the notification bell) containing a dark
+// mode toggle and Edit Profile. Progressive enhancement -- works on every
+// page without per-page HTML changes.
+const ProfileNav = {
+    init() {
+        const headerRight = document.querySelector('.header-right');
+        const userBlock    = document.querySelector('.header-user');
+        if (!headerRight || !userBlock || document.getElementById('profile-wrap')) return;
+
+        const wrap = document.createElement('div');
+        wrap.className = 'profile-wrap';
+        wrap.id = 'profile-wrap';
+        userBlock.parentNode.insertBefore(wrap, userBlock);
+        wrap.appendChild(userBlock);
+
+        const dropdown = document.createElement('div');
+        dropdown.className = 'profile-dropdown hidden';
+        dropdown.id = 'profile-dropdown';
+        dropdown.innerHTML = `
+            <button class="profile-dropdown-item" id="btn-toggle-dark-mode" type="button">
+                <span>🌙 <span id="dark-mode-label">Dark Mode</span></span>
+                <span class="profile-toggle-track" id="dark-mode-track"><span class="profile-toggle-thumb"></span></span>
+            </button>
+            <button class="profile-dropdown-item" id="btn-open-edit-profile" type="button">
+                ✏️ Edit Profile
+            </button>`;
+        wrap.appendChild(dropdown);
+
+        userBlock.style.cursor = 'pointer';
+        userBlock.addEventListener('click', (e) => {
+            e.stopPropagation();
+            dropdown.classList.toggle('hidden');
+        });
+        document.addEventListener('click', (e) => {
+            if (!wrap.contains(e.target)) dropdown.classList.add('hidden');
+        });
+
+        document.getElementById('btn-toggle-dark-mode')?.addEventListener('click', () => DarkMode.toggle());
+        document.getElementById('btn-open-edit-profile')?.addEventListener('click', () => {
+            dropdown.classList.add('hidden');
+            EditProfileModal.open();
+        });
+
+        DarkMode.syncToggleUI();
+    },
+
+    // Shows the actual picture if the user has one; otherwise falls back
+    // to the original colored-circle-with-initial look.
+    renderAvatar(user) {
+        const avatarEl = document.getElementById('header-avatar');
+        if (!avatarEl) return;
+        if (user.avatar) {
+            avatarEl.style.backgroundImage    = `url(${user.avatar})`;
+            avatarEl.style.backgroundSize     = 'cover';
+            avatarEl.style.backgroundPosition = 'center';
+            avatarEl.textContent = '';
+        } else {
+            avatarEl.style.backgroundImage = '';
+            avatarEl.textContent = (user.name || '?').charAt(0).toUpperCase();
+        }
+    }
+};
+
+// ── Dark Mode ──────────────────────────────────
+// A real, working toggle over the shared building blocks (cards, tables,
+// forms, modals, the header) since those are all built from the same
+// CSS custom properties -- but this is explicitly a nice-to-have, not an
+// exhaustive per-page audit, so a few page-specific hardcoded colors
+// (charts, some POS-specific styling) may not fully adapt. Preference
+// persists across pages/sessions via localStorage.
+const DarkMode = {
+    KEY: 'pharmatrack_dark_mode',
+
+    init() {
+        const enabled = localStorage.getItem(this.KEY) === '1';
+        document.body.classList.toggle('dark-mode', enabled);
+    },
+
+    toggle() {
+        const enabled = !document.body.classList.contains('dark-mode');
+        document.body.classList.toggle('dark-mode', enabled);
+        localStorage.setItem(this.KEY, enabled ? '1' : '0');
+        this.syncToggleUI();
+    },
+
+    syncToggleUI() {
+        const track = document.getElementById('dark-mode-track');
+        const label = document.getElementById('dark-mode-label');
+        const enabled = document.body.classList.contains('dark-mode');
+        track?.classList.toggle('active', enabled);
+        if (label) label.textContent = enabled ? 'Dark Mode: On' : 'Dark Mode';
+    }
+};
+
+// ── Edit Profile Modal ──────────────────────
+// Name + profile picture. Cashiers can change their picture but not their
+// name (field is disabled here, AND enforced again server-side regardless
+// of what gets sent -- see authController.js's updateProfile). The picture
+// is resized client-side to a small thumbnail via canvas before it's ever
+// sent, so the request stays small and the database column doesn't bloat.
+const EditProfileModal = {
+    pendingAvatar: null,
+
+    ensureModal() {
+        if (document.getElementById('edit-profile-modal')) return;
+
+        const user = Auth.getUser();
+        const isCashier = user?.role === 'cashier';
+
+        const overlay = document.createElement('div');
+        overlay.className = 'modal-overlay';
+        overlay.id = 'edit-profile-modal';
+        overlay.innerHTML = `
+            <div class="modal" style="max-width:380px">
+                <div class="modal-header">
+                    <h3>✏️ Edit Profile</h3>
+                    <button class="btn-close" id="btn-close-edit-profile">✕</button>
+                </div>
+                <div class="modal-body">
+                    <div style="text-align:center;margin-bottom:16px">
+                        <div class="edit-profile-avatar-preview" id="edit-profile-avatar-preview"></div>
+                        <input type="file" id="edit-profile-avatar-input" accept="image/*" style="display:none">
+                        <button class="btn btn-light btn-sm" id="btn-choose-avatar" style="margin-top:10px">Change Picture</button>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Name</label>
+                        <input type="text" id="edit-profile-name" class="form-control" ${isCashier ? 'disabled' : ''}>
+                        ${isCashier ? '<div style="font-size:0.72rem;color:var(--secondary);margin-top:4px">Only an admin or owner can change your name.</div>' : ''}
+                    </div>
+                    <p class="error-msg" id="edit-profile-error" aria-live="polite" style="min-height:20px"></p>
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-light" id="btn-close-edit-profile-2">Cancel</button>
+                    <button class="btn btn-primary" id="btn-save-profile">Save Changes</button>
+                </div>
+            </div>`;
+        document.body.appendChild(overlay);
+
+        document.getElementById('btn-close-edit-profile')?.addEventListener('click', () => Modal.close('edit-profile-modal'));
+        document.getElementById('btn-close-edit-profile-2')?.addEventListener('click', () => Modal.close('edit-profile-modal'));
+
+        document.getElementById('btn-choose-avatar')?.addEventListener('click', () => {
+            document.getElementById('edit-profile-avatar-input')?.click();
+        });
+
+        document.getElementById('edit-profile-avatar-input')?.addEventListener('change', async (e) => {
+            const file = e.target.files[0];
+            if (!file) return;
+            try {
+                this.pendingAvatar = await this.resizeImage(file, 200, 200);
+                this.setPreview(this.pendingAvatar);
+            } catch (err) {
+                Toast.show('Could not read that image. Try a different file.', 'error');
+            }
+        });
+
+        document.getElementById('btn-save-profile')?.addEventListener('click', async () => {
+            const btn   = document.getElementById('btn-save-profile');
+            const errEl = document.getElementById('edit-profile-error');
+            errEl.textContent = '';
+
+            const body = {};
+            const currentUser = Auth.getUser();
+            if (currentUser?.role !== 'cashier') {
+                const name = document.getElementById('edit-profile-name')?.value.trim();
+                if (!name) { errEl.textContent = 'Name cannot be empty.'; return; }
+                body.name = name;
+            }
+            if (this.pendingAvatar) body.avatar = this.pendingAvatar;
+
+            btn.disabled = true;
+            btn.textContent = 'Saving…';
+            const result = await API.put('/auth/profile', body);
+            btn.disabled = false;
+            btn.textContent = 'Save Changes';
+
+            if (result?.success) {
+                Auth.updateStoredUser(result.user);
+                Nav.buildUserInfo(); // re-render header/avatar immediately, no re-login needed
+                Toast.show('Profile updated.', 'success');
+                Modal.close('edit-profile-modal');
+                this.pendingAvatar = null;
+            } else {
+                errEl.textContent = result?.message || 'Could not update profile.';
+            }
+        });
+    },
+
+    setPreview(src) {
+        const el = document.getElementById('edit-profile-avatar-preview');
+        if (!el) return;
+        if (src) {
+            el.style.backgroundImage = `url(${src})`;
+            el.textContent = '';
+        } else {
+            el.style.backgroundImage = '';
+            el.textContent = (Auth.getUser()?.name || '?').charAt(0).toUpperCase();
+        }
+    },
+
+    // Downscales an uploaded image to at most maxW x maxH via a canvas,
+    // returning a compact JPEG data-URL string -- keeps the request (and
+    // the database column) small regardless of how large the original
+    // photo was.
+    resizeImage(file, maxW, maxH) {
+        return new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onerror = () => reject(reader.error);
+            reader.onload = () => {
+                const img = new Image();
+                img.onerror = () => reject(new Error('Invalid image'));
+                img.onload = () => {
+                    let { width, height } = img;
+                    const ratio = Math.min(maxW / width, maxH / height, 1);
+                    width  = Math.round(width * ratio);
+                    height = Math.round(height * ratio);
+
+                    const canvas = document.createElement('canvas');
+                    canvas.width  = width;
+                    canvas.height = height;
+                    canvas.getContext('2d').drawImage(img, 0, 0, width, height);
+                    resolve(canvas.toDataURL('image/jpeg', 0.85));
+                };
+                img.src = reader.result;
+            };
+            reader.readAsDataURL(file);
+        });
+    },
+
+    open() {
+        this.ensureModal();
+        this.pendingAvatar = null; // reset any leftover pick from a previous cancelled visit
+
+        const user = Auth.getUser();
+        const nameInput = document.getElementById('edit-profile-name');
+        if (nameInput) nameInput.value = user?.name || '';
+        this.setPreview(user?.avatar || '');
+
+        Modal.open('edit-profile-modal');
+    }
+};
+
+// ── Alert Header Badges ──────────────────────────────────────────────────────
 async function loadHeaderAlerts() {
     const alertsClient = typeof OfflineAPI !== 'undefined' ? OfflineAPI : API;
     const data = await alertsClient.get('/inventory/alerts/summary');
@@ -643,17 +895,16 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Only run Nav init on protected pages (pages with a sidebar)
     if (document.getElementById('sidebar')) {
+        DarkMode.init();
         Nav.init();
         AlertsNav.init();
+        ProfileNav.init();
         loadHeaderAlerts();
     }
 
-    // Close modal when clicking overlay background
-    document.querySelectorAll('.modal-overlay').forEach(overlay => {
-        overlay.addEventListener('click', (e) => {
-            if (e.target === overlay) Modal.close(overlay.id);
-        });
-    });
+    // Modals now only close via their own X/Cancel/Close buttons -- an
+    // accidental click on the dimmed background used to close them too,
+    // which was easy to trigger by mistake mid-form and lose progress.
 });
 
 // ── Repaint safety net for a known Chromium quirk ──────────

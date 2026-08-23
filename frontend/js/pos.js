@@ -206,7 +206,6 @@ document.addEventListener('DOMContentLoaded', () => {
                 </div>`;
             document.body.appendChild(overlay);
 
-            overlay.addEventListener('click', (e) => { if (e.target === overlay) Modal.close('failed-sync-modal'); });
             document.getElementById('btn-close-failed-sync')?.addEventListener('click', () => Modal.close('failed-sync-modal'));
             document.getElementById('btn-close-failed-sync-2')?.addEventListener('click', () => Modal.close('failed-sync-modal'));
             document.getElementById('btn-dismiss-all-failed')?.addEventListener('click', async () => {
@@ -610,12 +609,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // ── Product search ────────────────────────────────────────
     searchInput?.addEventListener('input', debounce(() => {
-        const q = searchInput.value.trim();
-        if (q.length === 0) {
-            renderProductGrid(allProducts);
-        } else {
-            loadPOSProducts(q);
-        }
+        loadPOSProducts(searchInput.value.trim());
     }, 280));
 
     // ── Render product cards ───────────────────────────────────
@@ -819,13 +813,9 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('btn-camera-done')?.addEventListener('click', closeCameraScanner);
     document.getElementById('btn-camera-close')?.addEventListener('click', closeCameraScanner);
 
-    // main.js's generic overlay-click handler just calls Modal.close() by
-    // id, which would leave the camera stream running in the background if
-    // someone clicks the dimmed backdrop instead of Done/✕ — make sure the
-    // camera actually stops in that case too.
-    document.getElementById('camera-scan-modal')?.addEventListener('click', (e) => {
-        if (e.target.id === 'camera-scan-modal') closeCameraScanner();
-    });
+    // Only Done/✕ close this now -- backdrop-click-to-close was removed
+    // app-wide (see main.js), since it was too easy to trigger by
+    // accident and lose scanning progress or an in-progress form.
 
     async function openCameraScanner() {
         console.log('[Camera Scanner] Opening... ZXingBrowser loaded?', typeof ZXingBrowser !== 'undefined');
@@ -1047,16 +1037,16 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     // ── Void: pick which transaction ───────────────
-    // Shows up to the last 10 completed sales from THIS login session (see
-    // Order.findRecentCompletedInSession on the backend -- same security
-    // scoping as before, just more than one candidate now) so a wrong item
-    // caught a sale or two late doesn't require voiding everything back to
-    // it.
+    // Shows up to the last 10 completed sales from the last 10 days (see
+    // Order.VOID_WINDOW_DAYS on the backend) -- regardless of login
+    // session or whether that day's register has since closed -- so a
+    // wrong item caught late, even a day or two later, doesn't require
+    // voiding everything back to it.
     voidBtn?.addEventListener('click', async () => {
         const candidates = await OfflineAPI.get('/pos/void-candidates');
 
         if (!candidates?.success || !candidates.data?.length) {
-            Toast.show('No transaction from your current session available to void.', 'info');
+            Toast.show('No transaction from the last 10 days available to void.', 'info');
             return;
         }
 
@@ -1097,10 +1087,23 @@ document.addEventListener('DOMContentLoaded', () => {
             .map(i => `• ${i.product_name} x${i.quantity}`)
             .join('\n');
 
+        // Voiding something from a PREVIOUS day is now allowed (it used to
+        // be blocked once that day's register closed), but it can make a
+        // Sales/Register report already generated for that date incorrect
+        // after the fact -- flag it clearly here so it's a conscious
+        // choice, not a surprise.
+        const orderDay = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Manila', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(order.created_at));
+        const today     = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Manila', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
+        const isOlderDay = orderDay !== today;
+
+        const warningLine = isOlderDay
+            ? `\n\u26a0\ufe0f This sale is from ${Fmt.date(order.created_at)}, not today. Reports already generated for that date won't automatically reflect this void.\n`
+            : '';
+
         // Step 1: show what would be voided (same for every role)
         const confirmed = await ConfirmDialog.show({
             title:       `Void ${order.order_number}?`,
-            message:     `Total: ${Fmt.currency(order.total)}\n${itemsList}\n\nThis restores stock and cannot be undone.`,
+            message:     `Total: ${Fmt.currency(order.total)}\n${itemsList}\n${warningLine}\nThis restores stock and cannot be undone.`,
             confirmText: 'Void Transaction'
         });
 
