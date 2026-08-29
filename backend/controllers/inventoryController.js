@@ -11,12 +11,23 @@ const fs           = require('fs');
  * Returns filtered product list with computed stock_status.
  * Query params: search, category, status
  *
- * FIX Bug 4: The original code passed 'status' to Product.findAll() but
- * that method only accepts { search, category, expiringOnly }. Status was
- * silently ignored, returning all products regardless of the filter.
- * Fix: run findAll() normally, then filter the JS array by stock_status.
- * This works because Product.findAll() already computes stock_status via
- * a SQL CASE expression, so no extra DB query is needed.
+ * Filtering: every "concern" status (low_stock, near_expiry, expiring_3mo,
+ * expired, out_of_stock) checks its OWN real condition independently here,
+ * rather than matching the single stock_status column Product.findAll()
+ * computes. That column is still just ONE label per product (picked by
+ * priority: out_of_stock > expired > near_expiry > expiring_3mo >
+ * low_stock > in_stock) for the row's own badge -- but a product can
+ * genuinely be both low on stock AND expiring soon at the same time, and
+ * it needs to show up when filtering by EITHER concern, not just
+ * whichever one "won" the priority order for its badge. This was a real
+ * bug: a product with 3 units left and an expiry 42 days out was
+ * invisible under BOTH the Low Stock filter and the In Stock filter,
+ * simply because its single badge had been assigned to "Expiring in 3
+ * Months" instead.
+ *
+ * in_stock is the one deliberate exception and stays exclusive -- it's
+ * meant to mean "nothing here needs attention at all", so it only matches
+ * when none of the other conditions apply, same as the badge itself.
  */
 const getProducts = async (req, res, next) => {
     try {
@@ -27,15 +38,39 @@ const getProducts = async (req, res, next) => {
 
         let products = await Product.findAll({ search, category });
 
-        if (normalizedStatus === 'expiring_3mo') {
-            // Deliberately INCLUSIVE of the 1-month tier -- this filter is a
-            // broader "anything needing attention in the next 3 months" net,
-            // covering everything within 90 days rather than only the
-            // narrower 31-90 day band the per-row badge itself shows for
-            // those specific rows.
-            products = products.filter(p => p.stock_status === 'near_expiry' || p.stock_status === 'expiring_3mo');
-        } else if (normalizedStatus) {
-            products = products.filter(p => p.stock_status === normalizedStatus);
+        if (normalizedStatus) {
+            products = products.filter(p => {
+                const daysLeft  = parseInt(p.days_until_expiry);
+                const stock     = parseInt(p.stock_quantity);
+                const threshold = parseInt(p.low_stock_threshold);
+
+                switch (normalizedStatus) {
+                    case 'out_of_stock':
+                        return stock <= 0;
+                    case 'expired':
+                        return stock > 0 && daysLeft < 0;
+                    case 'near_expiry':
+                        // "Expiring This Month"
+                        return stock > 0 && daysLeft >= 0 && daysLeft <= 30;
+                    case 'expiring_3mo':
+                        // "Expiring in 3 Months" -- deliberately INCLUSIVE of the
+                        // 1-month tier (0-90 days), a broader "anything needing
+                        // attention soon" net, same as before -- now also
+                        // independent of stock level.
+                        return stock > 0 && daysLeft >= 0 && daysLeft <= 90;
+                    case 'low_stock':
+                        // Independent of expiry now -- shows up here even if
+                        // the row's own badge displays a different, more
+                        // urgent concern.
+                        return stock > 0 && stock <= threshold;
+                    case 'in_stock':
+                        // The one exception: stays exclusive on purpose (see
+                        // docstring above).
+                        return p.stock_status === 'in_stock';
+                    default:
+                        return true;
+                }
+            });
         }
 
         res.json({ success: true, data: products, total: products.length });

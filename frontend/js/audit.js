@@ -21,7 +21,6 @@ document.addEventListener('DOMContentLoaded', () => {
     const dateFilter   = document.getElementById('filter-date');
     const clearBtn     = document.getElementById('btn-clear-filters');
     const refreshBtn   = document.getElementById('btn-refresh');
-    const exportBtn    = document.getElementById('btn-export-audit');
 
     // ── Boot ─────────────────────────────────────────────────
     loadAuditLogs();
@@ -33,7 +32,54 @@ document.addEventListener('DOMContentLoaded', () => {
     dateFilter?.addEventListener('change',    applyFilters);
     clearBtn?.addEventListener('click',       clearFilters);
     refreshBtn?.addEventListener('click',     loadAuditLogs);
-    exportBtn?.addEventListener('click',      exportCSV);
+
+    // Suggests by cashier/user name -- the field most audit searches are
+    // actually looking for ("who did this"). It won't suggest matches by
+    // action/entity text, but the box still filters by all three once you
+    // hit Enter or keep typing, same as before.
+    SearchSuggest.attach(searchInput, {
+        getItems:    () => allLogs,
+        getLabel:    l => l.user_name || '',
+        getSubLabel: l => (l.action || '').replace(/_/g, ' ')
+    });
+
+    // ── Export dropdown (Excel / PDF / Word) ────────────
+    // Mirrors whatever filters are currently applied on screen, so the
+    // export always matches what's actually visible in the table.
+    const exportToggleBtn = document.getElementById('btn-export-toggle');
+    const exportMenu       = document.getElementById('export-menu');
+
+    exportToggleBtn?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        exportMenu?.classList.toggle('hidden');
+    });
+    document.addEventListener('click', (e) => {
+        if (exportMenu && !exportMenu.classList.contains('hidden') && !e.target.closest('#export-dropdown')) {
+            exportMenu.classList.add('hidden');
+        }
+    });
+    document.querySelectorAll('.export-menu-item').forEach(btn => {
+        btn.addEventListener('click', () => {
+            exportMenu?.classList.add('hidden');
+            exportAuditLogs(btn.dataset.format);
+        });
+    });
+
+    async function exportAuditLogs(format) {
+        const params = new URLSearchParams();
+        if (searchInput?.value.trim()) params.set('search', searchInput.value.trim());
+        if (actionFilter?.value)       params.set('action', actionFilter.value);
+        if (entityFilter?.value)       params.set('entity', entityFilter.value);
+        if (dateFilter?.value)         params.set('date', dateFilter.value);
+
+        Toast.show('Preparing report…', 'info');
+        const config = typeof getRuntimeConfig === 'function' ? getRuntimeConfig() : CONFIG;
+        const ok = await downloadAuthenticatedFile(
+            `${config.API_BASE}/auth/audit-logs/export/${format}?${params.toString()}`,
+            `PharmaTrack_Audit_Log.${format === 'excel' ? 'xlsx' : format === 'word' ? 'docx' : 'pdf'}`
+        );
+        if (!ok) Toast.show('Export failed. Check your connection.', 'error');
+    }
 
     // ── Load audit logs from API ──────────────────────────────
     async function loadAuditLogs() {
@@ -148,7 +194,6 @@ document.addEventListener('DOMContentLoaded', () => {
             tbody.innerHTML = `
                 <tr><td colspan="6">
                     <div class="empty-audit">
-                        <div class="empty-icon">🔍</div>
                         <div>No audit logs found for the selected filters.</div>
                     </div>
                 </td></tr>`;
@@ -286,7 +331,8 @@ document.addEventListener('DOMContentLoaded', () => {
             });
             if (!changed.length) return '<span class="text-muted">No fields changed.</span>';
             return detailGrid(changed.map(function(k) {
-                return [prettyLabel(k), escHtml(parsed.before[k] || '—') + ' → ' + escHtml(parsed.after[k] || '—')];
+                const displayVal = v => k === 'role' ? roleLabel(v) : (v || '—');
+                return [prettyLabel(k), escHtml(displayVal(parsed.before[k])) + ' → ' + escHtml(displayVal(parsed.after[k]))];
             }));
         }
 
@@ -298,8 +344,15 @@ document.addEventListener('DOMContentLoaded', () => {
             );
         }
 
+        // Generic fallback for any action without a dedicated handler above
+        // (e.g. UPDATE_USER falls through to here) -- role-shaped keys are
+        // translated the same way the main table's role badge is, so a raw
+        // "super_admin"/"admin" value never leaks through untranslated.
         return detailGrid(Object.entries(parsed).map(function(entry) {
             const k = entry[0], v = entry[1];
+            if (k === 'role' || k.endsWith('_role')) {
+                return [prettyLabel(k), escHtml(roleLabel(v))];
+            }
             const display = (typeof v === 'object' && v !== null) ? JSON.stringify(v) : v;
             return [prettyLabel(k), escHtml(display == null ? '—' : display)];
         }));
@@ -350,33 +403,6 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    // ── CSV Export ────────────────────────────────────────────
-    function exportCSV() {
-        if (!filteredLogs.length) {
-            Toast.show('No logs to export.', 'warning');
-            return;
-        }
-
-        const headers = ['Date/Time', 'User', 'Role', 'Action', 'Entity', 'Entity ID', 'Details'];
-        const rows = filteredLogs.map(log => [
-            Fmt.datetime(log.created_at),
-            log.user_name  || '',
-            log.user_role  || '',
-            log.action     || '',
-            log.entity     || '',
-            log.entity_id  || '',
-            JSON.stringify(log.details || {}).replace(/"/g, '""')
-        ]);
-
-        const csv   = [headers, ...rows].map(r => r.map(v => `"${v}"`).join(',')).join('\n');
-        const fname = `pharmatrack_audit_${new Date().toISOString().split('T')[0]}.csv`;
-        const a     = Object.assign(document.createElement('a'), {
-            href:     URL.createObjectURL(new Blob([csv], { type: 'text/csv' })),
-            download: fname
-        });
-        a.click();
-        Toast.show('Audit log exported.', 'success');
-    }
 });
 
 // ── Utilities ─────────────────────────────────────────────────

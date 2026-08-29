@@ -32,6 +32,12 @@ document.addEventListener('DOMContentLoaded', () => {
     categoryFilter?.addEventListener('change', loadProducts);
     statusFilter?.addEventListener('change',   loadProducts);
 
+    SearchSuggest.attach(searchInput, {
+        getItems:    () => products,
+        getLabel:    p => p.name,
+        getSubLabel: p => `${p.batch_number} · ${p.category}`
+    });
+
     // ── Toolbar ───────────────────────────────────────────────
     document.getElementById('btn-add-product')?.addEventListener('click', openAddModal);
     document.getElementById('btn-import-csv')?.addEventListener('click', () => importInput?.click());
@@ -143,7 +149,7 @@ document.addEventListener('DOMContentLoaded', () => {
             return `
             <tr class="${rowClass}" data-id="${p.id}">
                 <td><span class="fw-600">${escHtml(p.batch_number)}</span></td>
-                <td>
+                <td title="${escHtml(p.name)}">
                     <div class="fw-600">${escHtml(p.name)}</div>
                     ${p.generic_name ? `<div class="text-muted" style="font-size:0.73rem">${escHtml(p.generic_name)}</div>` : ''}
                 </td>

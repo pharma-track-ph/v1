@@ -9,6 +9,7 @@ const User    = require('../models/User');
 const db      = require('../config/db');           // ← FIX: was missing, causes ReferenceError in getAuditLogs
 const { logAudit } = require('../middleware/authMiddleware');
 const { sendOtpEmail } = require('../utils/mailer');
+const { exportReport, formatShortDateTime } = require('../utils/reportExporter');
 
 /**
  * POST /api/auth/login
@@ -253,6 +254,75 @@ const getAuditLogs = async (req, res, next) => {
     }
 };
 
+const AUDIT_COLUMNS = [
+    { label: 'Date/Time',  excelWidth: 20, pdfWidth: 95  },
+    { label: 'User',        excelWidth: 18, pdfWidth: 85  },
+    { label: 'Role',        excelWidth: 10, pdfWidth: 50  },
+    { label: 'Action',      excelWidth: 16, pdfWidth: 80  },
+    { label: 'Entity',      excelWidth: 14, pdfWidth: 70  },
+    { label: 'Entity ID',   excelWidth: 10, pdfWidth: 50  }
+];
+
+const AUDIT_ROLE_LABELS   = { super_admin: 'Owner', admin: 'Admin', cashier: 'Cashier' };
+const AUDIT_ENTITY_LABELS = {
+    products: 'Product', users: 'User', orders: 'Order', order_items: 'Order Item',
+    cash_sessions: 'Cash Session', cash_movements: 'Cash Movement', audit_logs: 'Audit Log',
+    backups: 'Backups', app_settings: 'App Settings'
+};
+
+/**
+ * GET /api/auth/audit-logs/export/:format (excel|pdf|word)
+ * Mirrors the exact same filters the Audit Logs PAGE applies client-side
+ * (search/action/entity/date) -- entity filtering in particular isn't
+ * supported by getAuditLogs above at all, so it's handled here instead,
+ * to keep "what you're looking at" and "what you exported" consistent.
+ */
+const exportAuditLogs = async (req, res, next) => {
+    try {
+        const { search = '', action = '', entity = '', date = '' } = req.query;
+
+        let sql = `
+            SELECT al.*, u.name AS user_name, u.role AS user_role
+            FROM audit_logs al
+            JOIN users u ON u.id = al.user_id
+            WHERE 1=1
+        `;
+        const params = [];
+
+        if (search) {
+            sql += ' AND (u.name LIKE ? OR al.action LIKE ? OR al.entity LIKE ?)';
+            const pattern = `%${search}%`;
+            params.push(pattern, pattern, pattern);
+        }
+        if (action) { sql += ' AND al.action LIKE ?'; params.push(`${action}%`); }
+        if (entity) { sql += ' AND al.entity = ?';     params.push(entity); }
+        if (date)   { sql += ' AND DATE(al.created_at) = ?'; params.push(date); }
+
+        sql += ' ORDER BY al.created_at DESC LIMIT 500';
+
+        const [rows] = await db.query(sql, params);
+
+        const exportRows = rows.map(log => [
+            formatShortDateTime(log.created_at),
+            log.user_name || '—',
+            log.user_role ? (AUDIT_ROLE_LABELS[log.user_role] || log.user_role) : '—',
+            (log.action || '').replace(/_/g, ' '),
+            log.entity ? (AUDIT_ENTITY_LABELS[log.entity] || log.entity) : '—',
+            log.entity_id || '—'
+        ]);
+
+        await exportReport(req.params.format, {
+            res,
+            title:       'Audit Log',
+            generatedBy: req.user.name,
+            filename:    'PharmaTrack_Audit_Log',
+            columns:     AUDIT_COLUMNS,
+            rows:        exportRows,
+            periodLabel: date ? `Date: ${date}` : null
+        });
+    } catch (err) { next(err); }
+};
+
 /**
  * POST /api/auth/forgot-password
  * Body: { email }
@@ -442,6 +512,6 @@ const updateProfile = async (req, res, next) => {
 };
 
 module.exports = {
-    login, getMe, getAllUsers, createUser, updateUser, deleteUser, getAuditLogs,
+    login, getMe, getAllUsers, createUser, updateUser, deleteUser, getAuditLogs, exportAuditLogs,
     forgotPassword, verifyOtp, resetPassword, updateProfile
 };

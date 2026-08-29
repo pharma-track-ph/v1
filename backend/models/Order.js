@@ -177,64 +177,63 @@ const Order = {
     },
 
     // -- Void support --------------------------------------------
-    // Scoped to a rolling window (VOID_WINDOW_DAYS below) and to the
-    // cashier's OWN transactions -- not "any cashier system-wide". This
-    // used to also require the transaction be from the CURRENT login
-    // session, which meant a mistake noticed the next day (or after
-    // logging back in) could never be voided at all. That restriction is
-    // gone now on purpose: this only checks "is it yours" and "is it
-    // recent enough", regardless of which login session it happened in or
-    // whether that day's register has since been closed.
-    VOID_WINDOW_DAYS: 10,
-
-    findLastCompletedInSession: async (userId) => {
+    // Scoped to a rolling ONE CALENDAR MONTH window from right now (e.g.
+    // if today is Aug 29, the cutoff is Jul 29) -- and, as of this
+    // change, no longer restricted to "your own" transactions. ANY
+    // cashier's completed sale from within that window is reachable by
+    // anyone with void access, not just the person who originally rang it
+    // up -- useful when a different cashier notices a prior mistake, or an
+    // admin/owner needs to review and correct something after the fact.
+    // Cashiers still can't act on their own authority though: an
+    // admin/owner must approve with their own credentials before ANY void
+    // goes through (see posController.js's voidLastOrder), regardless of
+    // whose sale it originally was.
+    findLastCompletedInSession: async () => {
         const [rows] = await db.query(
             `SELECT o.*, u.name AS cashier_name
              FROM orders o
              JOIN users u ON u.id = o.cashier_id
-             WHERE o.cashier_id = ?
-               AND o.status = 'completed'
-               AND o.created_at >= DATE_SUB(NOW(), INTERVAL ${Order.VOID_WINDOW_DAYS} DAY)
-             ORDER BY o.created_at DESC LIMIT 1`,
-            [userId]
+             WHERE o.status = 'completed'
+               AND o.created_at >= DATE_SUB(NOW(), INTERVAL 1 MONTH)
+             ORDER BY o.created_at DESC LIMIT 1`
         );
         return rows[0] || null;
     },
 
     // Same scoping as above, but returns up to `limit` recent transactions
-    // instead of only the single most recent one -- lets the cashier pick
-    // WHICH one to void (e.g. a wrong medicine rung up a sale or two, or a
-    // day or two, back that wasn't caught right away).
-    findRecentCompletedInSession: async (userId, limit = 10) => {
+    // instead of only the single most recent one -- lets the person pick
+    // WHICH one to void. Limit bumped up from the old 10 now that this
+    // covers a full month system-wide instead of one cashier's last 10
+    // sales, so genuinely older (but still in-window) transactions stay
+    // reachable through the list.
+    findRecentCompletedInSession: async (limit = 50) => {
         const [rows] = await db.query(
             `SELECT o.*, u.name AS cashier_name
              FROM orders o
              JOIN users u ON u.id = o.cashier_id
-             WHERE o.cashier_id = ?
-               AND o.status = 'completed'
-               AND o.created_at >= DATE_SUB(NOW(), INTERVAL ${Order.VOID_WINDOW_DAYS} DAY)
+             WHERE o.status = 'completed'
+               AND o.created_at >= DATE_SUB(NOW(), INTERVAL 1 MONTH)
              ORDER BY o.created_at DESC LIMIT ?`,
-            [userId, limit]
+            [limit]
         );
         return rows;
     },
 
     // Fetches ONE specific order by id, but only within the exact same
     // scoping rules as above -- used when voiding a SPECIFIC chosen
-    // transaction rather than just "the last one", so the security
-    // boundary is identical either way: still your own order, still
-    // within the window, regardless of which one in the list gets picked.
-    findByIdInSession: async (orderId, userId) => {
+    // transaction rather than just "the last one", so the boundary is
+    // identical either way: still within the 1-month window, regardless
+    // of which one in the list gets picked or who rang it up.
+    findByIdInSession: async (orderId) => {
         const [rows] = await db.query(
             `SELECT o.*, u.name AS cashier_name
              FROM orders o
              JOIN users u ON u.id = o.cashier_id
              WHERE o.id = ?
-               AND o.cashier_id = ?
                AND o.status = 'completed'
-               AND o.created_at >= DATE_SUB(NOW(), INTERVAL ${Order.VOID_WINDOW_DAYS} DAY)
+               AND o.created_at >= DATE_SUB(NOW(), INTERVAL 1 MONTH)
              LIMIT 1`,
-            [orderId, userId]
+            [orderId]
         );
         return rows[0] || null;
     }

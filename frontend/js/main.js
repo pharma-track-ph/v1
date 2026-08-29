@@ -342,6 +342,16 @@ const Nav = {
 
         toggleBtn.addEventListener('click', () => this.openSidebar());
         overlay?.addEventListener('click',   () => this.closeSidebar());
+
+        sidebar.querySelectorAll('.nav-item a[href]').forEach(link => {
+            const href = link.getAttribute('href');
+            if (!href || href === '#') return;
+            link.addEventListener('click', () => {
+                if (window.matchMedia('(max-width: 768px)').matches) {
+                    this.closeSidebar();
+                }
+            });
+        });
     },
 
     openSidebar() {
@@ -877,6 +887,32 @@ async function loadHeaderAlerts() {
 }
 
 // ── Modal Helpers ──────────────────────────────────────────────
+async function downloadAuthenticatedFile(url, fallbackFilename) {
+    const token = Auth.getToken();
+    try {
+        const res = await fetch(url, { headers: token ? { 'Authorization': `Bearer ${token}` } : {} });
+        if (!res.ok) throw new Error('Download failed.');
+
+        const disposition = res.headers.get('Content-Disposition') || '';
+        const match = disposition.match(/filename="?([^"]+)"?/);
+        const filename = match ? match[1] : fallbackFilename;
+
+        const blob = await res.blob();
+        const objectUrl = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = objectUrl;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(objectUrl);
+        return true;
+    } catch (err) {
+        Toast.show('Download failed. Check your connection.', 'error');
+        return false;
+    }
+}
+
 const Modal = {
     open(id) {
         document.getElementById(id)?.classList.add('active');
@@ -886,6 +922,125 @@ const Modal = {
     },
     closeAll() {
         document.querySelectorAll('.modal-overlay.active').forEach(m => m.classList.remove('active'));
+    }
+};
+
+// ── Search-as-you-type Suggestions ─────────────────
+// A small, reusable autocomplete dropdown -- attach it to any search box
+// on a page that already has its full dataset loaded in memory (products,
+// users, logs), and it suggests matching items as you type, the same way
+// a search engine suggests queries, except scoped to whatever's actually
+// on that page instead of the web. Selecting a suggestion just fills the
+// box and re-fires its normal 'input' event, so it works with whatever
+// filtering logic that page already has -- no page needs to duplicate any
+// matching logic here.
+const SearchSuggest = {
+    attach(inputEl, { getItems, getLabel, getSubLabel = null, maxResults = 8, onSelect = null }) {
+        if (!inputEl) return;
+
+        const wrap = document.createElement('div');
+        wrap.className = 'search-suggest-wrap';
+        inputEl.parentNode.insertBefore(wrap, inputEl);
+        wrap.appendChild(inputEl);
+
+        const dropdown = document.createElement('div');
+        dropdown.className = 'search-suggest-dropdown hidden';
+        wrap.appendChild(dropdown);
+
+        let activeIndex     = -1;
+        let currentMatches  = [];
+
+        function esc(str) {
+            return String(str ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+        }
+
+        function renderSuggestions(query) {
+            const items = getItems() || [];
+            const q = query.trim().toLowerCase();
+
+            if (!q) {
+                dropdown.classList.add('hidden');
+                currentMatches = [];
+                return;
+            }
+
+            // Same relevance idea used server-side elsewhere in this app --
+            // a name that STARTS WITH the typed text ranks above one where
+            // it's merely buried in the middle somewhere.
+            const starts = [];
+            const contains = [];
+            items.forEach(item => {
+                const label = String(getLabel(item) || '').toLowerCase();
+                if (!label) return;
+                if (label.startsWith(q)) starts.push(item);
+                else if (label.includes(q)) contains.push(item);
+            });
+
+            currentMatches = [...starts, ...contains].slice(0, maxResults);
+            activeIndex = -1;
+
+            if (!currentMatches.length) {
+                dropdown.classList.add('hidden');
+                return;
+            }
+
+            dropdown.innerHTML = currentMatches.map((item, i) => `
+                <button type="button" class="search-suggest-item" data-index="${i}">
+                    <span class="search-suggest-label">${esc(getLabel(item))}</span>
+                    ${getSubLabel ? `<span class="search-suggest-sub">${esc(getSubLabel(item))}</span>` : ''}
+                </button>
+            `).join('');
+
+            dropdown.querySelectorAll('.search-suggest-item').forEach(btn => {
+                // mousedown (not click) fires BEFORE the input's blur event,
+                // so picking a suggestion doesn't get lost to blur closing
+                // the dropdown first.
+                btn.addEventListener('mousedown', (e) => {
+                    e.preventDefault();
+                    selectItem(currentMatches[parseInt(btn.dataset.index)]);
+                });
+            });
+
+            dropdown.classList.remove('hidden');
+        }
+
+        function selectItem(item) {
+            inputEl.value = getLabel(item);
+            dropdown.classList.add('hidden');
+            inputEl.dispatchEvent(new Event('input', { bubbles: true }));
+            if (onSelect) onSelect(item);
+        }
+
+        function updateActiveHighlight() {
+            dropdown.querySelectorAll('.search-suggest-item').forEach((el, i) => {
+                el.classList.toggle('active', i === activeIndex);
+            });
+        }
+
+        inputEl.addEventListener('input', () => renderSuggestions(inputEl.value));
+        inputEl.addEventListener('focus', () => { if (inputEl.value.trim()) renderSuggestions(inputEl.value); });
+        inputEl.addEventListener('blur', () => {
+            setTimeout(() => dropdown.classList.add('hidden'), 100);
+        });
+
+        inputEl.addEventListener('keydown', (e) => {
+            if (dropdown.classList.contains('hidden') || !currentMatches.length) return;
+
+            if (e.key === 'ArrowDown') {
+                e.preventDefault();
+                activeIndex = Math.min(activeIndex + 1, currentMatches.length - 1);
+                updateActiveHighlight();
+            } else if (e.key === 'ArrowUp') {
+                e.preventDefault();
+                activeIndex = Math.max(activeIndex - 1, 0);
+                updateActiveHighlight();
+            } else if (e.key === 'Enter' && activeIndex >= 0) {
+                e.preventDefault();
+                selectItem(currentMatches[activeIndex]);
+            } else if (e.key === 'Escape') {
+                dropdown.classList.add('hidden');
+            }
+        });
     }
 };
 

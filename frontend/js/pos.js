@@ -374,7 +374,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
 
                 if (result?.message?.toLowerCase().includes('credentials')) {
-                    promptMessage = `❌ ${result.message} Please try again.`;
+                    promptMessage = `${result.message} Please try again.`;
                     continue;
                 }
 
@@ -473,7 +473,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
 
                 if (result?.message?.toLowerCase().includes('credentials')) {
-                    promptMessage = `❌ ${result.message} Please try again.`;
+                    promptMessage = `${result.message} Please try again.`;
                     continue;
                 }
 
@@ -585,7 +585,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
 
                 if (result?.message?.toLowerCase().includes('credentials')) {
-                    promptMessage = `❌ ${result.message} Please try again.`;
+                    promptMessage = `${result.message} Please try again.`;
                     continue;
                 }
 
@@ -611,6 +611,17 @@ document.addEventListener('DOMContentLoaded', () => {
     searchInput?.addEventListener('input', debounce(() => {
         loadPOSProducts(searchInput.value.trim());
     }, 280));
+
+    // Suggestions read from whatever `allProducts` currently holds -- since
+    // that's replaced by each search's own results, suggestions may lag by
+    // one keystroke during very rapid typing, an acceptable tradeoff
+    // rather than keeping a whole separate "master catalog" copy just for
+    // this.
+    SearchSuggest.attach(searchInput, {
+        getItems:    () => allProducts,
+        getLabel:    p => p.name,
+        getSubLabel: p => `${Fmt.currency(p.price)} · Stock: ${p.stock_quantity}`
+    });
 
     // ── Render product cards ───────────────────────────────────
     // No status tags (expired/low-stock/near-expiry) — expired items
@@ -674,7 +685,6 @@ document.addEventListener('DOMContentLoaded', () => {
         if (cart.isEmpty) {
             cartItemsEl.innerHTML = `
                 <div class="cart-empty">
-                    <span class="empty-icon">🛒</span>
                     <span>Cart is empty</span>
                 </div>`;
         } else {
@@ -1013,13 +1023,13 @@ document.addEventListener('DOMContentLoaded', () => {
             const product = data.data[0];
             const added   = addToCart(product, qty);
             if (added && cameraFeedback) {
-                cameraFeedback.textContent = `✅ Added ${product.name} ×${qty}`;
+                cameraFeedback.textContent = `Added ${product.name} ×${qty}`;
                 cameraFeedback.className   = 'camera-scan-feedback success';
             }
         } else {
             Toast.show(`Barcode "${code}" not found.`, 'warning');
             if (cameraFeedback) {
-                cameraFeedback.textContent = `❌ Barcode "${code}" not found.`;
+                cameraFeedback.textContent = `Barcode "${code}" not found.`;
                 cameraFeedback.className   = 'camera-scan-feedback error';
             }
         }
@@ -1037,16 +1047,15 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     // ── Void: pick which transaction ───────────────
-    // Shows up to the last 10 completed sales from the last 10 days (see
-    // Order.VOID_WINDOW_DAYS on the backend) -- regardless of login
-    // session or whether that day's register has since closed -- so a
-    // wrong item caught late, even a day or two later, doesn't require
-    // voiding everything back to it.
+    // Shows up to the last 50 completed sales from the last CALENDAR MONTH,
+    // from ANY cashier -- not just your own -- so a mistake noticed later,
+    // possibly by someone other than who rang it up, can still be found
+    // and corrected.
     voidBtn?.addEventListener('click', async () => {
         const candidates = await OfflineAPI.get('/pos/void-candidates');
 
         if (!candidates?.success || !candidates.data?.length) {
-            Toast.show('No transaction from the last 10 days available to void.', 'info');
+            Toast.show('No transaction from the last month available to void.', 'info');
             return;
         }
 
@@ -1068,7 +1077,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     <strong>${order.order_number}</strong>
                     <span>${Fmt.currency(order.total)}</span>
                 </div>
-                <div class="text-muted" style="font-size:0.75rem;margin-bottom:4px">${Fmt.datetime(order.created_at)}</div>
+                <div class="text-muted" style="font-size:0.75rem;margin-bottom:4px">${Fmt.datetime(order.created_at)} · ${escHtml(order.cashier_name)}</div>
                 <div class="void-list-item-items">${itemsSummary}</div>
                 <button class="btn btn-danger btn-sm btn-void-this" data-id="${order.id}">Void This Transaction</button>
             </div>`;
@@ -1087,18 +1096,24 @@ document.addEventListener('DOMContentLoaded', () => {
             .map(i => `• ${i.product_name} x${i.quantity}`)
             .join('\n');
 
-        // Voiding something from a PREVIOUS day is now allowed (it used to
-        // be blocked once that day's register closed), but it can make a
-        // Sales/Register report already generated for that date incorrect
-        // after the fact -- flag it clearly here so it's a conscious
-        // choice, not a surprise.
+        // Voiding something from a PREVIOUS day (or a different cashier's
+        // sale) is allowed, but it can make a Sales/Register report already
+        // generated for that date incorrect after the fact -- flag it
+        // clearly here so it's a conscious choice, not a surprise.
         const orderDay = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Manila', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(order.created_at));
         const today     = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Manila', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
         const isOlderDay = orderDay !== today;
 
-        const warningLine = isOlderDay
-            ? `\n\u26a0\ufe0f This sale is from ${Fmt.date(order.created_at)}, not today. Reports already generated for that date won't automatically reflect this void.\n`
-            : '';
+        const currentUserId = Auth.getUser()?.id;
+        const isOtherCashier = order.cashier_id !== currentUserId;
+
+        let warningLine = '';
+        if (isOlderDay) {
+            warningLine += `\nThis sale is from ${Fmt.date(order.created_at)}, not today. Reports already generated for that date won't automatically reflect this void.\n`;
+        }
+        if (isOtherCashier) {
+            warningLine += `\nThis sale was rung up by ${order.cashier_name}, not you.\n`;
+        }
 
         // Step 1: show what would be voided (same for every role)
         const confirmed = await ConfirmDialog.show({
@@ -1139,7 +1154,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
                 if (result?.message?.toLowerCase().includes('credentials')) {
                     // Wrong email/password or not an admin/owner -- let them retry
-                    promptMessage = `❌ ${result.message} Please try again.`;
+                    promptMessage = `${result.message} Please try again.`;
                     continue;
                 }
 
@@ -1248,7 +1263,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const result = await OfflineAPI.post('/pos/checkout', payload);
 
         checkoutBtn.disabled = false;
-        checkoutBtn.textContent = '✅ Checkout';
+        checkoutBtn.textContent = 'Checkout';
 
         if (result?.success) {
             if (result.queued) {
@@ -1274,7 +1289,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 Toast.show(result.message, 'error');
                 loadCashSession();
             } else if (result?.blocked && result?.reason === 'expired') {
-                Toast.show(result.message, 'error', '⛔ Sale Blocked');
+                Toast.show(result.message, 'error', 'Sale Blocked');
             } else {
                 Toast.show(result?.message || 'Checkout failed.', 'error');
             }

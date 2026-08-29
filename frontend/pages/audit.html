@@ -45,8 +45,8 @@
                 <div class="header-title">Audit Logs</div>
             </div>
             <div class="header-right">
-                <div class="header-alert-btn">📦 Low Stock <span class="alert-badge" id="badge-low-stock" style="display:none">0</span></div>
-                <div class="header-alert-btn">⚠️ Near Expiry <span class="alert-badge amber" id="badge-near-expiry" style="display:none">0</span></div>
+                <div class="header-alert-btn">Low Stock <span class="alert-badge" id="badge-low-stock" style="display:none">0</span></div>
+                <div class="header-alert-btn">Near Expiry <span class="alert-badge amber" id="badge-near-expiry" style="display:none">0</span></div>
                 <div class="header-user">
                     <div class="user-avatar" id="header-avatar">?</div>
                     <div class="user-info">
@@ -61,28 +61,24 @@
             <!-- Stats -->
             <div class="audit-stats">
                 <div class="audit-stat-card">
-                    <div class="audit-stat-icon blue">📋</div>
                     <div>
                         <div class="audit-stat-label">Total Events</div>
                         <div class="audit-stat-value" id="stat-total">—</div>
                     </div>
                 </div>
                 <div class="audit-stat-card">
-                    <div class="audit-stat-icon yellow">🔑</div>
                     <div>
                         <div class="audit-stat-label">Logins Today</div>
                         <div class="audit-stat-value" id="stat-logins">—</div>
                     </div>
                 </div>
                 <div class="audit-stat-card">
-                    <div class="audit-stat-icon green">✏️</div>
                     <div>
                         <div class="audit-stat-label">Edits Today</div>
                         <div class="audit-stat-value" id="stat-edits">—</div>
                     </div>
                 </div>
                 <div class="audit-stat-card">
-                    <div class="audit-stat-icon red">🗑️</div>
                     <div>
                         <div class="audit-stat-label">Deletions Today</div>
                         <div class="audit-stat-value" id="stat-deletes">—</div>
@@ -113,8 +109,8 @@
                     <option value="orders">Orders</option>
                 </select>
                 <input type="date" id="filter-date" class="form-control" style="width:auto" title="Filter by date">
-                <button class="btn btn-light" id="btn-clear-filters">✕ Clear</button>
-                <button class="btn btn-primary" id="btn-refresh">↻ Refresh</button>
+                <button class="btn btn-light" id="btn-clear-filters">Clear</button>
+                <button class="btn btn-primary" id="btn-refresh">Refresh</button>
             </div>
 
             <!-- Export button -- moved down to sit between the toolbar and
@@ -122,11 +118,11 @@
                  top of the page. -->
             <div class="page-header" style="justify-content:flex-end;margin-bottom:12px">
                 <div class="export-dropdown" id="export-dropdown">
-                    <button class="btn btn-outline" id="btn-export-toggle">📄 Export ▾</button>
+                    <button class="btn btn-outline" id="btn-export-toggle">Export ▾</button>
                     <div class="export-menu hidden" id="export-menu">
-                        <button class="export-menu-item" data-format="excel">📊 Excel (.xlsx)</button>
-                        <button class="export-menu-item" data-format="pdf">📄 PDF</button>
-                        <button class="export-menu-item" data-format="word">📝 Word (.docx)</button>
+                        <button class="export-menu-item" data-format="excel">Excel (.xlsx)</button>
+                        <button class="export-menu-item" data-format="pdf">PDF</button>
+                        <button class="export-menu-item" data-format="word">Word (.docx)</button>
                     </div>
                 </div>
             </div>

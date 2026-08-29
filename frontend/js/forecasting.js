@@ -62,17 +62,14 @@ document.addEventListener('DOMContentLoaded', async () => {
     // ── Algorithm explainer texts ─────────────────────────────
     const ALGO_INFO = {
         'moving-average': {
-            icon:  '📊',
             title: 'Simple Average Method',
             desc:  'This method takes the average of the last 4 weeks of sales and uses that as the prediction for all future weeks. It works best for products with very stable, predictable demand that does not change much over time.'
         },
         'exponential': {
-            icon:  '📉',
             title: 'Weighted Average Method',
             desc:  'This method gives more importance to recent sales when making predictions. If sales went up last week, the forecast will reflect that faster than a plain average. Good for products whose demand is slowly changing in one direction.'
         },
         'holt-winters': {
-            icon:  '🌟',
             title: 'Seasonal Forecast Method (Recommended)',
             desc:  'This is the most advanced method. It tracks three things at once: the normal level of demand, whether demand is growing or shrinking over time, and repeating seasonal patterns (like higher antibiotic sales when there is a flu outbreak). This is the best choice for most pharmacy products in the Philippines.'
         }
@@ -145,14 +142,12 @@ document.addEventListener('DOMContentLoaded', async () => {
 
         grid.innerHTML = products.slice(0, 4).map(p => {
             const trendClass = p.trend > 5 ? 'up' : (p.trend < -5 ? 'down' : 'stable');
-            const trendIcon  = p.trend > 5 ? '📈' : (p.trend < -5 ? '📉' : '➡️');
             const trendLabel = p.trend > 5 ? `▲ ${p.trend}% vs last month`
                              : p.trend < -5 ? `▼ ${Math.abs(p.trend)}% vs last month`
                              : `Stable demand`;
 
             return `
                 <div class="trending-card" data-product-id="${p.id}" title="Click to forecast ${p.name}">
-                    <div class="trend-icon">${trendIcon}</div>
                     <div class="trend-name">${p.name}</div>
                     <div class="trend-category">${p.category}</div>
                     <div class="trend-stats">
@@ -267,7 +262,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         const isLowConfSES    = currentAlgorithm === 'exponential' && periods === 12;
 
         if (isLowConfSES) {
-            horizonConfidenceEl.textContent = '⚠️ 12-week forecasts with this method drift in a straight line and get less reliable past ~2 months — treat this as a rough estimate.';
+            horizonConfidenceEl.textContent = '12-week forecasts with this method drift in a straight line and get less reliable past ~2 months — treat this as a rough estimate.';
             horizonConfidenceEl.classList.remove('hidden');
             return;
         }
@@ -275,7 +270,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         if (isLongHWHorizon) {
             const spanDays = lastForecastData?.data_span_days;
             if (spanDays != null && spanDays < 300) {
-                horizonConfidenceEl.textContent = `⚠️ Limited historical data — this product only has about ${Math.round(spanDays / 7)} week(s) of sales on record. Seasonal patterns need close to a year of data to be reliable, so treat this ${periods}-week forecast as lower confidence.`;
+                horizonConfidenceEl.textContent = `Limited historical data — this product only has about ${Math.round(spanDays / 7)} week(s) of sales on record. Seasonal patterns need close to a year of data to be reliable, so treat this ${periods}-week forecast as lower confidence.`;
                 horizonConfidenceEl.classList.remove('hidden');
                 return;
             }
@@ -308,6 +303,12 @@ document.addEventListener('DOMContentLoaded', async () => {
             selectFirstAndRun(filtered);
         });
 
+        SearchSuggest.attach(productSearch, {
+            getItems:    () => allProducts,
+            getLabel:    p => p.name,
+            getSubLabel: p => p.category
+        });
+
         // Quick filters — auto-selects & forecasts the first product in
         // whichever filtered list results.
         document.querySelectorAll('.btn-filter').forEach(btn => {
@@ -327,9 +328,24 @@ document.addEventListener('DOMContentLoaded', async () => {
                 updateAlgoExplainer(currentAlgorithm);
                 renderHorizonButtons(currentAlgorithm);
 
-                // Show advanced params only for holt-winters
-                const hwParams = document.getElementById('hw-params');
-                if (hwParams) hwParams.style.display = currentAlgorithm === 'holt-winters' ? '' : 'none';
+                // Advanced Parameters: alpha applies to both Exponential
+                // Smoothing and Holt-Winters, so the whole block shows for
+                // either -- only Moving Average has nothing to tune. The
+                // beta/gamma/season-length sub-group is Holt-Winters only.
+                const hwParams     = document.getElementById('hw-params');
+                const hwOnlyParams = document.querySelector('.hw-only-params');
+                const summaryText  = document.getElementById('hw-params-summary');
+                if (hwParams) {
+                    hwParams.style.display = currentAlgorithm === 'moving-average' ? 'none' : '';
+                }
+                if (hwOnlyParams) {
+                    hwOnlyParams.style.display = currentAlgorithm === 'holt-winters' ? 'flex' : 'none';
+                }
+                if (summaryText) {
+                    summaryText.textContent = currentAlgorithm === 'holt-winters'
+                        ? 'Advanced Parameters (α, β, γ) — Holt-Winters only'
+                        : 'Advanced Parameters (α) — Exponential Smoothing only';
+                }
 
                 if (productSelect?.value) runForecast();
             });
@@ -356,10 +372,8 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     function updateAlgoExplainer(algo) {
         const info     = ALGO_INFO[algo];
-        const iconEl   = document.querySelector('.algo-explainer-icon');
         const titleEl  = document.getElementById('explainer-title');
         const descEl   = document.getElementById('explainer-desc');
-        if (iconEl)  iconEl.textContent  = info.icon;
         if (titleEl) titleEl.textContent = info.title;
         if (descEl)  descEl.textContent  = info.desc;
     }
@@ -615,14 +629,13 @@ document.addEventListener('DOMContentLoaded', async () => {
         const container = document.getElementById('pattern-insights');
         if (!container) return;
 
-        const trendLabel = pattern.trend > 5  ? '📈 Sales are growing'
-                         : pattern.trend < -5 ? '📉 Sales are declining'
-                         : '➡️ Sales are stable';
+        const trendLabel = pattern.trend > 5  ? 'Sales are growing'
+                         : pattern.trend < -5 ? 'Sales are declining'
+                         : 'Sales are stable';
         const trendColor = pattern.trend > 5 ? '#4ade80' : pattern.trend < -5 ? '#f87171' : '#94a3b8';
 
         container.innerHTML = `
             <div class="pattern-item">
-                <span class="pattern-icon">📦</span>
                 <div class="pattern-info">
                     <div class="pattern-label">Average Weekly Sales</div>
                     <div class="pattern-value">${pattern.baseline} units/week</div>
@@ -630,7 +643,6 @@ document.addEventListener('DOMContentLoaded', async () => {
                 </div>
             </div>
             <div class="pattern-item">
-                <span class="pattern-icon">📊</span>
                 <div class="pattern-info">
                     <div class="pattern-label">Sales Trend</div>
                     <div class="pattern-value" style="color:${trendColor}">${trendLabel}</div>
@@ -638,7 +650,6 @@ document.addEventListener('DOMContentLoaded', async () => {
                 </div>
             </div>
             <div class="pattern-item">
-                <span class="pattern-icon">🗓️</span>
                 <div class="pattern-info">
                     <div class="pattern-label">Seasonal Pattern</div>
                     <div class="pattern-value">+${pattern.seasonalSpike}% at peak</div>
@@ -655,12 +666,12 @@ document.addEventListener('DOMContentLoaded', async () => {
         const maxFcst = Math.max(...predictions.map(p => p.forecast), 1);
 
         grid.innerHTML = predictions.map((p, i) => {
-            let cardClass = 'good', tagClass = 'good', tagText = '✅ Normal';
+            let cardClass = 'good', tagClass = 'good', tagText = 'Normal';
 
             if (p.forecast >= maxFcst * 0.9) {
-                cardClass = 'urgent'; tagClass = 'urgent'; tagText = '🔴 Peak Week';
+                cardClass = 'urgent'; tagClass = 'urgent'; tagText = 'Peak Week';
             } else if (p.forecast >= maxFcst * 0.7) {
-                cardClass = 'warning'; tagClass = 'warning'; tagText = '⚠️ High Demand';
+                cardClass = 'warning'; tagClass = 'warning'; tagText = 'High Demand';
             }
 
             return `
@@ -686,10 +697,10 @@ document.addEventListener('DOMContentLoaded', async () => {
         const shortage         = Math.max(0, recommendedOrder - currentStock);
 
         const stockStatus = currentStock >= recommendedOrder
-            ? '✅ You have enough'
+            ? 'You have enough'
             : currentStock >= totalForecast
-            ? '⚠️ Borderline — consider ordering'
-            : '🔴 Order Now';
+            ? 'Borderline — consider ordering'
+            : 'Order Now';
 
         const orderDate = new Date();
         orderDate.setDate(orderDate.getDate() + 7);
@@ -703,25 +714,25 @@ document.addEventListener('DOMContentLoaded', async () => {
 
         container.innerHTML = `
             <div class="rec-stat">
-                <div class="rec-label">📦 Total Expected Demand</div>
+                <div class="rec-label">Total Expected Demand</div>
                 <div class="rec-value">${fmtNum(totalForecast)}</div>
                 <small>units over next ${predictions.length} week${predictions.length > 1 ? 's' : ''}</small>
             </div>
             <div class="rec-stat">
-                <div class="rec-label">🛒 Current Stock</div>
+                <div class="rec-label">Current Stock</div>
                 <div class="rec-value" style="font-size:1.3rem">${stockStatus}</div>
                 <small>${fmtNum(currentStock)} units on hand</small>
             </div>
             <div class="rec-stat">
-                <div class="rec-label">🛡️ Recommended Order</div>
+                <div class="rec-label">Recommended Order</div>
                 <div class="rec-value">${fmtNum(recommendedOrder)}</div>
                 <small>includes 20% safety buffer</small>
             </div>
             <div class="rec-action">
                 <div class="rec-message">
                     ${shortage > 0
-                        ? `⚠️ You may run short by ${fmtNum(shortage)} units — place an order by <strong>${orderDateLabel}</strong>`
-                        : `✅ Stock levels look good for the next ${predictions.length} week${predictions.length > 1 ? 's' : ''}.`}
+                        ? `You may run short by ${fmtNum(shortage)} units — place an order by <strong>${orderDateLabel}</strong>`
+                        : `Stock levels look good for the next ${predictions.length} week${predictions.length > 1 ? 's' : ''}.`}
                 </div>
                 <div class="rec-deadline" style="margin-top:8px;opacity:0.85">
                     Estimated value of order: ${fmtCur(recommendedOrder * parseFloat(product.price || 0))}
@@ -900,7 +911,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         if (!productId) { Toast.show('Please select a product first.', 'warning'); return; }
 
         compareBtn.disabled    = true;
-        compareBtn.textContent = '⏳ Comparing…';
+        compareBtn.textContent = 'Comparing…';
 
         // Comparison always uses a fixed 4-week horizon for all 3 methods —
         // that's the largest horizon Moving Average can meaningfully support,
@@ -942,7 +953,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             Toast.show('Error comparing methods.', 'error');
         } finally {
             compareBtn.disabled    = false;
-            compareBtn.textContent = '📊 Compare All Methods';
+            compareBtn.textContent = 'Compare All Methods';
         }
     }
 
@@ -951,9 +962,9 @@ document.addEventListener('DOMContentLoaded', async () => {
         if (!body) return;
 
         const methods = [
-            { name: 'Simple Average',    emoji: '📊', result: ma,  desc: 'Best for stable, predictable products' },
-            { name: 'Weighted Average',  emoji: '📉', result: ses, desc: 'Best for products with gradual growth/decline' },
-            { name: 'Seasonal Forecast', emoji: '🌟', result: hw,  desc: 'Best for seasonal patterns (recommended)' }
+            { name: 'Simple Average',    result: ma,  desc: 'Best for stable, predictable products' },
+            { name: 'Weighted Average',  result: ses, desc: 'Best for products with gradual growth/decline' },
+            { name: 'Seasonal Forecast', result: hw,  desc: 'Best for seasonal patterns (recommended)' }
         ];
 
         // Only methods with a measurable MAPE can be meaningfully compared.
@@ -988,8 +999,7 @@ document.addEventListener('DOMContentLoaded', async () => {
                             return `
                             <tr style="border-bottom:1px solid var(--gray-200);${isBest ? 'background:#f0f7ff' : ''}">
                                 <td style="padding:12px 10px">
-                                    <span style="font-size:1.2rem">${m.emoji}</span>
-                                    <strong style="margin-left:8px">${m.name}</strong>
+                                    <strong>${m.name}</strong>
                                     ${isBest ? '<span style="margin-left:8px;background:var(--primary);color:white;padding:2px 8px;border-radius:10px;font-size:0.68rem;font-weight:700">BEST FIT</span>' : ''}
                                 </td>
                                 <td style="padding:12px 10px;text-align:center">
@@ -1012,9 +1022,9 @@ document.addEventListener('DOMContentLoaded', async () => {
             </div>
             ${bestMethod ? `
             <div style="margin-top:20px;padding:16px;background:#eef4ff;border-radius:10px;border-left:4px solid var(--primary)">
-                <strong>💡 Our Recommendation for ${product.name}:</strong>
+                <strong>Our Recommendation for ${product.name}:</strong>
                 <p style="margin-top:8px;font-size:0.875rem">
-                    Based on historical sales, the <strong>${bestMethod.emoji} ${bestMethod.name}</strong> method has the lowest error rate
+                    Based on historical sales, the <strong>${bestMethod.name}</strong> method has the lowest error rate
                     (${bestMethod.result.mape}%). This means it would have predicted past sales most accurately.
                     We recommend using this method for future forecasts of this product.
                 </p>
@@ -1026,7 +1036,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             </div>
             ` : `
             <div style="margin-top:20px;padding:16px;background:#fff8e6;border-radius:10px;border-left:4px solid #f0ad4e">
-                <strong>⚠️ Not enough sales data yet</strong>
+                <strong>Not enough sales data yet</strong>
                 <p style="margin-top:8px;font-size:0.875rem">
                     This product has no recorded sales history, so none of the three methods can be scored for accuracy yet.
                     The predictions above are still shown, but treat them as rough starting estimates until real sales accumulate.

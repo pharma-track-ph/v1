@@ -88,3 +88,47 @@
     gap: 5px;
     white-space: nowrap;
 }
+
+/* ── Responsive ──────────────────────────────────────────── */
+@media (max-width: 768px) {
+    .backup-schedule-card {
+        padding:        14px 14px;
+        margin-bottom:  12px;
+    }
+
+    .backup-schedule-row {
+        grid-template-columns: 1fr 1fr;
+        gap:                   12px;
+        margin-bottom:         0;
+    }
+
+    .backup-schedule-row > :first-child {
+        grid-column: 1 / -1;
+    }
+
+    .backup-schedule-edit {
+        flex-wrap: wrap;
+        gap:       6px;
+        min-height: 0;
+    }
+
+    .backup-schedule-value {
+        min-height: 0;
+        font-size:  0.85rem;
+    }
+
+    .backup-schedule-label {
+        min-height:    0;
+        margin-bottom: 4px;
+    }
+
+    .backup-now-cell {
+        grid-column: 1 / -1;
+        width:        100%;
+    }
+
+    .backup-now-cell .btn {
+        width:           100%;
+        justify-content: center;
+    }
+}

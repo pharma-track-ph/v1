@@ -1,7 +1,7 @@
 const express = require('express');
 const router  = express.Router();
 const {
-    login, getMe, getAllUsers, createUser, updateUser, deleteUser, getAuditLogs,
+    login, getMe, getAllUsers, createUser, updateUser, deleteUser, getAuditLogs, exportAuditLogs,
     forgotPassword, verifyOtp, resetPassword, updateProfile
 } = require('../controllers/authController');
 const { verifyToken, requireRole } = require('../middleware/authMiddleware');
@@ -27,7 +27,9 @@ router.post('/users',     verifyToken, requireRole('super_admin'), createUser);
 router.put('/users/:id',  verifyToken, requireRole('super_admin'), updateUser);
 router.delete('/users/:id', verifyToken, requireRole('super_admin'), deleteUser);
 
-// Audit logs – Super Admin only
+// Audit logs – Super Admin only. Export route before the plain GET so
+// Express doesn't need any special-casing (different path shape anyway).
+router.get('/audit-logs/export/:format', verifyToken, requireRole('super_admin'), exportAuditLogs);
 router.get('/audit-logs', verifyToken, requireRole('super_admin'), getAuditLogs);
 
 module.exports = router;

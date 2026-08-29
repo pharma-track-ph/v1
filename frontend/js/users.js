@@ -35,6 +35,12 @@ document.addEventListener('DOMContentLoaded', () => {
     roleFilter?.addEventListener('change',   debounceFilter);
     statusFilter?.addEventListener('change', debounceFilter);
 
+    SearchSuggest.attach(searchInput, {
+        getItems:    () => allUsers,
+        getLabel:    u => u.name,
+        getSubLabel: u => u.email
+    });
+
     function debounceFilter() { renderTable(filterUsers()); }
 
     function filterUsers() {
@@ -62,7 +68,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function renderStats() {
         document.getElementById('stat-total').textContent    = allUsers.length;
-        document.getElementById('stat-admins').textContent   = allUsers.filter(u => ['admin','super_admin'].includes(u.role)).length;
+        document.getElementById('stat-owners').textContent   = allUsers.filter(u => u.role === 'super_admin').length;
+        document.getElementById('stat-admins').textContent   = allUsers.filter(u => u.role === 'admin').length;
         document.getElementById('stat-cashiers').textContent = allUsers.filter(u => u.role === 'cashier').length;
     }
 
@@ -77,7 +84,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         tbody.innerHTML = users.map(u => {
             const isSelf    = u.id === currentUser?.id;
-            const roleLabel = { super_admin: '🔐 Owner', admin: '🔑 Admin', cashier: '🛒 Cashier' }[u.role] || u.role;
+            const roleLabel = { super_admin: 'Owner', admin: 'Admin', cashier: 'Cashier' }[u.role] || u.role;
             const roleClass = u.role;
             const activeLabel = u.is_active
                 ? '<span class="status-dot active"></span>Active'
@@ -105,13 +112,13 @@ document.addEventListener('DOMContentLoaded', () => {
                 <td class="action-cell">
                     <div class="d-flex gap-8">
                         ${canEdit ? `
-                            <button class="btn btn-light btn-sm btn-edit" data-id="${u.id}" title="Edit">✏️</button>
-                            <button class="btn btn-light btn-sm btn-pw" data-id="${u.id}" data-name="${escHtml(u.name)}" title="Change Password">🔒</button>
+                            <button class="btn btn-light btn-sm btn-edit" data-id="${u.id}" title="Edit">Edit</button>
+                            <button class="btn btn-light btn-sm btn-pw" data-id="${u.id}" data-name="${escHtml(u.name)}" title="Change Password">Password</button>
                         ` : ''}
                         ${canDelete ? `
-                            <button class="btn btn-danger btn-sm btn-delete" data-id="${u.id}" data-name="${escHtml(u.name)}" title="Deactivate">🗑️</button>
+                            <button class="btn btn-danger btn-sm btn-delete" data-id="${u.id}" data-name="${escHtml(u.name)}" title="Deactivate">Delete</button>
                         ` : ''}
-                        ${isOtherOwner ? `<span class="text-muted" style="font-size:0.78rem" title="Owner accounts can only be managed by the account holder.">🔒 Protected</span>` : ''}
+                        ${isOtherOwner ? `<span class="text-muted" style="font-size:0.78rem" title="Owner accounts can only be managed by the account holder.">Protected</span>` : ''}
                         ${!canEdit && !canDelete && !isOtherOwner ? `<span class="text-muted" style="font-size:0.78rem">—</span>` : ''}
                     </div>
                 </td>

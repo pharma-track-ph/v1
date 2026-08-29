@@ -7,6 +7,13 @@ const Order       = require('../models/Order');
 const Product     = require('../models/Product');
 const CashSession  = require('../models/CashSession');
 const db          = require('../config/db');
+const { exportReport, formatShortDate, formatShortDateTime } = require('../utils/reportExporter');
+
+function buildPeriodLabel(start_date, end_date) {
+    if (!start_date && !end_date) return null;
+    if (start_date && end_date)   return `${start_date} to ${end_date}`;
+    return start_date ? `From ${start_date}` : `Until ${end_date}`;
+}
 
 /**
  * GET /api/reports/sales
@@ -88,6 +95,56 @@ const getSalesReport = async (req, res, next) => {
     } catch (err) { next(err); }
 };
 
+const SALES_COLUMNS = [
+    { label: 'Order #',   excelWidth: 16, pdfWidth: 75  },
+    { label: 'Date/Time',  excelWidth: 20, pdfWidth: 95  },
+    { label: 'Cashier',    excelWidth: 18, pdfWidth: 90  },
+    { label: 'Subtotal',   excelWidth: 12, pdfWidth: 65  },
+    { label: 'Discount',   excelWidth: 12, pdfWidth: 60  },
+    { label: 'Total',      excelWidth: 12, pdfWidth: 65  },
+    { label: 'Payment',    excelWidth: 10, pdfWidth: 60  }
+];
+
+/**
+ * GET /api/reports/sales/export/:format (excel|pdf|word)
+ * Exports the same date range currently applied on screen.
+ */
+const exportSalesReport = async (req, res, next) => {
+    try {
+        const { start_date, end_date } = req.query;
+
+        let sql = `
+            SELECT o.order_number, o.created_at, o.subtotal, o.discount, o.total,
+                   o.payment_method, u.name AS cashier_name
+            FROM orders o
+            JOIN users u ON u.id = o.cashier_id
+            WHERE o.status = 'completed'
+        `;
+        const params = [];
+        if (start_date) { sql += ' AND DATE(o.created_at) >= ?'; params.push(start_date); }
+        if (end_date)   { sql += ' AND DATE(o.created_at) <= ?'; params.push(end_date);   }
+        sql += ' ORDER BY o.created_at DESC';
+
+        const [orders] = await db.query(sql, params);
+
+        const rows = orders.map(o => [
+            o.order_number, formatShortDateTime(o.created_at), o.cashier_name,
+            `₱${Number(o.subtotal).toFixed(2)}`, `₱${Number(o.discount).toFixed(2)}`,
+            `₱${Number(o.total).toFixed(2)}`, o.payment_method.toUpperCase()
+        ]);
+
+        await exportReport(req.params.format, {
+            res,
+            title:       'Sales Report',
+            generatedBy: req.user.name,
+            filename:    'PharmaTrack_Sales_Report',
+            columns:     SALES_COLUMNS,
+            rows,
+            periodLabel: buildPeriodLabel(start_date, end_date)
+        });
+    } catch (err) { next(err); }
+};
+
 /**
  * GET /api/reports/expired
  * Returns all expired products with estimated value lost.
@@ -135,6 +192,65 @@ const getExpiredReport = async (req, res, next) => {
                 total_products: rows.length,
                 total_value_lost: totalLoss
             }
+        });
+    } catch (err) { next(err); }
+};
+
+const EXPIRED_COLUMNS = [
+    { label: 'Batch No.',     excelWidth: 16, pdfWidth: 80 },
+    { label: 'Product Name',  excelWidth: 26, pdfWidth: 140 },
+    { label: 'Category',      excelWidth: 20, pdfWidth: 110 },
+    { label: 'Qty',           excelWidth: 8,  pdfWidth: 40 },
+    { label: 'Cost (₱)',      excelWidth: 12, pdfWidth: 60 },
+    { label: 'Expiry Date',   excelWidth: 13, pdfWidth: 65 },
+    { label: 'Days Expired',  excelWidth: 13, pdfWidth: 65 },
+    { label: 'Value Lost',    excelWidth: 13, pdfWidth: 70 }
+];
+
+/**
+ * GET /api/reports/expired/export/:format (excel|pdf|word)
+ */
+const exportExpiredReport = async (req, res, next) => {
+    try {
+        const { months, start_date, end_date } = req.query;
+
+        let sql = `
+            SELECT *,
+                    (cost * stock_quantity)           AS value_lost,
+                    DATEDIFF(CURDATE(), expiry_date)  AS days_expired
+             FROM products
+             WHERE expiry_date < CURDATE()
+               AND is_active = 1
+               AND stock_quantity > 0
+        `;
+        const params = [];
+        if (start_date) { sql += ' AND expiry_date >= ?'; params.push(start_date); }
+        if (end_date)   { sql += ' AND expiry_date <= ?'; params.push(end_date);   }
+        else if (months && months !== 'all') {
+            sql += ' AND DATEDIFF(CURDATE(), expiry_date) <= ?';
+            params.push(parseInt(months) * 30);
+        }
+        sql += ' ORDER BY expiry_date ASC';
+
+        const [rows] = await db.query(sql, params);
+
+        const exportRows = rows.map(p => [
+            p.batch_number, p.name, p.category, String(p.stock_quantity),
+            `₱${Number(p.cost).toFixed(2)}`, formatShortDate(p.expiry_date),
+            `${p.days_expired}d`, `₱${Number(p.value_lost).toFixed(2)}`
+        ]);
+
+        let periodLabel = buildPeriodLabel(start_date, end_date);
+        if (!periodLabel && months && months !== 'all') periodLabel = `Last ${months} month(s)`;
+
+        await exportReport(req.params.format, {
+            res,
+            title:       'Expired Inventory Report',
+            generatedBy: req.user.name,
+            filename:    'PharmaTrack_Expired_Inventory_Report',
+            columns:     EXPIRED_COLUMNS,
+            rows:        exportRows,
+            periodLabel
         });
     } catch (err) { next(err); }
 };
@@ -258,6 +374,60 @@ const getVoidReport = async (req, res, next) => {
     } catch (err) { next(err); }
 };
 
+const VOID_COLUMNS = [
+    { label: 'Order #',    excelWidth: 16, pdfWidth: 80  },
+    { label: 'Date/Time',   excelWidth: 20, pdfWidth: 100 },
+    { label: 'Cashier',     excelWidth: 18, pdfWidth: 100 },
+    { label: 'Voided By',   excelWidth: 18, pdfWidth: 100 },
+    { label: 'Voided At',   excelWidth: 20, pdfWidth: 100 },
+    { label: 'Total',       excelWidth: 12, pdfWidth: 70  }
+];
+
+/**
+ * GET /api/reports/void/export/:format (excel|pdf|word)
+ */
+const exportVoidReport = async (req, res, next) => {
+    try {
+        const { start_date, end_date } = req.query;
+
+        let sql = `
+            SELECT o.order_number, o.created_at, o.total,
+                   cashier.name AS cashier_name,
+                   voider.name  AS voided_by_name,
+                   al.created_at AS voided_at
+            FROM orders o
+            JOIN users cashier ON cashier.id = o.cashier_id
+            LEFT JOIN audit_logs al ON al.entity = 'orders'
+                                   AND al.entity_id = o.id
+                                   AND al.action = 'VOID_ORDER'
+            LEFT JOIN users voider ON voider.id = al.user_id
+            WHERE o.status = 'voided'
+        `;
+        const params = [];
+        if (start_date) { sql += ' AND DATE(o.created_at) >= ?'; params.push(start_date); }
+        if (end_date)   { sql += ' AND DATE(o.created_at) <= ?'; params.push(end_date);   }
+        sql += ' ORDER BY o.created_at DESC';
+
+        const [orders] = await db.query(sql, params);
+
+        const rows = orders.map(o => [
+            o.order_number, formatShortDateTime(o.created_at), o.cashier_name,
+            o.voided_by_name || '—', o.voided_at ? formatShortDateTime(o.voided_at) : '—',
+            `₱${Number(o.total).toFixed(2)}`
+        ]);
+
+        await exportReport(req.params.format, {
+            res,
+            title:       'Void Report',
+            generatedBy: req.user.name,
+            filename:    'PharmaTrack_Void_Report',
+            columns:     VOID_COLUMNS,
+            rows,
+            periodLabel: buildPeriodLabel(start_date, end_date)
+        });
+    } catch (err) { next(err); }
+};
+
 /**
  * GET /api/reports/register
  * Every cash register session (open or closed), newest first: who opened
@@ -286,4 +456,55 @@ const getRegisterReport = async (req, res, next) => {
     } catch (err) { next(err); }
 };
 
-module.exports = { getSalesReport, getExpiredReport, getDashboardKPIs, getVoidReport, getRegisterReport };
+const REGISTER_COLUMNS = [
+    { label: 'Cashier',            excelWidth: 18, pdfWidth: 80  },
+    { label: 'Opened At',           excelWidth: 20, pdfWidth: 90  },
+    { label: 'Opening Cash',        excelWidth: 14, pdfWidth: 65  },
+    { label: 'Opened Approved By',  excelWidth: 20, pdfWidth: 95  },
+    { label: 'Status',              excelWidth: 10, pdfWidth: 50  },
+    { label: 'Closed At',           excelWidth: 20, pdfWidth: 90  },
+    { label: 'Variance',            excelWidth: 12, pdfWidth: 60  },
+    { label: 'Closed Approved By',  excelWidth: 20, pdfWidth: 95  }
+];
+
+/**
+ * GET /api/reports/register/export/:format (excel|pdf|word)
+ */
+const exportRegisterReport = async (req, res, next) => {
+    try {
+        const { start_date, end_date } = req.query;
+
+        const sessions = await CashSession.findAllForReport({
+            startDate: start_date, endDate: end_date, limit: 500, offset: 0
+        });
+
+        const rows = sessions.map(s => {
+            const isOpen = s.status === 'OPEN';
+            const varianceVal = parseFloat(s.variance);
+            const varianceText = s.status === 'CLOSED' && !isNaN(varianceVal)
+                ? `${varianceVal >= 0 ? '+' : ''}₱${varianceVal.toFixed(2)}`
+                : '—';
+            return [
+                s.cashier_name, formatShortDateTime(s.opened_at),
+                `₱${Number(s.opening_cash).toFixed(2)}`, s.opened_approved_by_name || '—',
+                isOpen ? 'Open' : 'Closed', s.closed_at ? formatShortDateTime(s.closed_at) : '—',
+                varianceText, s.closed_approved_by_name || '—'
+            ];
+        });
+
+        await exportReport(req.params.format, {
+            res,
+            title:       'Register Report',
+            generatedBy: req.user.name,
+            filename:    'PharmaTrack_Register_Report',
+            columns:     REGISTER_COLUMNS,
+            rows,
+            periodLabel: buildPeriodLabel(start_date, end_date)
+        });
+    } catch (err) { next(err); }
+};
+
+module.exports = {
+    getSalesReport, getExpiredReport, getDashboardKPIs, getVoidReport, getRegisterReport,
+    exportSalesReport, exportExpiredReport, exportVoidReport, exportRegisterReport
+};

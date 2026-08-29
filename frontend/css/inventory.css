@@ -51,6 +51,57 @@
 .expiry-dot.blue   { background: var(--info); }
 .expiry-dot.green  { background: var(--success); }
 
+/* -- Inventory table: fixed column widths -- */
+/* Scoped to .inventory-table specifically, NOT the shared .table class --
+   .table is used on every other page (Reports, Users, Audit Logs, Backup,
+   Dashboard), each with a different number of columns and different
+   content shapes. Forcing table-layout:fixed onto .table globally would
+   force even-width columns on all of those too, since none of them have
+   a matching colgroup -- this stays scoped so nothing else changes.
+
+   Root cause of the column-width jumping: with the default
+   table-layout:auto, column widths are computed from actual cell content,
+   so an empty/short result set (e.g. a filter that matches 0 or 1 rows)
+   left only the header text to size against, and widths visibly jumped
+   around between filter changes. table-layout:fixed plus an explicit
+   colgroup makes column widths constant regardless of what's in the
+   table body. */
+.inventory-table {
+    width:        100%;
+    table-layout: fixed;
+    min-width:    1000px;
+}
+
+.inventory-table th,
+.inventory-table td {
+    overflow:      hidden;
+    text-overflow: ellipsis;
+    white-space:   nowrap;
+}
+
+/* Actions holds two real buttons, not text -- overflow:hidden above would
+   CLIP the second button (Delete) instead of ellipsis-truncating it,
+   which is exactly what was happening. Buttons need to stay fully
+   visible regardless of column width, so this column is excluded from
+   the truncation rule above. */
+.inventory-table td:last-child {
+    overflow:    visible;
+    white-space: normal;
+}
+
+/* Product Name cells stack two lines (name + generic name subtitle) inside
+   one <td> -- the td-level nowrap above only stops the COLUMN from
+   stretching to fit unusually long content; each inner line still needs
+   its own overflow/ellipsis handling so a long name or generic name
+   truncates cleanly instead of overflowing its own line. */
+.inventory-table td .fw-600,
+.inventory-table td .text-muted {
+    display:       block;
+    overflow:      hidden;
+    text-overflow: ellipsis;
+    white-space:   nowrap;
+}
+
 .import-hint {
     font-size:  0.75rem;
     color:      var(--secondary);
@@ -63,40 +114,6 @@
  * batch_number,name,generic_name,category,supplier,barcode,price,cost,stock_quantity,low_stock_threshold,expiry_date
  * BATCH-X-001,Vitamin C 500mg,Ascorbic Acid,Vitamins,Supplier Name,4800001099001,15.00,7.00,100,20,2025-12-31
  */
-
-/* ── Export dropdown ─────────────────────────── */
-.export-dropdown {
-    position: relative;
-}
-
-.export-menu {
-    position:      absolute;
-    top:           calc(100% + 6px);
-    left:          0;
-    z-index:       50;
-    background:    var(--white);
-    border:        1px solid var(--gray-200);
-    border-radius: var(--border-radius);
-    box-shadow:    var(--shadow);
-    min-width:     170px;
-    padding:       6px;
-}
-
-.export-menu-item {
-    display:       block;
-    width:         100%;
-    text-align:    left;
-    background:    none;
-    border:        none;
-    padding:       8px 10px;
-    border-radius: 6px;
-    font-size:     0.85rem;
-    cursor:        pointer;
-    color:         var(--dark);
-    transition:    var(--transition);
-}
-
-.export-menu-item:hover { background: var(--gray-100); }
 
 /* ── Barcode preview (Edit Product modal) ────────── */
 .barcode-preview-box {
@@ -117,4 +134,30 @@
     color:        var(--secondary);
     margin-top:   4px;
     letter-spacing: 1px;
+}
+
+/* ── Responsive ──────────────────────────────────────────── */
+@media (max-width: 768px) {
+    .inv-toolbar {
+        display:   flex;
+        flex-wrap: wrap;
+        gap:       8px;
+    }
+
+    .inv-toolbar .search-wrap {
+        flex:      1 1 130px;
+        min-width: 90px;
+    }
+
+    .inv-toolbar select {
+        flex:      1 1 90px;
+        min-width: 80px;
+        width:     auto !important;
+    }
+
+    .inv-toolbar .text-muted {
+        flex:   1 1 100%;
+        width:  100%;
+        margin: 0;
+    }
 }

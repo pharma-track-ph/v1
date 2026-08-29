@@ -199,3 +199,105 @@
     padding:    12px 16px;
 }
 
+/* ── Responsive ──────────────────────────────────────────── */
+@media (max-width: 768px) {
+    .report-tabs {
+        overflow-x:                 auto;
+        -webkit-overflow-scrolling: touch;
+        flex-wrap:                  nowrap;
+        gap:                        0;
+        padding-bottom:             2px;
+        margin-bottom:              12px;
+    }
+
+    .report-tab {
+        flex-shrink: 0;
+        padding:     8px 12px;
+        font-size:   0.78rem;
+    }
+
+    .toolbar-row {
+        gap:            6px;
+        margin-bottom:  10px;
+        flex-wrap:      wrap;
+        align-items:    stretch;
+    }
+
+    .toolbar-row .spacer { display: none; }
+
+    .period-btn {
+        flex:       1 1 calc(25% - 6px);
+        min-width:  0;
+        text-align: center;
+        padding:    6px 8px;
+        font-size:  0.75rem;
+    }
+
+    #custom-dates,
+    #expired-custom-dates,
+    #void-custom-dates,
+    #register-custom-dates {
+        flex-wrap: wrap;
+        width:     100%;
+        gap:       6px;
+    }
+
+    #custom-dates.visible,
+    #expired-custom-dates.visible,
+    #void-custom-dates.visible,
+    #register-custom-dates.visible {
+        flex-direction: column;
+        align-items:    stretch;
+    }
+
+    #custom-dates input[type="date"],
+    #expired-custom-dates input[type="date"],
+    #void-custom-dates input[type="date"],
+    #register-custom-dates input[type="date"] {
+        width: 100%;
+    }
+
+    .report-filters {
+        flex-direction: column;
+        align-items:    stretch;
+        gap:            8px;
+    }
+
+    .report-filters .form-group { width: 100%; }
+
+    .export-btn-wrap,
+    .toolbar-row .export-dropdown {
+        margin-left: 0;
+        flex:        1 1 100%;
+        width:       auto;
+    }
+
+    .export-btn-wrap .btn,
+    .toolbar-row .export-dropdown .btn {
+        width:     100%;
+        padding:    6px 10px;
+        font-size:  0.8rem;
+    }
+
+    .summary-chips {
+        gap:           8px;
+        margin-bottom: 12px;
+    }
+
+    .summary-chip {
+        flex:      1 1 calc(50% - 4px);
+        min-width: 0;
+        padding:   8px 12px;
+    }
+
+    .summary-chip .chip-value { font-size: 1.05rem; }
+
+    .expired-stats {
+        grid-template-columns: 1fr 1fr;
+        gap: 8px;
+        margin-bottom: 12px;
+    }
+
+    .expired-stat-card { padding: 10px 12px; }
+    .expired-stat-card .stat-value { font-size: 1.15rem; }
+}

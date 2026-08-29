@@ -36,12 +36,10 @@ const Product = {
         if (status) {
             switch (status) {
                 case 'low_stock':
-                    // Must mirror findAll's CASE priority: a batch that's ALSO
-                    // expired/near-expiry/expiring-3mo/out-of-stock is
-                    // categorized under that higher-priority status instead,
-                    // so exclude those here too, or this filter would
-                    // double-count rows that display under a different badge.
-                    sql += ' AND stock_quantity > 0 AND stock_quantity <= low_stock_threshold AND expiry_date >= CURDATE() AND DATEDIFF(expiry_date, CURDATE()) > 90';
+                    // Independent of expiry now -- a product can be both
+                    // low-stock AND expiring soon at once; this matches
+                    // regardless of what its single row badge shows.
+                    sql += ' AND stock_quantity > 0 AND stock_quantity <= low_stock_threshold';
                     break;
                 case 'expiring':
                     // A batch that's sold out (stock 0) is never "expiring soon"
@@ -177,17 +175,13 @@ const Product = {
     },
 
     getLowStockCount: async () => {
-        // Must mirror the exact priority order used in findAll()'s CASE expression
-        // (out_of_stock > expired > near_expiry > expiring_3mo > low_stock) so this
-        // count always matches what Inventory shows when filtered to "Low Stock" —
-        // otherwise a product that's both low-stock AND expiring soon would get
-        // double-counted here while only showing up under a different badge in
-        // the actual table.
+        // Independent of expiry now (see inventoryController.js's getProducts
+        // for the full explanation) -- a product can be both low-stock AND
+        // expiring soon at the same time, and should count here regardless
+        // of what its single row badge happens to show.
         const [rows] = await db.query(
             `SELECT COUNT(*) AS count FROM products
              WHERE is_active = 1
-               AND expiry_date >= CURDATE()
-               AND DATEDIFF(expiry_date, CURDATE()) > 90
                AND stock_quantity > 0
                AND stock_quantity <= low_stock_threshold`
         );

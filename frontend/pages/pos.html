@@ -29,7 +29,7 @@
             </ul>
             <p class="nav-section-label">Admin</p>
             <ul>
-                <li class="nav-item" data-roles="super_admin"><a href="users.html"><span class="nav-icon"></span> Users</a></li>
+                <li class="nav-item" data-roles="super_admin"><a href="users.html"><span class="nav-icon"></span> User Management</a></li>
                 <li class="nav-item" data-roles="super_admin"><a href="audit.html"><span class="nav-icon"></span> Audit Logs</a></li>
                 <li class="nav-item" data-roles="super_admin"><a href="backup.html"><span class="nav-icon"></span> Backup & Restore</a></li>
                 <li class="nav-item"><a href="#" data-action="logout"><span class="nav-icon"></span> Sign Out</a></li>
@@ -45,8 +45,8 @@
                 <div class="header-title">Point of Sale</div>
             </div>
             <div class="header-right">
-                <div class="header-alert-btn">📦 Low Stock <span class="alert-badge" id="badge-low-stock" style="display:none">0</span></div>
-                <div class="header-alert-btn">⚠️ Near Expiry <span class="alert-badge amber" id="badge-near-expiry" style="display:none">0</span></div>
+                <div class="header-alert-btn">Low Stock <span class="alert-badge" id="badge-low-stock" style="display:none">0</span></div>
+                <div class="header-alert-btn">Near Expiry <span class="alert-badge amber" id="badge-near-expiry" style="display:none">0</span></div>
                 <div class="header-user">
                     <div class="user-avatar" id="header-avatar">?</div>
                     <div class="user-info">
@@ -91,8 +91,8 @@
                         <span>Expected in Drawer: <strong id="reg-expected-cash">₱0.00</strong></span>
                     </div>
                     <div class="register-strip-actions">
-                        <button class="btn btn-sm btn-light" id="btn-cash-in">➕ Cash In</button>
-                        <button class="btn btn-sm btn-light" id="btn-cash-out">➖ Cash Out</button>
+                        <button class="btn btn-sm btn-light" id="btn-cash-in">Cash In</button>
+                        <button class="btn btn-sm btn-light" id="btn-cash-out">Cash Out</button>
                         <button class="btn btn-sm btn-outline" id="btn-close-register">Close Register</button>
                     </div>
                 </div>
@@ -108,16 +108,15 @@
                                placeholder="Search product name…" autocomplete="off">
                     </div>
                     <button class="btn-barcode" id="btn-barcode-scan">
-                        ⌨️ Type Barcode
+                        Type Barcode
                     </button>
                     <button class="btn-barcode" id="btn-camera-scan">
-                        📷 Scan Barcode
+                        Scan Barcode
                     </button>
                 </div>
 
                 <!-- Barcode scanner simulation row -->
                 <div class="barcode-input-row" id="barcode-input-row">
-                    <span>📷</span>
                     <input type="text" id="barcode-input"
                            placeholder="Scan or type barcode → Enter"
                            autocomplete="off">
@@ -128,7 +127,6 @@
             <!-- ── Blocking card when register is CLOSED (replaces the whole POS layout) ── -->
             <div class="register-blocker hidden" id="register-blocker">
                 <div class="register-blocker-card">
-                    <div class="register-blocker-icon">🗄️</div>
                     <h2>Register is Closed</h2>
                     <p>You need to open your register with a starting cash amount before you can process any sales.</p>
                     <button class="btn btn-primary btn-lg" id="btn-open-register">Open Register</button>
@@ -167,7 +165,7 @@
             <div class="pos-right">
                     <div class="cart-header">
                         <div class="cart-header-title">
-                            <h3>🛒 Cart</h3>
+                            <h3>Cart</h3>
                             <span class="cart-item-count" id="cart-count">0</span>
                         </div>
                         <button class="cart-toggle-btn" id="cart-toggle-btn" aria-expanded="false" aria-label="Expand cart">
@@ -177,7 +175,6 @@
 
                     <div class="cart-items" id="cart-items">
                         <div class="cart-empty">
-                            <span class="empty-icon">🛒</span>
                             <span>Cart is empty</span>
                         </div>
                     </div>
@@ -219,11 +216,11 @@
 
                     <!-- Action buttons -->
                     <div class="cart-actions">
-                        <button class="btn btn-light" id="btn-clear-cart">🗑 Clear</button>
-                        <button class="btn btn-success btn-lg" id="btn-checkout">✅ Checkout</button>
+                        <button class="btn btn-light" id="btn-clear-cart">Clear</button>
+                        <button class="btn btn-success btn-lg" id="btn-checkout">Checkout</button>
                     </div>
                     <div class="cart-actions" style="padding-top:0">
-                        <button class="btn-void-full" id="btn-void">↩ Void a Transaction</button>
+                        <button class="btn-void-full" id="btn-void">Void a Transaction</button>
                     </div>
                 </div>
         </main>
@@ -234,7 +231,7 @@
 <div class="modal-overlay" id="void-list-modal">
     <div class="modal" style="max-width:480px">
         <div class="modal-header">
-            <h3>↩ Void a Transaction</h3>
+            <h3>Void a Transaction</h3>
             <button class="btn-close" onclick="Modal.close('void-list-modal')">✕</button>
         </div>
         <div class="modal-body" id="void-list-body" style="max-height:420px;overflow-y:auto"></div>
@@ -248,20 +245,20 @@
 <div class="modal-overlay" id="receipt-modal">
     <div class="modal" style="max-width:420px">
         <div class="modal-header">
-            <h3>🧾 Transaction Receipt</h3>
+            <h3>Transaction Receipt</h3>
             <button class="btn-close" onclick="Modal.close('receipt-modal')">✕</button>
         </div>
         <div class="modal-body" id="receipt-body"></div>
         <div class="modal-footer">
             <button class="btn btn-light" onclick="Modal.close('receipt-modal')">Close</button>
-            <button class="btn btn-primary" onclick="window.print()">🖨 Print</button>
+            <button class="btn btn-primary" onclick="window.print()">Print</button>
         </div>
     </div>
 </div>
 
 <div class="modal-overlay" id="open-register-modal">
     <div class="modal" style="max-width:380px">
-        <div class="modal-header"><h3>🗄️ Open Register</h3></div>
+        <div class="modal-header"><h3>Open Register</h3></div>
         <div class="modal-body">
             <div class="form-group">
                 <label class="form-label">Opening Cash (₱)</label>
@@ -278,7 +275,7 @@
 
 <div class="modal-overlay" id="cash-in-modal">
     <div class="modal" style="max-width:380px">
-        <div class="modal-header"><h3>➕ Cash In</h3></div>
+        <div class="modal-header"><h3>Cash In</h3></div>
         <div class="modal-body">
             <div class="form-group">
                 <label class="form-label">Amount (₱)</label>
@@ -298,7 +295,7 @@
 
 <div class="modal-overlay" id="cash-out-modal">
     <div class="modal" style="max-width:380px">
-        <div class="modal-header"><h3>➖ Cash Out</h3></div>
+        <div class="modal-header"><h3>Cash Out</h3></div>
         <div class="modal-body">
             <div class="form-group">
                 <label class="form-label">Amount (₱)</label>
@@ -318,7 +315,7 @@
 
 <div class="modal-overlay" id="close-register-modal">
     <div class="modal" style="max-width:420px">
-        <div class="modal-header"><h3>🔒 Close Register</h3></div>
+        <div class="modal-header"><h3>Close Register</h3></div>
         <div class="modal-body">
             <div class="close-reg-summary" id="close-reg-summary"></div>
             <div class="form-group" style="margin-top:14px">
@@ -337,7 +334,7 @@
 <div class="modal-overlay" id="camera-scan-modal">
     <div class="modal" style="max-width:480px">
         <div class="modal-header">
-            <h3>🎥 Scan with Camera</h3>
+            <h3>Scan with Camera</h3>
             <button class="btn-close" id="btn-camera-close">✕</button>
         </div>
         <div class="modal-body">
@@ -373,7 +370,7 @@
             </p>
         </div>
         <div class="modal-footer">
-            <button class="btn btn-primary" id="btn-camera-done">✅ Done Scanning</button>
+            <button class="btn btn-primary" id="btn-camera-done">Done Scanning</button>
         </div>
     </div>
 </div>

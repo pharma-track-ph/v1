@@ -29,7 +29,7 @@
             </ul>
             <p class="nav-section-label">Admin</p>
             <ul>
-                <li class="nav-item" data-roles="super_admin"><a href="users.html"><span class="nav-icon"></span> Users</a></li>
+                <li class="nav-item" data-roles="super_admin"><a href="users.html"><span class="nav-icon"></span> User Management</a></li>
                 <li class="nav-item" data-roles="super_admin"><a href="audit.html"><span class="nav-icon"></span> Audit Logs</a></li>
                 <li class="nav-item" data-roles="super_admin"><a href="backup.html"><span class="nav-icon"></span> Backup & Restore</a></li>
                 <li class="nav-item"><a href="#" data-action="logout"><span class="nav-icon"></span> Sign Out</a></li>
@@ -42,11 +42,11 @@
         <header class="top-header">
             <div class="header-left">
                 <button class="btn-menu-toggle" id="btn-menu-toggle">☰</button>
-                <div class="header-title">Inventory Management</div>
+                <div class="header-title">Inventory</div>
             </div>
             <div class="header-right">
-                <div class="header-alert-btn">📦 Low Stock <span class="alert-badge" id="badge-low-stock" style="display:none">0</span></div>
-                <div class="header-alert-btn">⚠️ Near Expiry <span class="alert-badge amber" id="badge-near-expiry" style="display:none">0</span></div>
+                <div class="header-alert-btn">Low Stock <span class="alert-badge" id="badge-low-stock" style="display:none">0</span></div>
+                <div class="header-alert-btn">Near Expiry <span class="alert-badge amber" id="badge-near-expiry" style="display:none">0</span></div>
                 <div class="header-user">
                     <div class="user-avatar" id="header-avatar">?</div>
                     <div class="user-info">
@@ -69,12 +69,12 @@
                 </select>
                 <select id="inv-filter-status" class="form-control" style="width:auto">
                     <option value="">All Status</option>
-                    <option value="low_stock">⚠️ Low Stock</option>
-                    <option value="expiring">📅 Expiring This Month</option>
-                    <option value="expiring_3mo">🗓️ Expiring in 3 Months</option>
-                    <option value="expired">🚫 Expired</option>
-                    <option value="out_of_stock">❌ Out of Stock</option>
-                    <option value="in_stock">✅ In Stock</option>
+                    <option value="low_stock">Low Stock</option>
+                    <option value="expiring">Expiring This Month</option>
+                    <option value="expiring_3mo">Expiring in 3 Months</option>
+                    <option value="expired">Expired</option>
+                    <option value="out_of_stock">Out of Stock</option>
+                    <option value="in_stock">In Stock</option>
                 </select>
                 <span class="text-muted" style="font-size:0.83rem">
                     <strong id="inv-total-count">—</strong> products
@@ -83,13 +83,13 @@
 
             <div class="page-header" style="justify-content:flex-end;margin-bottom:12px">
                 <div class="d-flex gap-8">
-                    <button class="btn btn-outline" id="btn-import-csv">📤 Import CSV</button>
+                    <button class="btn btn-outline" id="btn-import-csv">Import CSV</button>
                     <div class="export-dropdown" id="export-dropdown">
-                        <button class="btn btn-outline" id="btn-export-toggle">📄 Export ▾</button>
+                        <button class="btn btn-outline" id="btn-export-toggle">Export ▾</button>
                         <div class="export-menu hidden" id="export-menu">
-                            <button class="export-menu-item" data-format="excel">📊 Excel (.xlsx)</button>
-                            <button class="export-menu-item" data-format="pdf">📄 PDF</button>
-                            <button class="export-menu-item" data-format="word">📝 Word (.docx)</button>
+                            <button class="export-menu-item" data-format="excel">Excel (.xlsx)</button>
+                            <button class="export-menu-item" data-format="pdf">PDF</button>
+                            <button class="export-menu-item" data-format="word">Word (.docx)</button>
                         </div>
                     </div>
                     <button class="btn btn-primary" id="btn-add-product">＋ Add Product</button>
@@ -99,7 +99,17 @@
 
             <div class="card" style="padding:0">
                 <div class="table-container">
-                    <table class="table">
+                    <table class="table inventory-table">
+                        <colgroup>
+                            <col style="width:11%">
+                            <col style="width:19%">
+                            <col style="width:15%">
+                            <col style="width:7%">
+                            <col style="width:9%">
+                            <col style="width:15%">
+                            <col style="width:15%">
+                            <col style="width:9%">
+                        </colgroup>
                         <thead>
                             <tr>
                                 <th>Batch No.</th>

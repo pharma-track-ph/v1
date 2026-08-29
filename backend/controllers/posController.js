@@ -363,7 +363,7 @@ const aiSuggest = async (req, res) => {
  */
 const getVoidCandidate = async (req, res, next) => {
     try {
-        const order = await Order.findLastCompletedInSession(req.user.id);
+        const order = await Order.findLastCompletedInSession();
 
         if (!order) {
             return res.json({ success: true, data: null });
@@ -377,17 +377,17 @@ const getVoidCandidate = async (req, res, next) => {
 
 /**
  * GET /api/pos/void-candidates
- * Returns up to the last 10 completed transactions from the last
- * VOID_WINDOW_DAYS days (see Order.js), regardless of login session or
- * whether that day's register has since closed, each with its item list
- * attached, so the cashier can pick which one to void instead of only
- * ever being able to void the very last sale. Useful when a wrong item
- * (e.g. the wrong medicine) wasn't caught until a sale, or a day, or two
- * later.
+ * Returns up to the last 50 completed transactions from the last
+ * CALENDAR MONTH (see Order.js), from ANY cashier -- not just the
+ * requester's own -- each with its item list attached, so someone with
+ * void access can pick which one to void instead of only ever being able
+ * to void the very last sale. Useful when a wrong item (e.g. the wrong
+ * medicine) wasn't caught until later, possibly by a different cashier
+ * than the one who made the sale.
  */
 const getVoidCandidates = async (req, res, next) => {
     try {
-        const orders = await Order.findRecentCompletedInSession(req.user.id, 10);
+        const orders = await Order.findRecentCompletedInSession(50);
 
         if (!orders.length) {
             return res.json({ success: true, data: [] });
@@ -412,36 +412,22 @@ const getVoidCandidates = async (req, res, next) => {
  * with anything still calling this the old way.
  *
  * ── Rules ──────────────────────────────────────────────────
- * - Scoped to a rolling window (Order.VOID_WINDOW_DAYS, currently 10
- *   days) and to the requester's OWN transactions — not "any cashier
- *   system-wide". This is deliberately NOT limited to the current login
- *   session or to an still-open register anymore: a mistake noticed the
- *   next day, or after logging back in, can now be voided too, as long
- *   as it's within the window and it's your own transaction. Picking a
- *   SPECIFIC order_id doesn't relax this at all — it's checked with the
- *   exact same WHERE clause as "the last one" (see Order.findByIdInSession).
- * - Cashiers cannot void on their own authority: an admin or super_admin
- *   ("owner") must approve by entering their own email + password in the
- *   request body (manager_email / manager_password).
- * - The audit log entry is attributed to the CASHIER whose transaction it
- *   actually is (req.user.id) — not the approving admin/owner. This was a
- *   real bug found in testing: an earlier version logged it under the
- *   approver's id, so Audit Logs/reports showed the admin/owner as the
- *   "User" for a void that genuinely belongs to the cashier's shift. The
- *   approver authorized it, they didn't perform it — their name/id goes in
- *   `details` (approved_by / approved_by_id) instead, same pattern used for
- *   Cash In/Out/Open/Close in cashController.js.
- * - Admins/super_admins void on their own authority (no approval needed),
- *   but only their OWN transactions within the window — same rule as
- *   anyone else.
- * - Voiding a transaction whose cash register session has already been
- *   CLOSED (or from a previous day) is now ALLOWED — this used to be
- *   blocked, since it can make a variance report already generated for
- *   that day incorrect after the fact without anyone knowing. That
- *   tradeoff is accepted deliberately here in exchange for being able to
- *   fix a mistake noticed late; the frontend shows a stronger warning
- *   when voiding something from a closed/older session so it's a
- *   conscious choice, not a silent one.
+ * - Scoped to a rolling ONE CALENDAR MONTH window, system-wide -- no
+ *   longer restricted to "your own" transactions. Anyone with void access
+ *   can void ANY cashier's completed sale from within that window, not
+ *   just their own. Picking a SPECIFIC order_id doesn't relax the window
+ *   at all -- it's checked with the exact same WHERE clause as "the last
+ *   one" (see Order.findByIdInSession).
+ * - Cashiers still cannot void on their own authority: an admin or
+ *   super_admin ("owner") must approve by entering their own email +
+ *   password in the request body (manager_email / manager_password),
+ *   regardless of whose sale is being voided.
+ * - Audit attribution: logged under req.user.id -- the person who actually
+ *   PERFORMED the void -- not the order's original cashier, since those
+ *   can now be different people. The order's original cashier name/id is
+ *   recorded in `details` (original_cashier / original_cashier_id) so the
+ *   trail still clearly shows whose sale it was, alongside approved_by
+ *   when a cashier needed manager sign-off.
  * - Stock is restored per batch (order_items.product_id is the exact batch
  *   row consumed at checkout time), not just added back to "the product"
  *   generically — so batch-level stock stays accurate.
@@ -481,12 +467,12 @@ const voidLastOrder = async (req, res, next) => {
     const connection = await db.getConnection();
     try {
         // A specific order_id picks exactly that transaction (still fully
-        // scoped to the 10-day window + "is it yours" — see
-        // Order.findByIdInSession); omitting it falls back to "the last
-        // one", for anything still calling this the old way.
+        // scoped to the 1-month window — see Order.findByIdInSession);
+        // omitting it falls back to "the last one", for anything still
+        // calling this the old way.
         const order = order_id
-            ? await Order.findByIdInSession(order_id, req.user.id)
-            : await Order.findLastCompletedInSession(req.user.id);
+            ? await Order.findByIdInSession(order_id)
+            : await Order.findLastCompletedInSession();
 
         if (!order) {
             connection.release();
@@ -519,22 +505,26 @@ const voidLastOrder = async (req, res, next) => {
 
         await connection.commit();
 
-        // Attributed to the cashier whose transaction this is (req.user.id),
-        // not the approver — see docstring above. Approver's name/id (when
-        // there is one) lives in details instead.
+        // Attributed to whoever actually PERFORMED the void (req.user.id) --
+        // the order's original cashier is recorded separately in details,
+        // since the two can now be different people (see docstring above).
         await logAudit(req.user.id, 'VOID_ORDER', 'orders', order.id,
             {
                 order_number: order.order_number,
                 total: order.total,
+                original_cashier: order.cashier_name,
+                original_cashier_id: order.cashier_id,
                 ...(approverName ? { approved_by: approverName, approved_by_id: approverId } : {})
             },
             req.ip);
 
+        const originalCashierNote = order.cashier_id !== req.user.id ? ` (originally rung up by ${order.cashier_name})` : '';
+
         res.json({
             success: true,
             message: isCashier
-                ? `Order ${order.order_number} voided by ${approverName}. Stock has been restored.`
-                : `Order ${order.order_number} voided. Stock has been restored.`
+                ? `Order ${order.order_number}${originalCashierNote} voided by ${approverName}. Stock has been restored.`
+                : `Order ${order.order_number}${originalCashierNote} voided. Stock has been restored.`
         });
 
     } catch (err) {

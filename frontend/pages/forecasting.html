@@ -29,7 +29,7 @@
             </ul>
             <p class="nav-section-label">Admin</p>
             <ul>
-                <li class="nav-item" data-roles="super_admin"><a href="users.html"><span class="nav-icon"></span> Users</a></li>
+                <li class="nav-item" data-roles="super_admin"><a href="users.html"><span class="nav-icon"></span> User Management</a></li>
                 <li class="nav-item" data-roles="super_admin"><a href="audit.html"><span class="nav-icon"></span> Audit Logs</a></li>
                 <li class="nav-item" data-roles="super_admin"><a href="backup.html"><span class="nav-icon"></span> Backup & Restore</a></li>
                 <li class="nav-item"><a href="#" data-action="logout"><span class="nav-icon"></span> Sign Out</a></li>
@@ -42,11 +42,11 @@
         <header class="top-header">
             <div class="header-left">
                 <button class="btn-menu-toggle" id="btn-menu-toggle">☰</button>
-                <div class="header-title">📈 Demand Forecasting & Trends</div>
+                <div class="header-title">Forecasting</div>
             </div>
             <div class="header-right">
-                <div class="header-alert-btn">📦 Low Stock <span class="alert-badge" id="badge-low-stock" style="display:none">0</span></div>
-                <div class="header-alert-btn">⚠️ Near Expiry <span class="alert-badge amber" id="badge-near-expiry" style="display:none">0</span></div>
+                <div class="header-alert-btn">Low Stock <span class="alert-badge" id="badge-low-stock" style="display:none">0</span></div>
+                <div class="header-alert-btn">Near Expiry <span class="alert-badge amber" id="badge-near-expiry" style="display:none">0</span></div>
                 <div class="header-user">
                     <div class="user-avatar" id="header-avatar">?</div>
                     <div class="user-info">
@@ -62,7 +62,7 @@
             <!-- ── TRENDING PRODUCTS ─────────────────────────── -->
             <div class="trending-section">
                 <div class="section-header">
-                    <h3>📈 Trending Products <span style="font-weight:400;font-size:0.85rem">(Last 4 weeks vs previous 4 weeks)</span></h3>
+                    <h3>Trending Products <span style="font-weight:400;font-size:0.85rem">(Last 4 weeks vs previous 4 weeks)</span></h3>
                     <p class="section-hint">Click any card to view its detailed forecast</p>
                 </div>
                 <div class="trending-grid" id="trending-grid">
@@ -72,22 +72,22 @@
 
             <!-- ── RESTOCK SUGGESTIONS ───────────────────────── -->
             <div class="restock-suggestions" id="restock-section" style="display:none">
-                <h4>🔄 What to Restock This Week</h4>
+                <h4>What to Restock This Week</h4>
                 <div class="restock-grid" id="restock-grid"></div>
             </div>
 
             <!-- ── PRODUCT SELECTOR & ALGORITHM ─────────────── -->
             <div class="forecast-panel">
                 <div class="panel-header">
-                    <h3>🔍 Detailed Demand Forecast</h3>
+                    <h3>Detailed Demand Forecast</h3>
                 </div>
 
                 <div class="selector-row">
                     <div class="product-selector-wrapper">
-                        <label class="input-label">🏷️ Select Medicine</label>
+                        <label class="input-label">Select Medicine</label>
                         <div class="searchable-select">
                             <input type="text" id="product-search" class="form-control"
-                                   placeholder="🔍 Search by name or category…">
+                                   placeholder="Search by name or category…">
                             <select id="forecast-product" class="form-control">
                                 <option value="">— Choose a product —</option>
                             </select>
@@ -95,45 +95,41 @@
                     </div>
 
                     <div class="quick-filters">
-                        <label class="input-label">⚡ Quick Filters</label>
+                        <label class="input-label">Quick Filters</label>
                         <div class="filter-buttons">
-                            <button class="btn-filter active" data-filter="all">📋 All</button>
-                            <button class="btn-filter" data-filter="trending">📈 Trending</button>
-                            <button class="btn-filter" data-filter="lowstock">⚠️ Low Stock</button>
-                            <button class="btn-filter" data-filter="expiring">⏰ Expiring Soon</button>
+                            <button class="btn-filter active" data-filter="all">All</button>
+                            <button class="btn-filter" data-filter="trending">Trending</button>
+                            <button class="btn-filter" data-filter="lowstock">Low Stock</button>
+                            <button class="btn-filter" data-filter="expiring">Expiring Soon</button>
                         </div>
                     </div>
                 </div>
 
                 <!-- Algorithm Cards -->
                 <div class="algorithm-selector">
-                    <label class="input-label">🧠 Forecasting Method</label>
+                    <label class="input-label">Forecasting Method</label>
                     <div class="algorithm-cards">
                         <div class="algo-card" data-algo="moving-average">
-                            <div class="algo-icon">📊</div>
                             <div class="algo-name">Moving Average</div>
-                            <div class="algo-desc">Simple · 4-week average</div>
-                            <div class="algo-badge">Stable Products</div>
                         </div>
                         <div class="algo-card" data-algo="exponential">
-                            <div class="algo-icon">📉</div>
                             <div class="algo-name">Exponential Smoothing</div>
-                            <div class="algo-desc">Reactive · Recent data weighted</div>
-                            <div class="algo-badge">No Seasonality</div>
                         </div>
                         <div class="algo-card active" data-algo="holt-winters">
-                            <div class="algo-icon">🌟</div>
                             <div class="algo-name">Holt-Winters</div>
-                            <div class="algo-desc">Seasonal · Level + Trend + Season</div>
-                            <div class="algo-badge highlight">Best for Pharma</div>
                         </div>
                     </div>
                 </div>
 
-                <!-- Advanced parameters (Holt-Winters only) -->
+                <!-- Advanced parameters -- alpha applies to both Exponential
+                     Smoothing and Holt-Winters; beta/gamma/season-length are
+                     Holt-Winters only and get hidden for Exponential
+                     Smoothing (see forecasting.js's renderHorizonButtons-
+                     adjacent logic that toggles this). Hidden entirely for
+                     Moving Average, which has no tunable parameters. -->
                 <details id="hw-params" style="margin-bottom:20px">
                     <summary style="cursor:pointer;font-weight:600;color:var(--primary);">
-                        ⚙️ Advanced Parameters (α, β, γ) — Holt-Winters only
+                        <span id="hw-params-summary">Advanced Parameters (α, β, γ) — Holt-Winters only</span>
                     </summary>
                     <div style="display:flex;gap:16px;margin-top:16px;padding:16px;background:var(--gray-100);border-radius:8px;flex-wrap:wrap;">
                         <div class="form-group">
@@ -141,30 +137,32 @@
                             <input type="range" id="forecast-alpha" min="0.01" max="0.99" step="0.01" value="0.3" style="width:140px">
                             <div class="alpha-hint">Higher = more reactive to recent demand</div>
                         </div>
-                        <div class="form-group">
-                            <label class="form-label">β Trend — <span id="beta-value">0.1</span></label>
-                            <input type="range" id="forecast-beta" min="0.01" max="0.99" step="0.01" value="0.1" style="width:140px">
-                            <div class="alpha-hint">Higher = faster trend adaptation</div>
-                        </div>
-                        <div class="form-group">
-                            <label class="form-label">γ Seasonal — <span id="gamma-value">0.3</span></label>
-                            <input type="range" id="forecast-gamma" min="0.01" max="0.99" step="0.01" value="0.3" style="width:140px">
-                            <div class="alpha-hint">Higher = stronger seasonal response</div>
-                        </div>
-                        <div class="form-group">
-                            <label class="form-label">Seasonal Period (s)</label>
-                            <select id="forecast-season-length" class="form-control" style="max-width:120px">
-                                <option value="4" selected>4 — Quarterly</option>
-                                <option value="12">12 — Monthly</option>
-                                <option value="52">52 — Weekly</option>
-                            </select>
+                        <div class="hw-only-params" style="display:flex;gap:16px;flex-wrap:wrap;">
+                            <div class="form-group">
+                                <label class="form-label">β Trend — <span id="beta-value">0.1</span></label>
+                                <input type="range" id="forecast-beta" min="0.01" max="0.99" step="0.01" value="0.1" style="width:140px">
+                                <div class="alpha-hint">Higher = faster trend adaptation</div>
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label">γ Seasonal — <span id="gamma-value">0.3</span></label>
+                                <input type="range" id="forecast-gamma" min="0.01" max="0.99" step="0.01" value="0.3" style="width:140px">
+                                <div class="alpha-hint">Higher = stronger seasonal response</div>
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label">Seasonal Period (s)</label>
+                                <select id="forecast-season-length" class="form-control" style="max-width:120px">
+                                    <option value="4" selected>4 — Quarterly</option>
+                                    <option value="12">12 — Monthly</option>
+                                    <option value="52">52 — Weekly</option>
+                                </select>
+                            </div>
                         </div>
                     </div>
                 </details>
 
                 <!-- Forecast Horizon (per-algorithm options, like the Reports date filter) -->
                 <div class="horizon-selector">
-                    <label class="input-label">📅 Forecast Horizon</label>
+                    <label class="input-label">Forecast Horizon</label>
                     <div class="filter-buttons" id="horizon-buttons"></div>
                     <div id="horizon-custom-wrap" class="hidden" style="margin-top:10px">
                         <label class="form-label" style="margin-bottom:4px">Custom weeks (1–26)</label>
@@ -176,7 +174,7 @@
 
                 <div class="action-row">
                     <button class="btn btn-outline" id="btn-compare-all">
-                        📊 Compare All Methods
+                        Compare All Methods
                     </button>
                 </div>
             </div>
@@ -192,15 +190,15 @@
                     </div>
                     <div class="product-quick-stats">
                         <div class="quick-stat">
-                            <span class="stat-label">📦 Current Stock</span>
+                            <span class="stat-label">Current Stock</span>
                             <span class="stat-value" id="quick-stock">—</span>
                         </div>
                         <div class="quick-stat warning">
-                            <span class="stat-label">⚠️ Reorder Level</span>
+                            <span class="stat-label">Reorder Level</span>
                             <span class="stat-value" id="quick-reorder">—</span>
                         </div>
                         <div class="quick-stat">
-                            <span class="stat-label">💰 Unit Price</span>
+                            <span class="stat-label">Unit Price</span>
                             <span class="stat-value" id="quick-price">—</span>
                         </div>
                     </div>
@@ -208,14 +206,14 @@
 
                 <!-- Pattern detection -->
                 <div class="pattern-detection-card">
-                    <h4>🔍 Historical Pattern Detected</h4>
+                    <h4>Historical Pattern Detected</h4>
                     <div class="pattern-insights" id="pattern-insights"></div>
                 </div>
 
                 <!-- Chart -->
                 <div class="forecast-chart-card">
                     <div class="chart-header">
-                        <h4>📈 <span id="chart-title">Historical Sales & Demand Forecast</span></h4>
+                        <h4><span id="chart-title">Historical Sales & Demand Forecast</span></h4>
                         <div class="chart-legend">
                             <span class="legend-item"><span class="legend-color blue"></span> Actual Sales</span>
                             <span class="legend-item"><span class="legend-color green"></span> Fitted Values</span>
@@ -230,14 +228,13 @@
 
                 <!-- Weekly predictions -->
                 <div class="predictions-section">
-                    <h4>📅 Weekly Demand Predictions</h4>
+                    <h4>Weekly Demand Predictions</h4>
                     <div class="predictions-grid" id="predictions-grid"></div>
                 </div>
 
                 <!-- Smart restock recommendation -->
                 <div class="recommendation-card" id="recommendation-card">
                     <div class="rec-header">
-                        <span class="rec-icon">📦</span>
                         <h4>Smart Restock Recommendation</h4>
                     </div>
                     <div class="rec-body" id="recommendation-body"></div>
@@ -245,7 +242,7 @@
 
                 <!-- Historical data table (collapsible) -->
                 <details class="data-details">
-                    <summary>📋 View Historical Data & Holt-Winters Component Analysis</summary>
+                    <summary>View Historical Data & Holt-Winters Component Analysis</summary>
                     <div class="table-responsive">
                         <table class="data-table" id="components-table">
                             <thead>
@@ -268,7 +265,7 @@
             <div class="modal-overlay hidden" id="comparison-modal">
                 <div class="modal-content modal-lg">
                     <div class="modal-header">
-                        <h3>📊 Algorithm Comparison</h3>
+                        <h3>Algorithm Comparison</h3>
                         <button class="modal-close" id="close-modal">&times;</button>
                     </div>
                     <div class="modal-body" id="comparison-body"></div>

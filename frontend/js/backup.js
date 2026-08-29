@@ -135,9 +135,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 <td>${typeBadge(b.triggered_by)}</td>
                 <td class="action-cell">
                     <div class="d-flex gap-8">
-                        <button class="btn btn-light btn-sm backup-action-btn btn-download" data-filename="${b.filename}" title="Download this backup file">⬇️ Download</button>
-                        <button class="btn btn-light btn-sm backup-action-btn btn-restore"  data-filename="${b.filename}" title="Replace the current database with this backup">♻️ Restore</button>
-                        <button class="btn btn-danger btn-sm backup-action-btn btn-delete"  data-filename="${b.filename}" title="Permanently delete this backup file">🗑️ Delete</button>
+                        <button class="btn btn-light btn-sm backup-action-btn btn-download" data-filename="${b.filename}" title="Download this backup file">Download</button>
+                        <button class="btn btn-light btn-sm backup-action-btn btn-restore"  data-filename="${b.filename}" title="Replace the current database with this backup">Restore</button>
+                        <button class="btn btn-danger btn-sm backup-action-btn btn-delete"  data-filename="${b.filename}" title="Permanently delete this backup file">Delete</button>
                     </div>
                 </td>
             </tr>
@@ -170,7 +170,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const result = await API.post('/backup/run', {});
 
         backupBtn.disabled    = false;
-        backupBtn.textContent = '💾 Backup Now';
+        backupBtn.textContent = 'Backup Now';
 
         if (result?.success) {
             Toast.show(result.message, 'success');

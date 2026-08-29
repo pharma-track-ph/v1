@@ -16,6 +16,11 @@
     --jotform-size:      70px;
     --jotform-margin:    24px;
     --cart-peek-height:  40px;      /* mobile collapsed cart bar, matches toolbar controls */
+    /* How much space to reserve at the BOTTOM of the mobile page so
+       nothing in normal flow renders behind the fixed cart bar / JotForm
+       bubble zone. Based on JotForm's own extent (the taller of the two
+       floating elements) plus a small buffer above its top edge. */
+    --mobile-bottom-clearance: calc(var(--jotform-margin) + var(--jotform-size) + 20px);
 }
 
 /* Robust safety net: explicitly cap EVERY level of the ancestor chain at
@@ -170,6 +175,16 @@ body.pos-page .main-wrapper {
     min-height:    128px;
     height:        auto;
     overflow:      visible;
+    /* Grid/flex items default to min-width:auto, which can stop them from
+       shrinking below their content's natural width -- at certain
+       in-between window widths (not quite wide enough for the next column
+       count, not quite narrow enough to trigger a breakpoint), this let a
+       card stay slightly WIDER than its actual grid track instead of
+       properly shrinking, which pushed .p-generic's text past where its
+       own overflow:hidden/ellipsis could cleanly catch it. This is what
+       actually lets the card (and everything inside it) shrink to fit at
+       any width, not just the specific breakpoints already tested. */
+    min-width:     0;
 }
 
 .product-card:hover {
@@ -649,24 +664,40 @@ body.pos-page .main-wrapper {
        what was letting the page grow taller than the visible screen and
        scroll as a whole -- including the toolbar right off the top. */
     .pos-fixed-height {
-        display:        flex;
-        flex-direction: column;
-        height:         calc(100dvh - var(--header-height));
-        overflow:       hidden;
+        /* Rebuilt to match desktop's proven display:grid approach exactly
+           (single grid-template-rows column instead of desktop's two
+           columns), after three attempts at patching the flex-column
+           version failed to actually take effect for reasons that
+           weren't fully diagnosable from static review alone. This
+           structure is copied directly from the 901px+ block above,
+           which IS confirmed working via real testing. */
+        display:               grid;
+        grid-template-rows:    auto 1fr;
+        grid-template-areas:   "top"
+                                "grid";
+        gap:            var(--fixed-top-gap);
         padding-top:    var(--fixed-top-gap);
         box-sizing:     border-box;
-        gap:            var(--fixed-top-gap);
+        min-height:     0;
+        height:         calc(100dvh - var(--header-height) - var(--mobile-bottom-clearance));
+        overflow:       hidden;
+    }
+
+    #pos-fixed-top {
+        grid-area:  top;
+        min-height: 0;
     }
 
     #pos-layout {
+        grid-area:      grid;
         display:        flex;
         flex-direction: column;
-        flex:           1;
         min-height:     0;
+        overflow:       hidden;
     }
 
     .register-blocker {
-        flex:       1;
+        grid-area:  grid;
         min-height: 0;
         overflow-y: auto;
     }
@@ -683,10 +714,14 @@ body.pos-page .main-wrapper {
         flex:           1;
         min-height:     0;
         overflow-y:     auto;
-        /* Reserves room at the bottom of the SCROLLING area (not the
-           page) so the last row of products can still scroll fully into
-           view above the floating cart peek bar below. */
-        padding-bottom: calc(var(--cart-peek-height) + var(--fixed-top-gap));
+        align-items:    stretch;
+        /* Deliberately generous and flat rather than a precise calc() --
+           three rounds of precisely-calculated clearance values still
+           left the last card peeking out by a small margin each time.
+           This just reserves clearly more than enough room, trading a
+           bit of extra empty scroll space for actually guaranteeing the
+           last card clears the cart/jotform zone. */
+        padding-bottom: 170px;
     }
 
     .register-strip-actions {
@@ -702,14 +737,25 @@ body.pos-page .main-wrapper {
        other. Tapping it expands to a full-screen panel. */
     .pos-right {
         position:      fixed;
-        left:          16px;
+        left:          var(--jotform-margin);
         right:         calc(var(--jotform-size) + var(--jotform-margin) + 8px);
-        bottom:        var(--jotform-margin);
+        /* Centers the peek bar's own height against JotForm's circular
+           bubble -- they're different heights (--cart-peek-height vs
+           --jotform-size), so matching just the bottom edge left them
+           looking vertically offset from each other rather than aligned
+           on the same row. */
+        bottom:        calc(var(--jotform-margin) + (var(--jotform-size) - var(--cart-peek-height)) / 2);
         width:         auto;
+        height:        var(--cart-peek-height);
         max-height:    var(--cart-peek-height);
+        min-height:    var(--cart-peek-height);
+        overflow:      hidden;
+        overflow-y:    hidden;
+        overscroll-behavior: none;
+        touch-action:  none;
         border-radius: 16px;
         z-index:       50;
-        transition:    max-height 0.25s ease, border-radius 0.25s ease,
+        transition:    max-height 0.25s ease, height 0.25s ease, border-radius 0.25s ease,
                         left 0.25s ease, right 0.25s ease, top 0.25s ease,
                         bottom 0.25s ease;
     }
@@ -720,7 +766,10 @@ body.pos-page .main-wrapper {
         right:         0;
         top:           0;
         bottom:        0;
+        height:        100dvh;
         max-height:    100dvh;
+        min-height:    0;
+        overflow-y:    auto;
         border-radius: 0;
         z-index:       1500;
     }
@@ -748,6 +797,42 @@ body.pos-page .main-wrapper {
     }
 
     .cart-toggle-btn { display: flex; }
+
+    body.pos-page .page-content.pos-fixed-height {
+        padding: 12px 12px 0;
+    }
+
+    .product-grid {
+        grid-template-columns: repeat(2, 1fr);
+        gap:                   10px;
+        align-items:           start;
+        overflow-x:            hidden;
+    }
+
+    .product-card {
+        /* Fixed height + overflow:hidden, not auto/visible -- the previous
+           version let a card's content spill downward into the row below
+           whenever the grid's computed row height was shorter than the
+           card's true natural height (which happened often enough to be
+           the norm, not the exception). This guarantees every card's own
+           content stays inside its own box no matter what, at the cost
+           of clipping only in genuinely extreme edge cases. Sized
+           generously for 2-line name + generic-name line + price + stock
+           + padding, all already reserved/clamped by the rules above. */
+        min-height: 0;
+        height:     118px;
+        overflow:   hidden;
+        padding:    10px 8px;
+        gap:        3px;
+    }
+
+    .product-card .p-name {
+        font-size: 0.78rem;
+    }
+
+    .register-blocker-card {
+        padding: 32px 20px;
+    }
 }
 
 /* Backdrop behind the expanded mobile cart; tap to collapse */
@@ -1054,6 +1139,15 @@ body.pos-page .main-wrapper {
 }
 
 .failed-sync-banner:hover { filter: brightness(1.08); }
+
+@media (max-width: 900px) {
+    .failed-sync-banner {
+        left:     12px;
+        bottom:   calc(var(--cart-peek-height) + var(--jotform-margin) + 8px);
+        font-size: 0.75rem;
+        padding:   8px 14px;
+    }
+}
 
 .failed-sync-item {
     padding:       12px 0;

@@ -48,9 +48,7 @@
 
             <p class="nav-section-label">Admin</p>
             <ul>
-                <li class="nav-item" data-roles="super_admin">
-                    <a href="users.html"><span class="nav-icon"></span>Users</a>
-                </li>
+                <li class="nav-item" data-roles="super_admin"><a href="users.html"><span class="nav-icon"></span>User Management</a></li>
                 <li class="nav-item" data-roles="super_admin">
                     <a href="audit.html"><span class="nav-icon"></span>Audit Logs</a>
                 </li>
@@ -82,12 +80,12 @@
             <div class="header-right">
                 <!-- Low Stock Alert -->
                 <div class="header-alert-btn">
-                    📦 Low Stock
+                    Low Stock
                     <span class="alert-badge" id="badge-low-stock" style="display:none">0</span>
                 </div>
                 <!-- Near Expiry Alert -->
                 <div class="header-alert-btn">
-                    ⚠️ Near Expiry
+                    Near Expiry
                     <span class="alert-badge amber" id="badge-near-expiry" style="display:none">0</span>
                 </div>
                 <div class="header-user">
@@ -104,7 +102,6 @@
             <!-- ── KPI Cards ──────────────────────────────────── -->
             <div class="kpi-grid">
                 <div class="kpi-card kpi-clickable" id="kpi-card-sales" title="View in Reports">
-                    <div class="kpi-icon blue">💰</div>
                     <div class="kpi-info">
                         <div class="kpi-label">Sales Today</div>
                         <div class="kpi-value" id="kpi-sales-today">₱—</div>
@@ -112,7 +109,6 @@
                     </div>
                 </div>
                 <div class="kpi-card kpi-clickable" id="kpi-card-profit" title="View in Reports">
-                    <div class="kpi-icon green">📈</div>
                     <div class="kpi-info">
                         <div class="kpi-label">Profit Today</div>
                         <div class="kpi-value" id="kpi-profit-today">₱—</div>
@@ -120,7 +116,6 @@
                     </div>
                 </div>
                 <div class="kpi-card kpi-clickable" id="kpi-card-low-stock" title="View in Inventory">
-                    <div class="kpi-icon yellow">📦</div>
                     <div class="kpi-info">
                         <div class="kpi-label">Low Stock Items</div>
                         <div class="kpi-value" id="kpi-low-stock">—</div>
@@ -128,7 +123,6 @@
                     </div>
                 </div>
                 <div class="kpi-card kpi-clickable" id="kpi-card-near-expiry" title="View in Inventory">
-                    <div class="kpi-icon red">⚠️</div>
                     <div class="kpi-info">
                         <div class="kpi-label">Near Expiry</div>
                         <div class="kpi-value" id="kpi-near-expiry">—</div>
@@ -140,13 +134,13 @@
             <!-- ── Charts ─────────────────────────────────────── -->
             <div class="charts-grid">
                 <div class="chart-card">
-                    <h3>📊 Monthly Revenue (Last 12 Months)</h3>
+                    <h3>Monthly Revenue (Last 12 Months)</h3>
                     <div class="chart-container">
                         <canvas id="chart-monthly-revenue"></canvas>
                     </div>
                 </div>
                 <div class="chart-card">
-                    <h3>🏆 Top 5 Products</h3>
+                    <h3>Top 5 Products</h3>
                     <div class="chart-container">
                         <canvas id="chart-top-products"></canvas>
                     </div>
@@ -155,7 +149,7 @@
 
             <!-- ── Recent Transactions ────────────────────────── -->
             <div class="recent-table-card">
-                <h3>🧾 Recent Transactions</h3>
+                <h3>Recent Transactions</h3>
                 <div class="table-container">
                     <table class="table">
                         <thead>
