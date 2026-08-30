@@ -96,18 +96,24 @@ const getSalesReport = async (req, res, next) => {
 };
 
 const SALES_COLUMNS = [
-    { label: 'Order #',   excelWidth: 16, pdfWidth: 75  },
-    { label: 'Date/Time',  excelWidth: 20, pdfWidth: 95  },
-    { label: 'Cashier',    excelWidth: 18, pdfWidth: 90  },
-    { label: 'Subtotal',   excelWidth: 12, pdfWidth: 65  },
-    { label: 'Discount',   excelWidth: 12, pdfWidth: 60  },
-    { label: 'Total',      excelWidth: 12, pdfWidth: 65  },
-    { label: 'Payment',    excelWidth: 10, pdfWidth: 60  }
+    { label: 'Order #',       excelWidth: 20, pdfWidth: 100 },
+    { label: 'Date/Time',     excelWidth: 20, pdfWidth: 95  },
+    { label: 'Cashier',       excelWidth: 18, pdfWidth: 80  },
+    { label: 'Subtotal',      excelWidth: 12, pdfWidth: 60  },
+    { label: 'Purchase Cost', excelWidth: 14, pdfWidth: 65  },
+    { label: 'Discount',      excelWidth: 12, pdfWidth: 55  },
+    { label: 'Total',         excelWidth: 12, pdfWidth: 60  },
+    { label: 'Profit',        excelWidth: 12, pdfWidth: 60  }
 ];
 
 /**
  * GET /api/reports/sales/export/:format (excel|pdf|word)
- * Exports the same date range currently applied on screen.
+ * Exports the same date range currently applied on screen. Purchase Cost
+ * and Profit are computed the same way as the on-screen Sales Report
+ * (getSalesReport above) — cost is summed from each line item's snapshot
+ * unit_cost and is NEVER discounted, since a discount reduces revenue,
+ * not what the pharmacy actually paid for the stock. A bold "TOTAL
+ * PROFIT" row is appended under the Profit column once all rows are in.
  */
 const exportSalesReport = async (req, res, next) => {
     try {
@@ -115,23 +121,39 @@ const exportSalesReport = async (req, res, next) => {
 
         let sql = `
             SELECT o.order_number, o.created_at, o.subtotal, o.discount, o.total,
-                   o.payment_method, u.name AS cashier_name
+                   o.payment_method, u.name AS cashier_name,
+                   COALESCE(SUM(oi.unit_cost * oi.quantity), 0) AS purchase_cost,
+                   ((o.subtotal - o.discount) - COALESCE(SUM(oi.unit_cost * oi.quantity), 0)) AS profit
             FROM orders o
             JOIN users u ON u.id = o.cashier_id
+            LEFT JOIN order_items oi ON oi.order_id = o.id
             WHERE o.status = 'completed'
         `;
         const params = [];
         if (start_date) { sql += ' AND DATE(o.created_at) >= ?'; params.push(start_date); }
         if (end_date)   { sql += ' AND DATE(o.created_at) <= ?'; params.push(end_date);   }
-        sql += ' ORDER BY o.created_at DESC';
+        sql += ` GROUP BY o.id, o.order_number, o.created_at, o.subtotal, o.discount,
+                          o.total, o.payment_method, u.name
+                 ORDER BY o.created_at DESC`;
 
         const [orders] = await db.query(sql, params);
 
         const rows = orders.map(o => [
             o.order_number, formatShortDateTime(o.created_at), o.cashier_name,
-            `₱${Number(o.subtotal).toFixed(2)}`, `₱${Number(o.discount).toFixed(2)}`,
-            `₱${Number(o.total).toFixed(2)}`, o.payment_method.toUpperCase()
+            `₱${Number(o.subtotal).toFixed(2)}`, `₱${Number(o.purchase_cost).toFixed(2)}`,
+            `₱${Number(o.discount).toFixed(2)}`, `₱${Number(o.total).toFixed(2)}`,
+            `₱${Number(o.profit).toFixed(2)}`
         ]);
+
+        let totalsRow = null;
+        if (orders.length) {
+            const totalProfit = orders.reduce((s, o) => s + parseFloat(o.profit || 0), 0);
+            // Label sits under Order # (leftmost column) rather than
+            // buried mid-row, so it reads the same way a spreadsheet total
+            // normally does -- the actual figure still sits under Profit,
+            // the column it's summarizing.
+            totalsRow = ['TOTAL PROFIT', '', '', '', '', '', `₱${totalProfit.toFixed(2)}`];
+        }
 
         await exportReport(req.params.format, {
             res,
@@ -140,6 +162,7 @@ const exportSalesReport = async (req, res, next) => {
             filename:    'PharmaTrack_Sales_Report',
             columns:     SALES_COLUMNS,
             rows,
+            totalsRow,
             periodLabel: buildPeriodLabel(start_date, end_date)
         });
     } catch (err) { next(err); }
@@ -375,12 +398,12 @@ const getVoidReport = async (req, res, next) => {
 };
 
 const VOID_COLUMNS = [
-    { label: 'Order #',    excelWidth: 16, pdfWidth: 80  },
-    { label: 'Date/Time',   excelWidth: 20, pdfWidth: 100 },
-    { label: 'Cashier',     excelWidth: 18, pdfWidth: 100 },
-    { label: 'Voided By',   excelWidth: 18, pdfWidth: 100 },
-    { label: 'Voided At',   excelWidth: 20, pdfWidth: 100 },
-    { label: 'Total',       excelWidth: 12, pdfWidth: 70  }
+    { label: 'Order #',    excelWidth: 20, pdfWidth: 100 },
+    { label: 'Date/Time',   excelWidth: 20, pdfWidth: 95  },
+    { label: 'Cashier',     excelWidth: 18, pdfWidth: 95  },
+    { label: 'Voided By',   excelWidth: 18, pdfWidth: 95  },
+    { label: 'Voided At',   excelWidth: 20, pdfWidth: 95  },
+    { label: 'Total',       excelWidth: 12, pdfWidth: 65  }
 ];
 
 /**

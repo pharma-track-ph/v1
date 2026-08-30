@@ -118,8 +118,21 @@
                 <!-- Barcode scanner simulation row -->
                 <div class="barcode-input-row" id="barcode-input-row">
                     <input type="text" id="barcode-input"
-                           placeholder="Scan or type barcode → Enter"
+                           placeholder="Type Barcode"
                            autocomplete="off">
+
+                    <!-- Quantity to add per typed/scanned barcode -- same idea as
+                         the camera scanner's per-scan stepper (#camera-scan-qty),
+                         so someone with several units of the same product can set
+                         this once instead of pressing Enter that many times. Read
+                         fresh on every Enter (see pos.js), so it applies
+                         immediately if changed mid-session. -->
+                    <div class="barcode-qty-stepper" title="Quantity to add">
+                        <button type="button" class="qty-btn" id="barcode-qty-dec">−</button>
+                        <input type="number" id="barcode-scan-qty" value="1" min="1" step="1">
+                        <button type="button" class="qty-btn" id="barcode-qty-inc">+</button>
+                    </div>
+
                     <button class="btn btn-sm btn-light" onclick="document.getElementById('barcode-input-row').classList.remove('active')">✕</button>
                 </div>
             </div>

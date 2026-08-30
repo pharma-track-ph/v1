@@ -145,6 +145,59 @@ body.pos-page .main-wrapper {
 
 .barcode-input-row input:focus { outline: none; }
 
+/* Quantity-per-scan stepper inside the manual barcode row -- same
+   pattern/markup as the camera scanner's .camera-qty-stepper, just sized
+   to sit inline in this single-row bar instead of stacked under a video
+   preview. Shares the global .qty-btn class already used by the cart's
+   own qty buttons. */
+.barcode-qty-stepper {
+    display:     flex;
+    align-items: center;
+    gap:         6px;
+    flex-shrink: 0;
+}
+
+.barcode-qty-stepper .qty-btn {
+    width:  28px;
+    height: 28px;
+    background: var(--white);
+}
+
+.barcode-qty-stepper input {
+    width:         46px;
+    flex:          none;
+    text-align:    center;
+    font-weight:   700;
+    font-family:   var(--font-family);
+    letter-spacing: normal;
+    background:    var(--white);
+    border:        1px solid var(--gray-300);
+    border-radius: 6px;
+    padding:       4px 2px;
+    color:         var(--dark);
+    height:        28px;
+}
+
+.barcode-qty-stepper input:focus { outline: none; border-color: var(--primary); }
+
+/* Native number-input spin buttons are redundant here -- there's already
+   a dedicated +/- button on either side, so the browser's own tiny
+   up/down arrows just add visual clutter and a second, fiddlier way to
+   change the same value. Same treatment applied to the camera scanner's
+   qty input below, for the same reason. */
+.barcode-qty-stepper input::-webkit-outer-spin-button,
+.barcode-qty-stepper input::-webkit-inner-spin-button,
+.camera-qty-stepper input::-webkit-outer-spin-button,
+.camera-qty-stepper input::-webkit-inner-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+}
+
+.barcode-qty-stepper input[type=number],
+.camera-qty-stepper input[type=number] {
+    -moz-appearance: textfield;
+}
+
 @keyframes pulse-border {
     0%, 100% { border-color: var(--primary); }
     50%       { border-color: var(--primary-dark); box-shadow: 0 0 0 3px rgba(13,110,253,0.2); }

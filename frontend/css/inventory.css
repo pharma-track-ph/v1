@@ -65,11 +65,26 @@
    left only the header text to size against, and widths visibly jumped
    around between filter changes. table-layout:fixed plus an explicit
    colgroup makes column widths constant regardless of what's in the
-   table body. */
+   table body.
+
+   min-width bumped from 1000px to 1150px, and the colgroup percentages
+   rebalanced (see inventory.html) -- at 1000px, Batch No. (11%, ~110px)
+   silently ellipsis-truncated real batch numbers like "BATCH-OMP-001",
+   and Actions (9%, ~90px) was nowhere near wide enough for Edit+Delete
+   together, so the buttons visually spilled out past the table -- and
+   past the browser viewport, since Actions is the last column, with no
+   scrollbar able to reach them because the table's LAYOUT width (as far
+   as the browser's overflow calculation was concerned) never actually
+   grew to include that spillover. Both columns now get real width so
+   nothing needs to overflow in the first place; if a narrower window
+   still doesn't fit all 1150px, .table-container's existing
+   overflow-x:auto (global.css) now has genuine extra table width to
+   scroll to, since it's real layout width this time, not just visually-
+   painted overflow. */
 .inventory-table {
     width:        100%;
     table-layout: fixed;
-    min-width:    1000px;
+    min-width:    1150px;
 }
 
 .inventory-table th,

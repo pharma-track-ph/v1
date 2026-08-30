@@ -766,15 +766,43 @@ document.addEventListener('DOMContentLoaded', () => {
         barcodeInput?.focus();
     });
 
+    // Quantity to add per typed/scanned barcode -- same stepper pattern as
+    // the camera scanner's #camera-scan-qty (see getCameraScanQty below),
+    // read fresh on every Enter so changing it mid-session (e.g. from 1 to
+    // 20 for the next product) applies immediately without reopening
+    // anything.
+    const barcodeQtyInput = document.getElementById('barcode-scan-qty');
+
+    function getBarcodeScanQty() {
+        const val = parseInt(barcodeQtyInput?.value);
+        return (!val || val < 1) ? 1 : val;
+    }
+
+    document.getElementById('barcode-qty-dec')?.addEventListener('click', () => {
+        if (!barcodeQtyInput) return;
+        barcodeQtyInput.value = Math.max(1, getBarcodeScanQty() - 1);
+    });
+    document.getElementById('barcode-qty-inc')?.addEventListener('click', () => {
+        if (!barcodeQtyInput) return;
+        barcodeQtyInput.value = getBarcodeScanQty() + 1;
+    });
+    barcodeQtyInput?.addEventListener('input', () => {
+        if (barcodeQtyInput.value !== '' && getBarcodeScanQty() < 1) barcodeQtyInput.value = 1;
+    });
+    // Typing/adjusting the quantity shouldn't fall through to the barcode
+    // input's own Enter/Escape handling below.
+    barcodeQtyInput?.addEventListener('keydown', (e) => e.stopPropagation());
+
     barcodeInput?.addEventListener('keydown', async (e) => {
         if (e.key === 'Enter') {
             const code = barcodeInput.value.trim();
             if (!code) return;
 
+            const qty  = getBarcodeScanQty();
             const data = await OfflineAPI.get(`/pos/products?barcode=${encodeURIComponent(code)}`);
 
             if (data?.success && data.data.length) {
-                addToCart(data.data[0]);
+                addToCart(data.data[0], qty);
                 barcodeInput.value = '';
             } else {
                 Toast.show(`Barcode "${code}" not found.`, 'warning');

@@ -259,42 +259,49 @@
 /* Alpha/beta hint text */
 .alpha-hint { font-size: 0.72rem; color: var(--secondary); margin-top: 4px; }
 
-/* ── Product Forecast Header ─────────────────────────────── */
-.product-forecast-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    background: var(--white);
-    border-radius: 16px;
-    padding: 20px 24px;
-    margin-bottom: 20px;
-    box-shadow: var(--shadow-sm);
-    border: 1px solid var(--gray-200);
-    flex-wrap: wrap;
-    gap: 16px;
-}
-
-.product-title-section h2    { font-size: 1.4rem; font-weight: 700; color: var(--dark); margin-bottom: 6px; }
-.product-category            { font-size: 0.85rem; color: var(--secondary); background: var(--gray-100); padding: 4px 12px; border-radius: 20px; display: inline-block; }
-
-.product-quick-stats { display: flex; gap: 20px; flex-wrap: wrap; }
-
-.quick-stat          { text-align: center; padding: 0 12px; }
-.quick-stat:not(:last-child) { border-right: 1px solid var(--gray-200); }
-.quick-stat .stat-label  { display: block; font-size: 0.75rem; color: var(--secondary); margin-bottom: 4px; }
-.quick-stat .stat-value  { font-size: 1.3rem; font-weight: 700; color: var(--dark); }
-.quick-stat.warning .stat-value { color: #f0ad4e; }
-
-/* ── What We Found Card ────────────────────────────────────── */
+/* ── What We Found Card (now also carries product info + quick stats) ── */
 .pattern-detection-card {
     background: linear-gradient(135deg, #1a237e 0%, #1565c0 100%);
     border-radius: 16px;
     padding: 20px 24px;
     margin-bottom: 20px;
     color: white;
+    box-shadow: var(--shadow-sm);
 }
 
-.pattern-detection-card h4 { font-size: 1rem; font-weight: 600; margin-bottom: 16px; opacity: 0.9; }
+.pdc-top-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 16px;
+}
+
+.pdc-product-info h4 { font-size: 1.25rem; font-weight: 700; color: white; margin-bottom: 4px; }
+
+/* .product-category normally sits on a light card (see e.g. Inventory) --
+   here it's on the dark gradient instead, so it needs its own translucent
+   treatment rather than the default light-gray-background/dark-text
+   look. */
+.pattern-detection-card .product-category {
+    background: rgba(255,255,255,0.18);
+    color:      white;
+}
+
+.pdc-quick-stats { display: flex; gap: 18px; flex-wrap: wrap; }
+.pdc-quick-stats .quick-stat { text-align: center; padding: 0 12px; }
+.pdc-quick-stats .quick-stat:not(:last-child) { border-right: 1px solid rgba(255,255,255,0.25); }
+.pdc-quick-stats .stat-label { display: block; font-size: 0.72rem; opacity: 0.75; margin-bottom: 2px; }
+.pdc-quick-stats .stat-value { font-size: 1.15rem; font-weight: 700; color: white; }
+.pdc-quick-stats .quick-stat.warning .stat-value { color: #ffc107; }
+
+.pdc-divider {
+    height:     1px;
+    background: rgba(255,255,255,0.18);
+    margin:     18px 0 16px;
+}
+
+.pdc-pattern-title { font-size: 0.95rem; font-weight: 600; margin-bottom: 14px; opacity: 0.9; }
 
 .pattern-insights {
     display: grid;
@@ -362,33 +369,15 @@
 .predictions-section h4 { font-size: 1rem; font-weight: 700; color: var(--dark); margin-bottom: 8px; }
 .predictions-section p  { font-size: 0.8rem; color: var(--secondary); margin-bottom: 16px; }
 
-.predictions-grid {
-    display: grid;
-    grid-template-columns: repeat(4, 1fr);
-    gap: 16px;
-}
-
-.prediction-card {
-    background: var(--white);
+.predictions-section .table-responsive {
+    background:    var(--white);
     border-radius: 12px;
-    padding: 20px;
-    text-align: center;
-    box-shadow: var(--shadow-sm);
-    border: 1px solid var(--gray-200);
-    border-top: 4px solid var(--primary);
-    transition: all 0.2s;
+    box-shadow:    var(--shadow-sm);
+    border:        1px solid var(--gray-200);
+    padding:       4px 16px;
 }
 
-.prediction-card.urgent  { border-top-color: #dc3545; }
-.prediction-card.warning { border-top-color: #ffc107; }
-.prediction-card.good    { border-top-color: #198754; }
-
-.pred-week  { font-size: 0.82rem; font-weight: 600; color: var(--secondary); margin-bottom: 10px; }
-.pred-value { font-size: 2.2rem; font-weight: 800; color: var(--dark); margin-bottom: 2px; }
-.pred-unit  { font-size: 0.72rem; color: var(--secondary); }
-.pred-range { font-size: 0.72rem; color: var(--secondary); margin-bottom: 8px; margin-top: 4px; }
-
-.pred-tag          { display: inline-block; padding: 3px 10px; border-radius: 20px; font-size: 0.65rem; font-weight: 600; }
+.pred-tag          { display: inline-block; padding: 3px 10px; border-radius: 20px; font-size: 0.7rem; font-weight: 600; }
 .pred-tag.urgent   { background: #dc3545; color: white; }
 .pred-tag.warning  { background: #ffc107; color: #664d03; }
 .pred-tag.good     { background: #198754; color: white; }
@@ -455,6 +444,29 @@
 .data-table th        { background: var(--gray-100); padding: 12px 8px; text-align: left; font-weight: 600; color: var(--gray-700, #495057); border-bottom: 2px solid var(--primary); }
 .data-table td        { padding: 10px 8px; border-bottom: 1px solid var(--gray-200); }
 .data-table tr:hover  { background: var(--gray-100); }
+
+.table-pagination {
+    display:         flex;
+    align-items:     center;
+    justify-content: center;
+    gap:             14px;
+    padding:         14px 0 4px;
+}
+
+.pg-btn {
+    padding:       6px 14px;
+    border:        1px solid var(--gray-300);
+    background:    var(--white);
+    border-radius: 8px;
+    font-size:     0.82rem;
+    cursor:        pointer;
+    transition:    all 0.2s;
+    font-family:   var(--font-family);
+}
+.pg-btn:hover:not(:disabled) { background: var(--primary); color: white; border-color: var(--primary); }
+.pg-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+.pg-info { font-size: 0.82rem; color: var(--secondary); font-weight: 600; }
 
 /* ── Comparison Modal ────────────────────────────────────── */
 .modal-overlay {
@@ -542,7 +554,9 @@ details summary { padding: 8px 0; user-select: none; }
 @media (max-width: 768px) {
     .selector-row        { grid-template-columns: 1fr; }
 
-    /* Search input + product select side by side instead of stacked */
+    /* #forecast-product is hidden (see forecasting.html) -- this only
+       affects #product-search now, which just takes the full row width
+       via flex:1 below. */
     .searchable-select   { flex-direction: row; }
     .searchable-select > * { flex: 1; min-width: 0; }
 
@@ -569,7 +583,6 @@ details summary { padding: 8px 0; user-select: none; }
     .algo-card           { padding: 12px 6px; min-height: 48px; }
     .algo-name           { font-size: 0.72rem; }
 
-    .predictions-grid    { grid-template-columns: repeat(2, 1fr); gap: 10px; }
     .rec-body            { grid-template-columns: 1fr; }
 
     /* Pattern label/value/sub side by side (3 columns) instead of stacked */
@@ -580,8 +593,9 @@ details summary { padding: 8px 0; user-select: none; }
     .pattern-info .pattern-sub   { font-size: 0.62rem; }
 
     .chart-legend        { margin-top: 12px; }
-    .product-quick-stats { width: 100%; justify-content: space-around; }
-    .product-forecast-header { flex-direction: column; align-items: flex-start; padding: 14px; }
+    .pdc-quick-stats     { width: 100%; justify-content: space-around; }
+    .pdc-top-row         { flex-direction: column; align-items: flex-start; }
+    .pattern-detection-card { padding: 14px; }
     .trending-grid {
         grid-template-columns: repeat(2, 1fr);
         gap:                   8px;
@@ -679,23 +693,18 @@ details summary { padding: 8px 0; user-select: none; }
 }
 
 @media (max-width: 480px) {
-    .predictions-grid    { grid-template-columns: 1fr 1fr; }
-
     .forecast-chart-container { height: 260px; }
 
     .trending-section,
     .forecast-panel,
     .restock-suggestions,
-    .product-forecast-header {
+    .pattern-detection-card {
         padding: 14px;
     }
 
-    .product-quick-stats .quick-stat:not(:last-child) {
+    .pdc-quick-stats .quick-stat:not(:last-child) {
         border-right: none;
     }
-
-    .prediction-card { padding: 16px; }
-    .pred-value      { font-size: 1.8rem; }
 }
 
 /* -- Dark mode overrides -- */

@@ -198,7 +198,7 @@ const getRestockSuggestions = async (req, res, next) => {
                 reason  = `Will run out in ~${daysLeft} day${daysLeft !== 1 ? 's' : ''} at current rate`;
                 urgency = 60;
             } else if (daysExpiry <= 30 && stock > threshold) {
-                reason  = `Expires in ${daysExpiry} day${daysExpiry !== 1 ? 's' : ''} — sell or reorder fresher batch`;
+                reason  = `Expires in ${daysExpiry} day${daysExpiry !== 1 ? 's' : ''}`;
                 urgency = 40;
             }
 

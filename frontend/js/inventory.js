@@ -164,8 +164,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 <td>${statusBadge}</td>
                 <td>
                     <div class="d-flex gap-8">
-                        <button class="btn btn-light btn-sm btn-edit"    data-id="${p.id}" title="Edit">✏️</button>
-                        <button class="btn btn-danger btn-sm btn-delete" data-id="${p.id}" title="Delete">🗑️</button>
+                        <button class="btn btn-light btn-sm btn-edit"    data-id="${p.id}" title="Edit">Edit</button>
+                        <button class="btn btn-danger btn-sm btn-delete" data-id="${p.id}" title="Delete">Delete</button>
                     </div>
                 </td>
             </tr>`;

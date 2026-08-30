@@ -234,6 +234,35 @@
     </div>
 </div>
 
+<!-- Email Change Verification (OTP) Modal -->
+<div class="modal-overlay" id="email-otp-modal">
+    <div class="modal" style="max-width:400px">
+        <div class="modal-header">
+            <h3>Verify Email Change</h3>
+            <button class="btn-close btn-close-email-otp">✕</button>
+        </div>
+        <div class="modal-body">
+            <p style="font-size:0.85rem;color:var(--secondary);margin-bottom:6px">
+                Changing email for <strong id="email-otp-target-name">—</strong> to
+                <strong id="email-otp-new-email">—</strong>.
+            </p>
+            <p id="email-otp-status" style="font-size:0.8rem;color:var(--secondary);margin-bottom:16px">Sending verification code…</p>
+            <div class="form-group">
+                <label class="form-label">6-Digit Code *</label>
+                <input type="text" id="email-otp-code" class="form-control" inputmode="numeric" maxlength="6"
+                       placeholder="000000" autocomplete="one-time-code" style="letter-spacing:6px;text-align:center;font-size:1.2rem">
+            </div>
+            <p style="font-size:0.78rem;color:var(--secondary);margin-top:10px">
+                Didn't get a code? <button type="button" class="btn-link-inline" id="btn-resend-email-otp" style="background:none;border:none;color:var(--primary);cursor:pointer;padding:0;font-size:0.78rem;text-decoration:underline">Resend code</button>
+            </p>
+        </div>
+        <div class="modal-footer">
+            <button class="btn btn-light btn-close-email-otp">Cancel</button>
+            <button class="btn btn-primary" id="btn-confirm-email-otp">Confirm</button>
+        </div>
+    </div>
+</div>
+
 <div id="toast-container" class="toast-container"></div>
 <script src="../js/main.js"></script>
 <script src="../js/users.js"></script>

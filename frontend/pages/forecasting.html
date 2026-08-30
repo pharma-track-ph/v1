@@ -62,7 +62,7 @@
             <!-- ── TRENDING PRODUCTS ─────────────────────────── -->
             <div class="trending-section">
                 <div class="section-header">
-                    <h3>Trending Products <span style="font-weight:400;font-size:0.85rem">(Last 4 weeks vs previous 4 weeks)</span></h3>
+                    <h4>Trending Products <span style="font-weight:400;font-size:0.85rem">(Last 4 weeks vs previous 4 weeks)</span></h4>
                     <p class="section-hint">Click any card to view its detailed forecast</p>
                 </div>
                 <div class="trending-grid" id="trending-grid">
@@ -79,23 +79,27 @@
             <!-- ── PRODUCT SELECTOR & ALGORITHM ─────────────── -->
             <div class="forecast-panel">
                 <div class="panel-header">
-                    <h3>Detailed Demand Forecast</h3>
+                    <h4>Detailed Demand Forecast</h4>
                 </div>
 
                 <div class="selector-row">
                     <div class="product-selector-wrapper">
-                        <label class="input-label">Select Medicine</label>
+                        <!-- Single combobox: shows the current selection, and
+                             doubles as the search box the moment it's clicked
+                             (via SearchSuggest in forecasting.js) -- the
+                             underlying <select> just tracks the actual
+                             selected id/options for the rest of the page's
+                             logic and is never shown. -->
                         <div class="searchable-select">
                             <input type="text" id="product-search" class="form-control"
-                                   placeholder="Search by name or category…">
-                            <select id="forecast-product" class="form-control">
-                                <option value="">— Choose a product —</option>
+                                   placeholder="Search or select a product…" autocomplete="off">
+                            <select id="forecast-product" class="hidden">
+                                <option value="">Select a product</option>
                             </select>
                         </div>
                     </div>
 
                     <div class="quick-filters">
-                        <label class="input-label">Quick Filters</label>
                         <div class="filter-buttons">
                             <button class="btn-filter active" data-filter="all">All</button>
                             <button class="btn-filter" data-filter="trending">Trending</button>
@@ -107,7 +111,6 @@
 
                 <!-- Algorithm Cards -->
                 <div class="algorithm-selector">
-                    <label class="input-label">Forecasting Method</label>
                     <div class="algorithm-cards">
                         <div class="algo-card" data-algo="moving-average">
                             <div class="algo-name">Moving Average</div>
@@ -129,22 +132,22 @@
                      Moving Average, which has no tunable parameters. -->
                 <details id="hw-params" style="margin-bottom:20px">
                     <summary style="cursor:pointer;font-weight:600;color:var(--primary);">
-                        <span id="hw-params-summary">Advanced Parameters (α, β, γ) — Holt-Winters only</span>
+                        <span id="hw-params-summary">Advanced Parameters (α, β, γ) Holt-Winters only</span>
                     </summary>
                     <div style="display:flex;gap:16px;margin-top:16px;padding:16px;background:var(--gray-100);border-radius:8px;flex-wrap:wrap;">
                         <div class="form-group">
-                            <label class="form-label">α Level — <span id="alpha-value">0.3</span></label>
+                            <label class="form-label">α Level: <span id="alpha-value">0.3</span></label>
                             <input type="range" id="forecast-alpha" min="0.01" max="0.99" step="0.01" value="0.3" style="width:140px">
                             <div class="alpha-hint">Higher = more reactive to recent demand</div>
                         </div>
                         <div class="hw-only-params" style="display:flex;gap:16px;flex-wrap:wrap;">
                             <div class="form-group">
-                                <label class="form-label">β Trend — <span id="beta-value">0.1</span></label>
+                                <label class="form-label">β Trend: <span id="beta-value">0.1</span></label>
                                 <input type="range" id="forecast-beta" min="0.01" max="0.99" step="0.01" value="0.1" style="width:140px">
                                 <div class="alpha-hint">Higher = faster trend adaptation</div>
                             </div>
                             <div class="form-group">
-                                <label class="form-label">γ Seasonal — <span id="gamma-value">0.3</span></label>
+                                <label class="form-label">γ Seasonal: <span id="gamma-value">0.3</span></label>
                                 <input type="range" id="forecast-gamma" min="0.01" max="0.99" step="0.01" value="0.3" style="width:140px">
                                 <div class="alpha-hint">Higher = stronger seasonal response</div>
                             </div>
@@ -162,7 +165,7 @@
 
                 <!-- Forecast Horizon (per-algorithm options, like the Reports date filter) -->
                 <div class="horizon-selector">
-                    <label class="input-label">Forecast Horizon</label>
+                    <label class="input-label">Forecast Range</label>
                     <div class="filter-buttons" id="horizon-buttons"></div>
                     <div id="horizon-custom-wrap" class="hidden" style="margin-top:10px">
                         <label class="form-label" style="margin-bottom:4px">Custom weeks (1–26)</label>
@@ -182,31 +185,38 @@
             <!-- ── FORECAST RESULTS ──────────────────────────── -->
             <div id="forecast-results" class="hidden">
 
-                <!-- Product header -->
-                <div class="product-forecast-header">
-                    <div class="product-title-section">
-                        <h2 id="forecast-product-name">—</h2>
-                        <span class="product-category" id="forecast-product-category">—</span>
-                    </div>
-                    <div class="product-quick-stats">
-                        <div class="quick-stat">
-                            <span class="stat-label">Current Stock</span>
-                            <span class="stat-value" id="quick-stock">—</span>
-                        </div>
-                        <div class="quick-stat warning">
-                            <span class="stat-label">Reorder Level</span>
-                            <span class="stat-value" id="quick-reorder">—</span>
-                        </div>
-                        <div class="quick-stat">
-                            <span class="stat-label">Unit Price</span>
-                            <span class="stat-value" id="quick-price">—</span>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Pattern detection -->
+                <!-- Product info + pattern detection: truly ONE container
+                     now (not a card nested inside another) -- the blue
+                     gradient panel that used to be just "Historical Pattern
+                     Detected" now also carries the product name/category
+                     and the three quick stats at its top, laid out
+                     compactly so the whole thing takes noticeably less
+                     vertical space than the previous two stacked cards. -->
                 <div class="pattern-detection-card">
-                    <h4>Historical Pattern Detected</h4>
+                    <div class="pdc-top-row">
+                        <div class="pdc-product-info">
+                            <h4 id="forecast-product-name">—</h4>
+                            <span class="product-category" id="forecast-product-category">—</span>
+                        </div>
+                        <div class="pdc-quick-stats">
+                            <div class="quick-stat">
+                                <span class="stat-label">Current Stock</span>
+                                <span class="stat-value" id="quick-stock">—</span>
+                            </div>
+                            <div class="quick-stat warning">
+                                <span class="stat-label">Reorder Level</span>
+                                <span class="stat-value" id="quick-reorder">—</span>
+                            </div>
+                            <div class="quick-stat">
+                                <span class="stat-label">Unit Price</span>
+                                <span class="stat-value" id="quick-price">—</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="pdc-divider"></div>
+
+                    <h4 class="pdc-pattern-title">Historical Pattern Detected</h4>
                     <div class="pattern-insights" id="pattern-insights"></div>
                 </div>
 
@@ -229,7 +239,20 @@
                 <!-- Weekly predictions -->
                 <div class="predictions-section">
                     <h4>Weekly Demand Predictions</h4>
-                    <div class="predictions-grid" id="predictions-grid"></div>
+                    <div class="table-responsive">
+                        <table class="data-table" id="predictions-table">
+                            <thead>
+                                <tr>
+                                    <th>Week</th>
+                                    <th>Forecast</th>
+                                    <th>Expected Range</th>
+                                    <th>Status</th>
+                                </tr>
+                            </thead>
+                            <tbody id="predictions-tbody"></tbody>
+                        </table>
+                    </div>
+                    <div class="table-pagination" id="predictions-pagination"></div>
                 </div>
 
                 <!-- Smart restock recommendation -->
@@ -258,6 +281,7 @@
                             <tbody id="components-tbody"></tbody>
                         </table>
                     </div>
+                    <div class="table-pagination" id="components-pagination"></div>
                 </details>
             </div>
 
@@ -265,7 +289,7 @@
             <div class="modal-overlay hidden" id="comparison-modal">
                 <div class="modal-content modal-lg">
                     <div class="modal-header">
-                        <h3>Algorithm Comparison</h3>
+                        <h4>Algorithm Comparison</h4>
                         <button class="modal-close" id="close-modal">&times;</button>
                     </div>
                     <div class="modal-body" id="comparison-body"></div>

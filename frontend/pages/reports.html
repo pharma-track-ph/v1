@@ -104,10 +104,10 @@
                     <div class="table-container">
                         <table class="table">
                             <thead>
-                                <tr><th style="width:30px"></th><th>Order #</th><th>Date/Time</th><th>Cashier</th><th>Subtotal</th><th>Purchase Cost</th><th>Discount</th><th>Total</th><th>Profit</th><th>Payment</th></tr>
+                                <tr><th style="width:30px"></th><th>Order #</th><th>Date/Time</th><th>Cashier</th><th>Subtotal</th><th>Purchase Cost</th><th>Discount</th><th>Total</th><th>Profit</th></tr>
                             </thead>
                             <tbody id="sales-tbody">
-                                <tr><td colspan="10" class="text-center" style="padding:24px"><div class="spinner" style="margin:0 auto"></div></td></tr>
+                                <tr><td colspan="9" class="text-center" style="padding:24px"><div class="spinner" style="margin:0 auto"></div></td></tr>
                             </tbody>
                         </table>
                     </div>
@@ -372,13 +372,13 @@ document.addEventListener('DOMContentLoaded', () => {
     // ── Load sales report ─────────────────────────────────────
     async function loadSalesReport(start, end) {
         const tbody = document.getElementById('sales-tbody');
-        tbody.innerHTML = '<tr><td colspan="10" class="text-center" style="padding:24px"><div class="spinner" style="margin:0 auto"></div></td></tr>';
+        tbody.innerHTML = '<tr><td colspan="9" class="text-center" style="padding:24px"><div class="spinner" style="margin:0 auto"></div></td></tr>';
         document.getElementById('sales-summary-chips').style.display = 'none';
 
         const data = await API.get(`/reports/sales?start_date=${start}&end_date=${end}&limit=500`);
         if (!data?.success) {
             Toast.show('Failed to load report.', 'error');
-            tbody.innerHTML = '<tr><td colspan="10" class="text-center text-muted" style="padding:24px">Failed to load data.</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="9" class="text-center text-muted" style="padding:24px">Failed to load data.</td></tr>';
             return;
         }
 
@@ -392,7 +392,7 @@ document.addEventListener('DOMContentLoaded', () => {
         document.getElementById('sales-summary-chips').style.display = 'flex';
 
         if (!salesData.length) {
-            tbody.innerHTML = '<tr><td colspan="10" class="text-center text-muted" style="padding:24px">No transactions found for this period.</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="9" class="text-center text-muted" style="padding:24px">No transactions found for this period.</td></tr>';
             return;
         }
         tbody.innerHTML = salesData.map((o, idx) => `
@@ -406,10 +406,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 <td>${Fmt.currency(o.discount)}</td>
                 <td class="fw-600" style="color:var(--primary)">${Fmt.currency(o.total)}</td>
                 <td class="fw-600" style="color:${parseFloat(o.profit || 0) >= 0 ? 'var(--success)' : 'var(--danger)'}">${Fmt.currency(o.profit)}</td>
-                <td><span class="badge badge-primary">${o.payment_method.toUpperCase()}</span></td>
             </tr>
             <tr class="detail-row hidden" id="order-detail-${idx}">
-                <td colspan="10">
+                <td colspan="9">
                     <strong style="font-size:0.82rem">Items Sold:</strong>
                     <div class="table-container" style="margin-top:8px">
                         <table class="table" style="white-space:normal">

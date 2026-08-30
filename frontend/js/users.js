@@ -223,6 +223,14 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
 
+        // Email changes on an EXISTING account go through the dedicated
+        // OTP-verified flow below (startEmailChangeOtp) instead of being
+        // applied directly here -- the backend ignores the email field on
+        // this same PUT entirely (see authController.js's updateUser), so
+        // name/role/status/password below still save normally either way.
+        const originalUser = editingId ? allUsers.find(x => x.id === editingId) : null;
+        const emailChanged = !!(editingId && originalUser && email.toLowerCase() !== originalUser.email.toLowerCase());
+
         submitBtn.disabled    = true;
         submitBtn.textContent = editingId ? 'Saving…' : 'Adding…';
 
@@ -241,9 +249,18 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         if (result?.success) {
-            Toast.show(result.message, 'success');
-            Modal.close('user-modal');
-            loadUsers();
+            if (emailChanged) {
+                // Other fields are already saved at this point -- only the
+                // email is still pending, gated behind a code sent to the
+                // OWNER PERFORMING THE CHANGE (see startEmailChangeOtp).
+                Modal.close('user-modal');
+                Toast.show('Other changes saved. Verify the email change to finish.', 'info');
+                startEmailChangeOtp(editingId, originalUser.name, email);
+            } else {
+                Toast.show(result.message, 'success');
+                Modal.close('user-modal');
+                loadUsers();
+            }
         } else {
             Toast.show(result?.message || 'Save failed.', 'error');
         }
@@ -308,6 +325,122 @@ document.addEventListener('DOMContentLoaded', () => {
         } else {
             Toast.show(result?.message || 'Update failed.', 'error');
         }
+    });
+
+    // ── Email Change Verification (OTP) ───────────────
+    // Mirrors the Forgot Password OTP flow on the login page, but the code
+    // is sent to the OWNER PERFORMING THE CHANGE (whoever is logged in and
+    // using this page right now), never to the target account's old or
+    // new address -- this confirms "the person at this keyboard really
+    // meant to do this", not that the new address is reachable. Triggered
+    // from handleSubmit() above whenever the Edit modal's email field
+    // differs from the account's current email.
+    let pendingEmailOtp        = null; // { targetId, targetName, newEmail }
+    let emailOtpResendCooldown = null;
+
+    async function startEmailChangeOtp(targetId, targetName, newEmail) {
+        pendingEmailOtp = { targetId, targetName, newEmail };
+
+        document.getElementById('email-otp-target-name').textContent = targetName;
+        document.getElementById('email-otp-new-email').textContent   = newEmail;
+        const codeInput = document.getElementById('email-otp-code');
+        if (codeInput) codeInput.value = '';
+        setEmailOtpStatus('Sending verification code…');
+        Modal.open('email-otp-modal');
+
+        const result = await API.post(`/auth/users/${targetId}/email-otp/request`, { newEmail });
+
+        if (result?.success) {
+            setEmailOtpStatus(result.message || 'A verification code has been sent.');
+            startEmailOtpResendCooldown();
+            codeInput?.focus();
+        } else {
+            setEmailOtpStatus(result?.message || 'Could not send the verification email.', true);
+        }
+    }
+
+    function setEmailOtpStatus(message, isError = false) {
+        const el = document.getElementById('email-otp-status');
+        if (!el) return;
+        el.textContent = message;
+        el.style.color = isError ? 'var(--danger)' : 'var(--secondary)';
+    }
+
+    function startEmailOtpResendCooldown() {
+        const btn = document.getElementById('btn-resend-email-otp');
+        if (!btn) return;
+        let seconds = 30;
+        btn.disabled    = true;
+        btn.textContent = `Resend code (${seconds}s)`;
+        if (emailOtpResendCooldown) clearInterval(emailOtpResendCooldown);
+        emailOtpResendCooldown = setInterval(() => {
+            seconds--;
+            if (seconds <= 0) {
+                clearInterval(emailOtpResendCooldown);
+                btn.disabled    = false;
+                btn.textContent = 'Resend code';
+            } else {
+                btn.textContent = `Resend code (${seconds}s)`;
+            }
+        }, 1000);
+    }
+
+    // Closing without confirming just abandons the pending email change --
+    // the name/role/status/password changes from the same submit were
+    // already saved beforehand, so the table is refreshed to reflect those
+    // even though the email itself stays unchanged.
+    function closeEmailOtpModal() {
+        Modal.close('email-otp-modal');
+        if (emailOtpResendCooldown) clearInterval(emailOtpResendCooldown);
+        pendingEmailOtp = null;
+        loadUsers();
+    }
+
+    document.querySelectorAll('.btn-close-email-otp').forEach(btn =>
+        btn.addEventListener('click', closeEmailOtpModal));
+
+    document.getElementById('btn-resend-email-otp')?.addEventListener('click', async () => {
+        if (!pendingEmailOtp) return;
+        const result = await API.post(`/auth/users/${pendingEmailOtp.targetId}/email-otp/request`, {
+            newEmail: pendingEmailOtp.newEmail
+        });
+        if (result?.success) {
+            setEmailOtpStatus(result.message || 'A new code has been sent.');
+            startEmailOtpResendCooldown();
+        } else {
+            setEmailOtpStatus(result?.message || 'Could not resend code.', true);
+        }
+    });
+
+    async function confirmEmailOtp() {
+        if (!pendingEmailOtp) return;
+        const otp = document.getElementById('email-otp-code')?.value.trim();
+        if (!/^\d{6}$/.test(otp)) {
+            setEmailOtpStatus('Enter the 6-digit code.', true);
+            return;
+        }
+
+        const btn = document.getElementById('btn-confirm-email-otp');
+        btn.disabled    = true;
+        btn.textContent = 'Verifying…';
+        const result = await API.post(`/auth/users/${pendingEmailOtp.targetId}/email-otp/confirm`, { otp });
+        btn.disabled    = false;
+        btn.textContent = 'Confirm';
+
+        if (result?.success) {
+            if (emailOtpResendCooldown) clearInterval(emailOtpResendCooldown);
+            pendingEmailOtp = null;
+            Modal.close('email-otp-modal');
+            Toast.show(result.message || 'Email updated successfully.', 'success');
+            loadUsers();
+        } else {
+            setEmailOtpStatus(result?.message || 'Incorrect code.', true);
+        }
+    }
+
+    document.getElementById('btn-confirm-email-otp')?.addEventListener('click', confirmEmailOtp);
+    document.getElementById('email-otp-code')?.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') confirmEmailOtp();
     });
 
     // ── Password strength meters ──────────────────────────────

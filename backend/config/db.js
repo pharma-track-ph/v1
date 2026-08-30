@@ -126,6 +126,39 @@ async function initSchema() {
     }
 }
 
+// Adds the columns needed for the email-change OTP flow (User Management
+// -> changing a user's email now requires the ADMIN/OWNER performing the
+// change to confirm a code sent to their OWN email, mirroring the
+// forgot-password flow). Purely additive (ADD COLUMN, never DROP/ALTER
+// existing data) so it's safe to run in any environment, unlike the full
+// schema import above which only ever runs when tables are missing.
+async function ensureEmailChangeOtpColumns() {
+    try {
+        const requiredColumns = [
+            { name: 'email_change_otp_hash',   ddl: 'VARCHAR(255) NULL' },
+            { name: 'email_change_expires_at', ddl: 'DATETIME NULL' },
+            { name: 'email_change_attempts',   ddl: 'INT NOT NULL DEFAULT 0' },
+            { name: 'email_change_target_id',  ddl: 'INT NULL' },
+            { name: 'email_change_new_email',  ddl: 'VARCHAR(150) NULL' }
+        ];
+
+        const [existingCols] = await pool.query(
+            `SELECT COLUMN_NAME FROM information_schema.columns
+             WHERE table_schema = DATABASE() AND table_name = 'users'`
+        );
+        const existingNames = existingCols.map(r => r.COLUMN_NAME);
+
+        for (const col of requiredColumns) {
+            if (!existingNames.includes(col.name)) {
+                console.log(`📦  Adding missing column users.${col.name} ...`);
+                await pool.query(`ALTER TABLE users ADD COLUMN ${col.name} ${col.ddl}`);
+            }
+        }
+    } catch (err) {
+        console.error('⚠️  Could not verify/add email-change-OTP columns:', err.message);
+    }
+}
+
 // Test connection and init schema on startup
 async function initializeDatabase() {
     let connection = null;
@@ -154,6 +187,7 @@ async function initializeDatabase() {
         }
 
         await initSchema();
+        await ensureEmailChangeOtpColumns();
 
         const completionMsg = isProduction
             ? '✅ [PRODUCTION] Database initialization completed — Aiven data is PROTECTED'

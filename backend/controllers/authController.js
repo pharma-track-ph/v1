@@ -8,8 +8,9 @@ const bcrypt  = require('bcryptjs');
 const User    = require('../models/User');
 const db      = require('../config/db');           // ← FIX: was missing, causes ReferenceError in getAuditLogs
 const { logAudit } = require('../middleware/authMiddleware');
-const { sendOtpEmail } = require('../utils/mailer');
+const { sendOtpEmail, sendEmailChangeOtp } = require('../utils/mailer');
 const { exportReport, formatShortDateTime } = require('../utils/reportExporter');
+const EmailChangeOtpStore = require('../utils/emailChangeOtpStore');
 
 /**
  * POST /api/auth/login
@@ -132,8 +133,16 @@ const createUser = async (req, res, next) => {
 const updateUser = async (req, res, next) => {
     try {
         const { id } = req.params;
-        const { name, email, role, is_active, password } = req.body;
+        const { name, role, is_active, password } = req.body;
         const isSelf = parseInt(id) === req.user.id;
+
+        // Always fetched -- needed below regardless of isSelf, since email
+        // changes are deliberately IGNORED here (see comment on the email
+        // line) and we need the target's CURRENT email to keep it unchanged.
+        const target = await User.findById(id);
+        if (!target) {
+            return res.status(404).json({ success: false, message: 'User not found.' });
+        }
 
         if (isSelf) {
             if (role !== req.user.role) {
@@ -145,16 +154,18 @@ const updateUser = async (req, res, next) => {
         } else {
             // Owner (super_admin) accounts can only be managed by the account
             // holder themselves, never by another owner.
-            const target = await User.findById(id);
-            if (!target) {
-                return res.status(404).json({ success: false, message: 'User not found.' });
-            }
             if (target.role === 'super_admin') {
                 return res.status(403).json({ success: false, message: 'Owner accounts can only be managed by the account holder.' });
             }
         }
 
-        const affected = await User.update(id, { name, email, role, is_active });
+        // Email is deliberately NOT accepted here anymore -- it can only be
+        // changed via the dedicated OTP-verified flow below
+        // (requestEmailChangeOtp / confirmEmailChangeOtp), which sends a code
+        // to the PERSON MAKING THE CHANGE before it takes effect. Even if a
+        // client sends a different email in this request body, the target's
+        // existing email is kept untouched here.
+        const affected = await User.update(id, { name, email: target.email, role, is_active });
 
         if (!affected) {
             return res.status(404).json({ success: false, message: 'User not found.' });
@@ -165,8 +176,143 @@ const updateUser = async (req, res, next) => {
             await User.updatePassword(id, password);
         }
 
-        await logAudit(req.user.id, 'UPDATE_USER', 'users', id, { name, email, role, is_active }, req.ip);
+        await logAudit(req.user.id, 'UPDATE_USER', 'users', id, { name, role, is_active }, req.ip);
         res.json({ success: true, message: 'User updated.' });
+
+    } catch (err) { next(err); }
+};
+
+/**
+ * POST /api/auth/users/:id/email-otp/request  [Admin+]
+ * Body: { newEmail }
+ *
+ * Step 1 of the email-change flow. The 6-digit code is emailed to the
+ * PERSON PERFORMING THE CHANGE (req.user -- the admin/owner logged in and
+ * using User Management right now), never to the target account's new or
+ * old address. This mirrors the forgot-password OTP pattern, but its
+ * purpose is different: it's confirming "the person at this keyboard, in
+ * this session, really meant to do this" rather than confirming that the
+ * new address is reachable by its eventual owner.
+ */
+const requestEmailChangeOtp = async (req, res, next) => {
+    try {
+        const { id } = req.params;
+        const { newEmail } = req.body;
+
+        if (!newEmail) {
+            return res.status(400).json({ success: false, message: 'New email is required.' });
+        }
+
+        const normalizedEmail = newEmail.toLowerCase().trim();
+
+        const target = await User.findById(id);
+        if (!target) {
+            return res.status(404).json({ success: false, message: 'User not found.' });
+        }
+
+        // Same owner-protection rule as updateUser above.
+        if (parseInt(id) !== req.user.id && target.role === 'super_admin') {
+            return res.status(403).json({ success: false, message: 'Owner accounts can only be managed by the account holder.' });
+        }
+
+        if (normalizedEmail === target.email.toLowerCase()) {
+            return res.status(400).json({ success: false, message: 'That is already this user\'s email address.' });
+        }
+
+        const existing = await User.findByEmail(normalizedEmail);
+        if (existing && parseInt(existing.id) !== parseInt(id)) {
+            return res.status(409).json({ success: false, message: 'Email already in use by another account.' });
+        }
+
+        const requester = await User.findById(req.user.id);
+
+        const otp       = String(crypto.randomInt(100000, 1000000));
+        const otpHash   = await bcrypt.hash(otp, 10);
+        const expiresAt = new Date(Date.now() + OTP_EXPIRY_MINUTES * 60 * 1000);
+
+        // In-memory only -- see utils/emailChangeOtpStore.js for why this
+        // isn't written to the users table.
+        EmailChangeOtpStore.set(req.user.id, {
+            otpHash, expiresAt, targetId: id, newEmail: normalizedEmail
+        });
+
+        try {
+            await sendEmailChangeOtp(requester.email, otp, requester.name, target.name, normalizedEmail);
+        } catch (mailErr) {
+            console.error('[requestEmailChangeOtp] Failed to send OTP email:', mailErr.message);
+            EmailChangeOtpStore.clear(req.user.id);
+            return res.status(500).json({ success: false, message: 'Could not send the verification email. Please try again later.' });
+        }
+
+        res.json({ success: true, message: `A verification code has been sent to ${requester.email}.` });
+
+    } catch (err) { next(err); }
+};
+
+/**
+ * POST /api/auth/users/:id/email-otp/confirm  [Admin+]
+ * Body: { otp }
+ *
+ * Step 2 -- verifies the code against the REQUESTER's (not the target's)
+ * stored hash, then applies the pending email change to the target
+ * account it was originally requested for. The pending target id is
+ * checked against the :id in the URL so a stale/mismatched confirm
+ * request (e.g. two edit tabs open) can't silently apply to the wrong
+ * user.
+ */
+const confirmEmailChangeOtp = async (req, res, next) => {
+    try {
+        const { id } = req.params;
+        const { otp } = req.body;
+
+        if (!otp) {
+            return res.status(400).json({ success: false, message: 'Verification code is required.' });
+        }
+
+        const pending = EmailChangeOtpStore.get(req.user.id);
+
+        if (!pending) {
+            return res.status(400).json({ success: false, message: 'No pending email change found. Please start again.' });
+        }
+
+        if (parseInt(pending.targetId) !== parseInt(id)) {
+            return res.status(400).json({ success: false, message: 'This code does not match the pending change. Please start again.' });
+        }
+
+        if (new Date(pending.expiresAt) < new Date()) {
+            EmailChangeOtpStore.clear(req.user.id);
+            return res.status(400).json({ success: false, message: 'This code has expired. Please request a new one.' });
+        }
+
+        if (pending.attempts >= MAX_OTP_ATTEMPTS) {
+            EmailChangeOtpStore.clear(req.user.id);
+            return res.status(429).json({ success: false, message: 'Too many incorrect attempts. Please request a new code.' });
+        }
+
+        const matches = await bcrypt.compare(otp, pending.otpHash);
+
+        if (!matches) {
+            EmailChangeOtpStore.incrementAttempts(req.user.id);
+            const remaining = MAX_OTP_ATTEMPTS - (pending.attempts + 1);
+            return res.status(400).json({
+                success: false,
+                message: remaining > 0 ? `Incorrect code. ${remaining} attempt(s) left.` : 'Too many incorrect attempts. Please request a new code.'
+            });
+        }
+
+        // Re-check the target email hasn't been claimed by someone else while
+        // this code was pending (e.g. two admins editing at once).
+        const stillAvailable = await User.findByEmail(pending.newEmail);
+        if (stillAvailable && parseInt(stillAvailable.id) !== parseInt(id)) {
+            EmailChangeOtpStore.clear(req.user.id);
+            return res.status(409).json({ success: false, message: 'That email was taken by another account while this code was pending. Please start again.' });
+        }
+
+        await User.updateEmail(id, pending.newEmail);
+        EmailChangeOtpStore.clear(req.user.id);
+        await logAudit(req.user.id, 'CHANGE_USER_EMAIL', 'users', id, { new_email: pending.newEmail }, req.ip);
+
+        res.json({ success: true, message: 'Email updated successfully.', email: pending.newEmail });
 
     } catch (err) { next(err); }
 };
@@ -513,5 +659,6 @@ const updateProfile = async (req, res, next) => {
 
 module.exports = {
     login, getMe, getAllUsers, createUser, updateUser, deleteUser, getAuditLogs, exportAuditLogs,
-    forgotPassword, verifyOtp, resetPassword, updateProfile
+    forgotPassword, verifyOtp, resetPassword, updateProfile,
+    requestEmailChangeOtp, confirmEmailChangeOtp
 };

@@ -95,6 +95,16 @@ const User = {
         );
     },
 
+    // ── Email change (OTP) ──────────────────────
+    // The pending code/target/new-email itself is now kept in memory only
+    // (see utils/emailChangeOtpStore.js) -- no columns needed on this table
+    // for it. updateEmail below is the only DB write this feature needs,
+    // and it only touches the `email` column that already existed.
+    updateEmail: async (id, newEmail) => {
+        const [result] = await db.query('UPDATE users SET email = ? WHERE id = ?', [newEmail, id]);
+        return result.affectedRows;
+    },
+
     // ── Self-service profile update (name + avatar) ────
     // Cashiers are only ever allowed to change `avatar` here -- the
     // controller enforces that by simply not passing a new `name` for
