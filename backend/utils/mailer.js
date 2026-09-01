@@ -9,16 +9,6 @@
 // ============================================================
 const nodemailer = require('nodemailer');
 
-// Small (120x120, ~5KB) base64-embedded copy of the real PharmaTrack
-// logo, used inline in the emails below via a data: URI -- deliberately
-// NOT the full-size frontend/images/pharmatrack-logo.png (191KB) that
-// PDF/Excel/Word exports use, since email clients often flag/strip
-// large embedded images, and this only ever needs to render at ~28px.
-// A data: URI (rather than a linked <img src="https://...">) also means
-// the logo always shows immediately, since most email clients block
-// loading external images by default until the user explicitly allows
-// it -- exactly wrong for something meant to build trust in a one-time
-// code the person needs to read right now.
 // Small (32x32, ~1.4KB) base64-embedded copy of the real PharmaTrack
 // logo, used inline in the emails below via a data: URI -- deliberately
 // NOT the full-size frontend/images/pharmatrack-logo.png (191KB) that
@@ -33,10 +23,28 @@ const LOGO_DATA_URI = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAY
 
 let transporter = null;
 
+// Render's containers have no outbound IPv6 routing at all -- Gmail's
+// SMTP host (smtp.gmail.com) resolves to BOTH an IPv4 and an IPv6
+// address, and depending on DNS ordering Node can end up trying the
+// unreachable IPv6 one first, failing with ENETUNREACH or hanging until
+// a connection timeout. server.js already sets
+// dns.setDefaultResultOrder('ipv4first') globally, but that setting only
+// governs dns.lookup() specifically -- it turned out NOT to be enough on
+// its own here (confirmed live: the exact same ENETUNREACH/timeout
+// errors kept happening on Render even with that in place), most likely
+// because nodemailer's own connection setup doesn't route its DNS
+// resolution through dns.lookup() in a way that setting actually
+// reaches. `family: 4` below is the more direct fix -- it's passed
+// straight through to the underlying net/tls socket options and forces
+// an IPv4-only connection at the actual point of failure, regardless of
+// how the hostname got resolved. Harmless locally too (real IPv6 routing
+// exists there, but forcing IPv4 doesn't break anything -- Gmail is
+// reachable over both).
 function getTransporter() {
     if (!transporter) {
         transporter = nodemailer.createTransport({
             service: 'gmail',
+            family:  4,
             auth: {
                 user: process.env.EMAIL_USER,
                 pass: process.env.EMAIL_APP_PASSWORD
