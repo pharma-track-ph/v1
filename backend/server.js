@@ -4,6 +4,15 @@
 // ============================================================
 require('dotenv').config();
 
+// Render's containers only have IPv4 outbound routing -- without this,
+// Node (18+) can resolve Gmail's SMTP host to an IPv6 address first and
+// then fail with ENETUNREACH or hang until a connection timeout, even
+// though the exact same code works fine locally (which has real IPv6
+// routing). Forcing IPv4 first makes nodemailer (and anything else that
+// does outbound DNS/connections) skip the unreachable IPv6 address.
+const dns = require('dns');
+dns.setDefaultResultOrder('ipv4first');
+
 const express    = require('express');
 const cors       = require('cors');
 const helmet     = require('helmet');

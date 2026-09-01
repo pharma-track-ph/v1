@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Users – PharmaTrack</title>
+    <link rel="icon" type="image/png" href="../images/pharmatrack-logo.png">
     <link rel="stylesheet" href="../css/global.css">
     <link rel="stylesheet" href="../css/users.css">
 </head>
@@ -12,9 +13,7 @@
 
     <aside class="sidebar" id="sidebar">
         <div class="sidebar-brand">
-            <div class="brand-icon">
-                <img src="/images/pharmatrack-logo.png" alt="PharmaTrack logo">                
-            </div>
+            <div class="brand-icon"><img src="../images/pharmatrack-logo.png" alt="PharmaTrack"></div>
             <div class="brand-text"><h1>PharmaTrack</h1><p>Management System</p></div>
         </div>
         <nav class="sidebar-nav">
@@ -261,6 +260,36 @@
         <div class="modal-footer">
             <button class="btn btn-light btn-close-email-otp">Cancel</button>
             <button class="btn btn-primary" id="btn-confirm-email-otp">Confirm</button>
+        </div>
+    </div>
+</div>
+
+<!-- Action Verification (OTP) Modal -- generic, reused for Add User,
+     Change Password, and Delete/Deactivate. Description text is set from
+     JS per action (see users.js's startActionOtp). -->
+<div class="modal-overlay" id="action-otp-modal">
+    <div class="modal" style="max-width:400px">
+        <div class="modal-header">
+            <h3>Verify This Action</h3>
+            <button class="btn-close btn-close-action-otp">✕</button>
+        </div>
+        <div class="modal-body">
+            <p style="font-size:0.85rem;color:var(--secondary);margin-bottom:6px">
+                You requested to <span id="action-otp-description">—</span>.
+            </p>
+            <p id="action-otp-status" style="font-size:0.8rem;color:var(--secondary);margin-bottom:16px">Sending verification code…</p>
+            <div class="form-group">
+                <label class="form-label">6-Digit Code *</label>
+                <input type="text" id="action-otp-code" class="form-control" inputmode="numeric" maxlength="6"
+                       placeholder="000000" autocomplete="one-time-code" style="letter-spacing:6px;text-align:center;font-size:1.2rem">
+            </div>
+            <p style="font-size:0.78rem;color:var(--secondary);margin-top:10px">
+                Didn't get a code? <button type="button" class="btn-link-inline" id="btn-resend-action-otp" style="background:none;border:none;color:var(--primary);cursor:pointer;padding:0;font-size:0.78rem;text-decoration:underline">Resend code</button>
+            </p>
+        </div>
+        <div class="modal-footer">
+            <button class="btn btn-light btn-close-action-otp">Cancel</button>
+            <button class="btn btn-primary" id="btn-confirm-action-otp">Confirm</button>
         </div>
     </div>
 </div>

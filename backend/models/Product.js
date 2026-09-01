@@ -816,6 +816,38 @@ const Product = {
         });
 
         return orderedRows;
+    },
+
+    // Broader search than the Inventory page's own findAllGrouped -- also
+    // checks Category and Description, not just Brand/Generic Name/
+    // Barcode. Used ONLY by the public JotForm agent endpoint
+    // (publicController.js), deliberately kept separate from
+    // findAllGrouped rather than widening that one, since the search
+    // TERM here is very different in nature: JotForm translates a
+    // symptom/condition into a medical term first (e.g. "headache" ->
+    // "pain relief"), which is far more likely to match a CATEGORY
+    // ("Fever and Pain Relief") than a specific product's brand or
+    // generic name -- the Inventory page's own search box doesn't have
+    // that same need, and widening it too could surface unexpected
+    // results for a staff member typing a normal product search.
+    findAllGroupedBroadSearch: async (search) => {
+        const like = `%${search}%`;
+        const [rows] = await db.query(
+            `SELECT *, DATEDIFF(expiry_date, CURDATE()) AS days_until_expiry
+             FROM products
+             WHERE is_active = 1
+               AND (name LIKE ? OR generic_name LIKE ? OR category LIKE ? OR description LIKE ? OR barcode = ?)
+             ORDER BY id ASC`,
+            [like, like, like, like, search]
+        );
+
+        const groups = new Map();
+        rows.forEach(r => {
+            if (!groups.has(r.name)) groups.set(r.name, []);
+            groups.get(r.name).push(r);
+        });
+
+        return Array.from(groups.values()).map(Product._rollUpGroup);
     }
 };
 

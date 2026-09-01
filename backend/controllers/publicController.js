@@ -23,11 +23,15 @@ function statusLabel(status) {
  *
  * Read-only, no login required -- built specifically for the JotForm AI
  * agent's "Send API Request" tool. Searches Brand Name / Generic Name /
- * Category for the term and returns only REAL, currently active products
- * with their actual rolled-up stock status (same logic the Inventory
- * page itself uses -- see Product._rollUpGroup) -- the agent is
- * instructed, via its own Agent Prompt in JotForm, to answer using ONLY
- * what this returns and never invent a product that isn't listed here.
+ * Category / Description for the term (see Product.findAllGroupedBroadSearch
+ * -- deliberately a wider net than the Inventory page's own search, since
+ * JotForm's "q" is usually a translated medical term like "pain relief",
+ * far more likely to match a CATEGORY than a specific product name) and
+ * returns only REAL, currently active products with their actual
+ * rolled-up stock status (same logic the Inventory page itself uses --
+ * see Product._rollUpGroup) -- the agent is instructed, via its own
+ * Agent Prompt in JotForm, to answer using ONLY what this returns and
+ * never invent a product that isn't listed here.
  *
  * Response is deliberately shaped for an AI agent to read directly --
  * plain labels, no internal ids/thresholds/costs it has no business
@@ -46,7 +50,7 @@ const searchInventoryForAgent = async (req, res) => {
     }
 
     try {
-        const results = await Product.findAllGrouped({ search: q });
+        const results = await Product.findAllGroupedBroadSearch(q);
 
         const products = results.slice(0, 8).map(p => ({
             brand_name:   p.name,

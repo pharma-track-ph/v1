@@ -223,29 +223,42 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
 
+        // ── Add User: OTP-gated -- nothing is created until the code sent
+        // to YOU (the owner performing this) is confirmed. See
+        // startActionOtp below; the account is created server-side only
+        // inside confirmActionOtp. ──
+        if (!editingId) {
+            Modal.close('user-modal');
+            const roleLabels = { super_admin: 'Owner', admin: 'Admin', cashier: 'Pharmacy Assistant' };
+            startActionOtp('create_user', { name, email, role, password },
+                `create a new ${roleLabels[role] || role} account for ${name}`);
+            return;
+        }
+
+        // ── Edit (existing user): unchanged, still direct -- only Add
+        // User, Change Password, and Delete are OTP-gated per the spec;
+        // ordinary profile edits (name/role/status) and Email Change stay
+        // exactly as they were. ──
+
         // Email changes on an EXISTING account go through the dedicated
         // OTP-verified flow below (startEmailChangeOtp) instead of being
         // applied directly here -- the backend ignores the email field on
         // this same PUT entirely (see authController.js's updateUser), so
         // name/role/status/password below still save normally either way.
-        const originalUser = editingId ? allUsers.find(x => x.id === editingId) : null;
-        const emailChanged = !!(editingId && originalUser && email.toLowerCase() !== originalUser.email.toLowerCase());
+        const originalUser = allUsers.find(x => x.id === editingId);
+        const emailChanged = !!(originalUser && email.toLowerCase() !== originalUser.email.toLowerCase());
 
         submitBtn.disabled    = true;
-        submitBtn.textContent = editingId ? 'Saving…' : 'Adding…';
+        submitBtn.textContent = 'Saving…';
 
         let result;
         try {
-            if (editingId) {
-                const body = { name, email, role, is_active: parseInt(is_active) };
-                if (password) body.password = password;
-                result = await API.put(`/auth/users/${editingId}`, body);
-            } else {
-                result = await API.post('/auth/users', { name, email, role, password });
-            }
+            const body = { name, email, role, is_active: parseInt(is_active) };
+            if (password) body.password = password;
+            result = await API.put(`/auth/users/${editingId}`, body);
         } finally {
             submitBtn.disabled    = false;
-            submitBtn.textContent = editingId ? 'Save Changes' : 'Add User';
+            submitBtn.textContent = 'Save Changes';
         }
 
         if (result?.success) {
@@ -269,17 +282,10 @@ document.addEventListener('DOMContentLoaded', () => {
     // ── Delete / Deactivate ───────────────────────────────────
     function confirmDelete(id, name) {
         if (!confirm(`Deactivate "${name}"?\n\nThey will no longer be able to log in. This action can be reversed by editing the account.`)) return;
-        doDelete(id);
-    }
-
-    async function doDelete(id) {
-        const result = await API.delete(`/auth/users/${id}`);
-        if (result?.success) {
-            Toast.show('User deactivated.', 'success');
-            loadUsers();
-        } else {
-            Toast.show(result?.message || 'Delete failed.', 'error');
-        }
+        // OTP-gated now -- see startActionOtp below. Nothing is
+        // deactivated until the code sent to you (the owner) is
+        // confirmed; doDelete() is gone, this call replaces it.
+        startActionOtp('delete_user', { targetId: id }, `deactivate ${name}'s account`);
     }
 
     // ── Password Change Modal ─────────────────────────────────
@@ -303,28 +309,14 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!newPw || newPw.length < 8) { Toast.show('Password must be at least 8 characters.', 'error'); return; }
         if (newPw !== confPw)           { Toast.show('Passwords do not match.', 'error'); return; }
 
-        const btn = document.getElementById('btn-save-pw');
-        btn.disabled    = true;
-        btn.textContent = 'Updating…';
-
-        // Use the edit endpoint — send just the password
         const u = allUsers.find(x => x.id === pwTargetId);
-        if (!u) { btn.disabled = false; btn.textContent = 'Update Password'; return; }
+        if (!u) return;
 
-        const result = await API.put(`/auth/users/${pwTargetId}`, {
-            name: u.name, email: u.email, role: u.role,
-            is_active: u.is_active, password: newPw
-        });
-
-        btn.disabled    = false;
-        btn.textContent = 'Update Password';
-
-        if (result?.success) {
-            Toast.show('Password updated successfully.', 'success');
-            Modal.close('pw-modal');
-        } else {
-            Toast.show(result?.message || 'Update failed.', 'error');
-        }
+        // OTP-gated now -- nothing is changed until the code sent to you
+        // (the owner) is confirmed. See startActionOtp below.
+        Modal.close('pw-modal');
+        startActionOtp('update_password', { targetId: pwTargetId, newPassword: newPw },
+            `change the password for ${u.name}'s account`);
     });
 
     // ── Email Change Verification (OTP) ───────────────
@@ -441,6 +433,122 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('btn-confirm-email-otp')?.addEventListener('click', confirmEmailOtp);
     document.getElementById('email-otp-code')?.addEventListener('keydown', (e) => {
         if (e.key === 'Enter') confirmEmailOtp();
+    });
+
+    // ── Action Verification (OTP) ─────────────────
+    // Generic version of the Email Change OTP flow above, reused for Add
+    // User, Change Password, and Delete/Deactivate -- same "confirm it's
+    // really you" pattern, code emailed to the OWNER PERFORMING the
+    // action. Nothing is written to the database for any of these three
+    // actions until the code is confirmed (see authController.js's
+    // requestActionOtp/confirmActionOtp).
+    let pendingAction           = null; // { action, payload }
+    let actionOtpResendCooldown = null;
+
+    async function startActionOtp(action, payload, descriptionText) {
+        pendingAction = { action, payload };
+
+        // textContent, not innerHTML -- descriptionText is built from a
+        // user-entered name (see handleSubmit/confirmDelete/btn-save-pw
+        // above), so this must never be interpreted as HTML.
+        const descEl = document.getElementById('action-otp-description');
+        if (descEl) descEl.textContent = descriptionText;
+
+        const codeInput = document.getElementById('action-otp-code');
+        if (codeInput) codeInput.value = '';
+        setActionOtpStatus('Sending verification code…');
+        Modal.open('action-otp-modal');
+
+        const result = await API.post('/auth/action-otp/request', { action, payload });
+
+        if (result?.success) {
+            setActionOtpStatus(result.message || 'A verification code has been sent.');
+            startActionOtpResendCooldown();
+            codeInput?.focus();
+        } else {
+            setActionOtpStatus(result?.message || 'Could not send the verification email.', true);
+        }
+    }
+
+    function setActionOtpStatus(message, isError = false) {
+        const el = document.getElementById('action-otp-status');
+        if (!el) return;
+        el.textContent = message;
+        el.style.color = isError ? 'var(--danger)' : 'var(--secondary)';
+    }
+
+    function startActionOtpResendCooldown() {
+        const btn = document.getElementById('btn-resend-action-otp');
+        if (!btn) return;
+        let seconds = 30;
+        btn.disabled    = true;
+        btn.textContent = `Resend code (${seconds}s)`;
+        if (actionOtpResendCooldown) clearInterval(actionOtpResendCooldown);
+        actionOtpResendCooldown = setInterval(() => {
+            seconds--;
+            if (seconds <= 0) {
+                clearInterval(actionOtpResendCooldown);
+                btn.disabled    = false;
+                btn.textContent = 'Resend code';
+            } else {
+                btn.textContent = `Resend code (${seconds}s)`;
+            }
+        }, 1000);
+    }
+
+    // Closing without confirming just abandons the pending action entirely
+    // -- nothing was ever written to the database for it (unlike the
+    // Email Change flow, where OTHER fields might already be saved --
+    // these three actions have nothing partially applied to undo).
+    function closeActionOtpModal() {
+        Modal.close('action-otp-modal');
+        if (actionOtpResendCooldown) clearInterval(actionOtpResendCooldown);
+        pendingAction = null;
+    }
+
+    document.querySelectorAll('.btn-close-action-otp').forEach(btn =>
+        btn.addEventListener('click', closeActionOtpModal));
+
+    document.getElementById('btn-resend-action-otp')?.addEventListener('click', async () => {
+        if (!pendingAction) return;
+        const result = await API.post('/auth/action-otp/request', pendingAction);
+        if (result?.success) {
+            setActionOtpStatus(result.message || 'A new code has been sent.');
+            startActionOtpResendCooldown();
+        } else {
+            setActionOtpStatus(result?.message || 'Could not resend code.', true);
+        }
+    });
+
+    async function confirmActionOtp() {
+        if (!pendingAction) return;
+        const otp = document.getElementById('action-otp-code')?.value.trim();
+        if (!/^\d{6}$/.test(otp)) {
+            setActionOtpStatus('Enter the 6-digit code.', true);
+            return;
+        }
+
+        const btn = document.getElementById('btn-confirm-action-otp');
+        btn.disabled    = true;
+        btn.textContent = 'Verifying…';
+        const result = await API.post('/auth/action-otp/confirm', { otp });
+        btn.disabled    = false;
+        btn.textContent = 'Confirm';
+
+        if (result?.success) {
+            if (actionOtpResendCooldown) clearInterval(actionOtpResendCooldown);
+            pendingAction = null;
+            Modal.close('action-otp-modal');
+            Toast.show(result.message || 'Action completed.', 'success');
+            loadUsers();
+        } else {
+            setActionOtpStatus(result?.message || 'Incorrect code.', true);
+        }
+    }
+
+    document.getElementById('btn-confirm-action-otp')?.addEventListener('click', confirmActionOtp);
+    document.getElementById('action-otp-code')?.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') confirmActionOtp();
     });
 
     // ── Password strength meters ──────────────────────────────

@@ -22,20 +22,33 @@
 // always lines up under the line regardless of how long the generated
 // name or caption text is.
 //
-// Same emoji/₱ caveat as the original Inventory export: Excel and Word
-// render the 💊 logo and ₱ sign fine (the viewing app handles the font),
-// but PDFKit bakes text into the file with its own bundled fonts at
-// generation time, which don't include either — so the PDF version uses
-// "PHP" instead of "₱", and draws a small vector capsule icon (see
-// drawPillLogo below) in place of the 💊 glyph, since no bundled PDF font
-// has an emoji glyph to fall back on at all.
+// Same currency caveat as the original Inventory export: Excel and Word
+// render the ₱ sign fine (the viewing app handles the font), but PDFKit
+// bakes text into the file with its own bundled fonts at generation
+// time, which don't include it — so the PDF version uses "PHP" instead
+// of "₱". The PharmaTrack logo itself is a raster image, not a font
+// glyph, so it embeds identically across all four formats with no
+// equivalent workaround needed.
 // ============================================================
 const ExcelJS     = require('exceljs');
 const PDFDocument = require('pdfkit');
+const fs          = require('fs');
+const path        = require('path');
 const {
     Document, Packer, Paragraph, Table, TableRow, TableCell,
-    TextRun, AlignmentType, WidthType, HeadingLevel, BorderStyle
+    TextRun, ImageRun, AlignmentType, WidthType, HeadingLevel, BorderStyle
 } = require('docx');
+
+// Real logo file, shared by every format below -- lives under
+// frontend/images since that's already served to the browser (sidebar,
+// login page, favicon); backend and frontend are siblings under the
+// project root, so a plain relative path reaches it directly without
+// needing a second copy anywhere.
+const LOGO_PATH = path.resolve(__dirname, '../../frontend/images/pharmatrack-logo.png');
+const LOGO_BUFFER = (() => {
+    try { return fs.readFileSync(LOGO_PATH); }
+    catch (err) { console.error('[reportExporter] Could not read logo file:', err.message); return null; }
+})();
 
 function formatManilaDateTime() {
     return new Date().toLocaleString('en-PH', {
@@ -68,23 +81,6 @@ function formatShortDateTime(value) {
     return `${formatShortDate(d)}, ${hours12}:${minutes} ${ampm}`;
 }
 
-// Draws a simple two-tone capsule/pill icon using plain vector shapes --
-// a stand-in for the 💊 emoji used in the Excel/Word headers. PDFKit bakes
-// text using its own bundled fonts, which have NO emoji glyphs at all, so
-// a text-based "💊" silently renders as nothing in the PDF no matter which
-// font is selected. Drawing it as shapes instead means it never depends
-// on font/glyph support, so it's always there in every generated PDF.
-function drawPillLogo(doc, x, y, w, h) {
-    const r = h / 2;
-    doc.save();
-    doc.roundedRect(x, y, w, h, r).clip();
-    doc.rect(x, y, w / 2, h).fill('#ff8fa3');
-    doc.rect(x + w / 2, y, w / 2, h).fill('#ffffff');
-    doc.restore();
-    doc.roundedRect(x, y, w, h, r).lineWidth(1).strokeColor('#495057').stroke();
-    doc.moveTo(x + w / 2, y).lineTo(x + w / 2, y + h).lineWidth(0.75).strokeColor('#495057').stroke();
-}
-
 /**
  * @param {object} opts
  * @param {object} opts.res - Express response
@@ -107,9 +103,18 @@ async function exportExcel({ res, title, generatedBy, filename, columns, rows, p
     const colLetter     = n => String.fromCharCode(64 + n);
 
     sheet.mergeCells(`A1:${lastColLetter}1`);
-    sheet.getCell('A1').value = '💊 PharmaTrack';
+    sheet.getCell('A1').value = 'PharmaTrack';
     sheet.getCell('A1').font = { size: 18, bold: true, color: { argb: 'FF0D6EFD' } };
     sheet.getCell('A1').alignment = { horizontal: 'center' };
+    sheet.getRow(1).height = 30; // taller than default so the logo image below has room to sit without overlapping row 2
+
+    // Real logo, anchored over the merged title cell -- floats on top of
+    // (doesn't replace) the text above, small enough to sit inside row 1's
+    // own height.
+    if (LOGO_BUFFER) {
+        const imageId = workbook.addImage({ buffer: LOGO_BUFFER, extension: 'png' });
+        sheet.addImage(imageId, { tl: { col: 0, row: 0 }, ext: { width: 26, height: 26 } });
+    }
 
     sheet.mergeCells(`A2:${lastColLetter}2`);
     sheet.getCell('A2').value = title;
@@ -236,23 +241,26 @@ async function exportPDF({ res, title, generatedBy, filename, columns, rows, per
     res.setHeader('Content-Disposition', `attachment; filename="${filename}.pdf"`);
     doc.pipe(res);
 
-    // Brand header -- a drawn capsule icon (see drawPillLogo above) plus
-    // the wordmark, centered together as ONE group so the PDF always
-    // carries the same logo mark the Excel/Word exports show as "💊
-    // PharmaTrack", instead of silently dropping it the way plain text
-    // did.
+    // Brand header -- the real logo image plus the wordmark, centered
+    // together as ONE group, embedded directly via PDFKit's own image
+    // support (a real raster image now, not a hand-drawn vector
+    // approximation).
     const brandText   = 'PharmaTrack';
     doc.font('Helvetica-Bold').fontSize(20);
     const brandTextWidth = doc.widthOfString(brandText);
-    const logoW = 24, logoH = 14, logoGap = 8;
-    const groupWidth   = logoW + logoGap + brandTextWidth;
+    const logoW = 20, logoH = 20, logoGap = 8;
+    const groupWidth   = LOGO_BUFFER ? logoW + logoGap + brandTextWidth : brandTextWidth;
     const contentWidth = doc.page.width - doc.page.margins.left - doc.page.margins.right;
     const groupX        = doc.page.margins.left + (contentWidth - groupWidth) / 2;
     const groupY         = doc.y;
     const brandTextHeight = doc.currentLineHeight();
 
-    drawPillLogo(doc, groupX, groupY + (brandTextHeight - logoH) / 2, logoW, logoH);
-    doc.fillColor('#0d6efd').text(brandText, groupX + logoW + logoGap, groupY, { lineBreak: false });
+    let textX = groupX;
+    if (LOGO_BUFFER) {
+        doc.image(LOGO_BUFFER, groupX, groupY + (brandTextHeight - logoH) / 2, { width: logoW, height: logoH });
+        textX = groupX + logoW + logoGap;
+    }
+    doc.fillColor('#0d6efd').text(brandText, textX, groupY, { lineBreak: false });
 
     doc.x = doc.page.margins.left;
     doc.y = groupY + brandTextHeight + 4;
@@ -467,7 +475,17 @@ async function exportWord({ res, title, generatedBy, filename, columns, rows, pe
     const doc = new Document({
         sections: [{
             children: [
-                new Paragraph({ alignment: AlignmentType.CENTER, children: [new TextRun({ text: '💊 PharmaTrack', bold: true, size: 36, color: '0D6EFD' })] }),
+                new Paragraph({
+                    alignment: AlignmentType.CENTER,
+                    children: [
+                        ...(LOGO_BUFFER ? [new ImageRun({
+                            type: 'png',
+                            data: LOGO_BUFFER,
+                            transformation: { width: 28, height: 28 }
+                        })] : []),
+                        new TextRun({ text: (LOGO_BUFFER ? '  ' : '') + 'PharmaTrack', bold: true, size: 36, color: '0D6EFD' })
+                    ]
+                }),
                 new Paragraph({ alignment: AlignmentType.CENTER, heading: HeadingLevel.HEADING_2, children: [new TextRun({ text: title, bold: true })] }),
                 new Paragraph({
                     alignment: AlignmentType.CENTER,

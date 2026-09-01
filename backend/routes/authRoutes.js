@@ -3,7 +3,8 @@ const router  = express.Router();
 const {
     login, getMe, getAllUsers, createUser, updateUser, deleteUser, getAuditLogs, exportAuditLogs,
     forgotPassword, verifyOtp, resetPassword, updateProfile,
-    requestEmailChangeOtp, confirmEmailChangeOtp
+    requestEmailChangeOtp, confirmEmailChangeOtp,
+    requestActionOtp, confirmActionOtp
 } = require('../controllers/authController');
 const { verifyToken, requireRole } = require('../middleware/authMiddleware');
 
@@ -33,6 +34,13 @@ router.delete('/users/:id', verifyToken, requireRole('super_admin'), deleteUser)
 // same as the rest of User Management (super_admin only).
 router.post('/users/:id/email-otp/request', verifyToken, requireRole('super_admin'), requestEmailChangeOtp);
 router.post('/users/:id/email-otp/confirm', verifyToken, requireRole('super_admin'), confirmEmailChangeOtp);
+
+// Action verification (OTP) -- generic version of the above, reused for
+// Add User, Change Password, and Delete/Deactivate. Same reasoning: the
+// code goes to the owner PERFORMING the action, nothing is written to
+// the database until confirmed.
+router.post('/action-otp/request', verifyToken, requireRole('super_admin'), requestActionOtp);
+router.post('/action-otp/confirm', verifyToken, requireRole('super_admin'), confirmActionOtp);
 
 // Audit logs – Super Admin only. Export route before the plain GET so
 // Express doesn't need any special-casing (different path shape anyway).

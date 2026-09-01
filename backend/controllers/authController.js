@@ -8,9 +8,10 @@ const bcrypt  = require('bcryptjs');
 const User    = require('../models/User');
 const db      = require('../config/db');           // ← FIX: was missing, causes ReferenceError in getAuditLogs
 const { logAudit } = require('../middleware/authMiddleware');
-const { sendOtpEmail, sendEmailChangeOtp } = require('../utils/mailer');
+const { sendOtpEmail, sendEmailChangeOtp, sendActionOtp } = require('../utils/mailer');
 const { exportReport, formatShortDateTime } = require('../utils/reportExporter');
 const EmailChangeOtpStore = require('../utils/emailChangeOtpStore');
+const ActionOtpStore      = require('../utils/actionOtpStore');
 
 /**
  * POST /api/auth/login
@@ -313,6 +314,196 @@ const confirmEmailChangeOtp = async (req, res, next) => {
         await logAudit(req.user.id, 'CHANGE_USER_EMAIL', 'users', id, { new_email: pending.newEmail }, req.ip);
 
         res.json({ success: true, message: 'Email updated successfully.', email: pending.newEmail });
+
+    } catch (err) { next(err); }
+};
+
+/**
+ * POST /api/auth/action-otp/request  [Super Admin only]
+ * Body: { action: 'create_user'|'update_password'|'delete_user', payload }
+ *
+ * Generic first step for the three OTP-gated User Management actions
+ * below (Add User, Change Password, Delete/Deactivate) -- same "confirm
+ * it's really you" pattern as requestEmailChangeOtp above: a code is
+ * emailed to the OWNER PERFORMING the action, and NOTHING is written to
+ * the database until confirmActionOtp verifies it. All the validation
+ * the direct create/update-password/delete logic normally does is
+ * duplicated here too, so a code is never sent for a request that was
+ * always going to fail anyway.
+ */
+const requestActionOtp = async (req, res, next) => {
+    try {
+        const { action, payload = {} } = req.body;
+        const validActions = ['create_user', 'update_password', 'delete_user'];
+
+        if (!validActions.includes(action)) {
+            return res.status(400).json({ success: false, message: 'Invalid action.' });
+        }
+
+        let actionDescription;
+        const roleLabels = { super_admin: 'Owner', admin: 'Admin', cashier: 'Pharmacy Assistant' };
+
+        if (action === 'create_user') {
+            const { name, email, password, role } = payload;
+            if (!name || !email || !password || !role) {
+                return res.status(400).json({ success: false, message: 'All fields are required.' });
+            }
+            if (password.length < 8) {
+                return res.status(400).json({ success: false, message: 'Password must be at least 8 characters.' });
+            }
+            if (req.user.role === 'admin' && role !== 'cashier') {
+                return res.status(403).json({ success: false, message: 'Admins can only create Pharmacy Assistant accounts.' });
+            }
+            const existing = await User.findByEmail(email.toLowerCase().trim());
+            if (existing) {
+                return res.status(409).json({ success: false, message: 'Email already in use.' });
+            }
+            actionDescription = `create a new ${roleLabels[role] || role} account for ${name}`;
+
+        } else if (action === 'update_password') {
+            const { targetId, newPassword } = payload;
+            if (!targetId || !newPassword) {
+                return res.status(400).json({ success: false, message: 'Target user and new password are required.' });
+            }
+            if (newPassword.length < 8) {
+                return res.status(400).json({ success: false, message: 'Password must be at least 8 characters.' });
+            }
+            const target = await User.findById(targetId);
+            if (!target) {
+                return res.status(404).json({ success: false, message: 'User not found.' });
+            }
+            // Same owner-protection rule as updateUser/deleteUser above.
+            if (parseInt(targetId) !== req.user.id && target.role === 'super_admin') {
+                return res.status(403).json({ success: false, message: 'Owner accounts can only be managed by the account holder.' });
+            }
+            actionDescription = `change the password for ${target.name}'s account`;
+
+        } else if (action === 'delete_user') {
+            const { targetId } = payload;
+            if (!targetId) {
+                return res.status(400).json({ success: false, message: 'Target user is required.' });
+            }
+            if (parseInt(targetId) === req.user.id) {
+                return res.status(400).json({ success: false, message: 'Cannot delete your own account.' });
+            }
+            const target = await User.findById(targetId);
+            if (!target) {
+                return res.status(404).json({ success: false, message: 'User not found.' });
+            }
+            if (target.role === 'super_admin') {
+                return res.status(403).json({ success: false, message: 'Owner accounts can only be managed by the account holder.' });
+            }
+            actionDescription = `deactivate ${target.name}'s account`;
+        }
+
+        const requester = await User.findById(req.user.id);
+
+        const otp       = String(crypto.randomInt(100000, 1000000));
+        const otpHash   = await bcrypt.hash(otp, 10);
+        const expiresAt = new Date(Date.now() + OTP_EXPIRY_MINUTES * 60 * 1000);
+
+        // In-memory only -- see utils/actionOtpStore.js for why. The
+        // plaintext password briefly held in `payload` for create_user (or
+        // update_password) lives only here, for up to 10 minutes, until
+        // confirmActionOtp hashes it via User.create/updatePassword (both
+        // hash internally) and this entry is cleared.
+        ActionOtpStore.set(req.user.id, { otpHash, expiresAt, action, payload });
+
+        try {
+            await sendActionOtp(requester.email, otp, requester.name, actionDescription);
+        } catch (mailErr) {
+            console.error('[requestActionOtp] Failed to send OTP email:', mailErr.message);
+            ActionOtpStore.clear(req.user.id);
+            return res.status(500).json({ success: false, message: 'Could not send the verification email. Please try again later.' });
+        }
+
+        res.json({ success: true, message: `A verification code has been sent to ${requester.email}.` });
+
+    } catch (err) { next(err); }
+};
+
+/**
+ * POST /api/auth/action-otp/confirm  [Super Admin only]
+ * Body: { otp }
+ *
+ * Step 2 -- verifies the code against the requester's stored hash, then
+ * actually performs whichever action was pending (create_user /
+ * update_password / delete_user), same expiry/attempt-limit logic as
+ * confirmEmailChangeOtp above.
+ */
+const confirmActionOtp = async (req, res, next) => {
+    try {
+        const { otp } = req.body;
+        if (!otp) {
+            return res.status(400).json({ success: false, message: 'Verification code is required.' });
+        }
+
+        const pending = ActionOtpStore.get(req.user.id);
+        if (!pending) {
+            return res.status(400).json({ success: false, message: 'No pending action found. Please start again.' });
+        }
+
+        if (new Date(pending.expiresAt) < new Date()) {
+            ActionOtpStore.clear(req.user.id);
+            return res.status(400).json({ success: false, message: 'This code has expired. Please request a new one.' });
+        }
+
+        if (pending.attempts >= MAX_OTP_ATTEMPTS) {
+            ActionOtpStore.clear(req.user.id);
+            return res.status(429).json({ success: false, message: 'Too many incorrect attempts. Please request a new code.' });
+        }
+
+        const matches = await bcrypt.compare(otp, pending.otpHash);
+        if (!matches) {
+            ActionOtpStore.incrementAttempts(req.user.id);
+            const remaining = MAX_OTP_ATTEMPTS - (pending.attempts + 1);
+            return res.status(400).json({
+                success: false,
+                message: remaining > 0 ? `Incorrect code. ${remaining} attempt(s) left.` : 'Too many incorrect attempts. Please request a new code.'
+            });
+        }
+
+        const { action, payload } = pending;
+        let responseMessage;
+
+        if (action === 'create_user') {
+            const { name, email, password, role } = payload;
+            // Re-check email uniqueness -- a race condition (another admin
+            // created the same email) while this code was pending.
+            const stillAvailable = await User.findByEmail(email.toLowerCase().trim());
+            if (stillAvailable) {
+                ActionOtpStore.clear(req.user.id);
+                return res.status(409).json({ success: false, message: 'That email was taken by another account while this code was pending. Please start again.' });
+            }
+            const id = await User.create({ name, email: email.toLowerCase().trim(), password, role });
+            await logAudit(req.user.id, 'CREATE_USER', 'users', id, { name, email, role }, req.ip);
+            responseMessage = 'User created successfully.';
+
+        } else if (action === 'update_password') {
+            const { targetId, newPassword } = payload;
+            const target = await User.findById(targetId);
+            if (!target) {
+                ActionOtpStore.clear(req.user.id);
+                return res.status(404).json({ success: false, message: 'User not found.' });
+            }
+            await User.updatePassword(targetId, newPassword);
+            await logAudit(req.user.id, 'RESET_USER_PASSWORD', 'users', targetId, {}, req.ip);
+            responseMessage = 'Password updated successfully.';
+
+        } else if (action === 'delete_user') {
+            const { targetId } = payload;
+            const target = await User.findById(targetId);
+            if (!target) {
+                ActionOtpStore.clear(req.user.id);
+                return res.status(404).json({ success: false, message: 'User not found.' });
+            }
+            await User.softDelete(targetId);
+            await logAudit(req.user.id, 'DELETE_USER', 'users', targetId, {}, req.ip);
+            responseMessage = 'User deactivated.';
+        }
+
+        ActionOtpStore.clear(req.user.id);
+        res.json({ success: true, message: responseMessage });
 
     } catch (err) { next(err); }
 };
@@ -660,5 +851,6 @@ const updateProfile = async (req, res, next) => {
 module.exports = {
     login, getMe, getAllUsers, createUser, updateUser, deleteUser, getAuditLogs, exportAuditLogs,
     forgotPassword, verifyOtp, resetPassword, updateProfile,
-    requestEmailChangeOtp, confirmEmailChangeOtp
+    requestEmailChangeOtp, confirmEmailChangeOtp,
+    requestActionOtp, confirmActionOtp
 };
