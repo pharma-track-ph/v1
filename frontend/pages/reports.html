@@ -28,15 +28,12 @@
             </ul>
             <p class="nav-section-label">Admin</p>
             <ul>
-                <li class="nav-item" data-roles="super_admin"><a href="users.html"><span class="nav-icon"></span> Users</a></li>
+                <li class="nav-item" data-roles="super_admin"><a href="users.html"><span class="nav-icon"></span> User Management</a></li>
                 <li class="nav-item" data-roles="super_admin"><a href="audit.html"><span class="nav-icon"></span> Audit Logs</a></li>
+                <li class="nav-item" data-roles="super_admin"><a href="backup.html"><span class="nav-icon"></span> Backup & Restore</a></li>
                 <li class="nav-item"><a href="#" data-action="logout"><span class="nav-icon"></span> Sign Out</a></li>
             </ul>
         </nav>
-        <div class="sidebar-footer">
-            <div id="sidebar-user-name" class="fw-600">—</div>
-            <div id="sidebar-user-role" style="font-size:0.7rem;opacity:0.7">—</div>
-        </div>
     </aside>
     <div class="sidebar-overlay" id="sidebar-overlay"></div>
 
@@ -47,8 +44,8 @@
                 <div class="header-title">Reports</div>
             </div>
             <div class="header-right">
-                <div class="header-alert-btn">📦 Low Stock <span class="alert-badge" id="badge-low-stock" style="display:none">0</span></div>
-                <div class="header-alert-btn">⚠️ Near Expiry <span class="alert-badge amber" id="badge-near-expiry" style="display:none">0</span></div>
+                <div class="header-alert-btn">Low Stock <span class="alert-badge" id="badge-low-stock" style="display:none">0</span></div>
+                <div class="header-alert-btn">Near Expiry <span class="alert-badge amber" id="badge-near-expiry" style="display:none">0</span></div>
                 <div class="header-user">
                     <div class="user-avatar" id="header-avatar">?</div>
                     <div class="user-info">
@@ -60,20 +57,16 @@
         </header>
 
         <main class="page-content">
-            <div class="page-header">
-                <div><h2>📋 Reports</h2><p>Sales summaries, export, and expired inventory.</p></div>
-            </div>
-
             <!-- Tabs -->
             <div class="report-tabs">
                 <button class="report-tab active" data-tab="sales">Sales Report</button>
                 <button class="report-tab" data-tab="expired">Expired Inventory</button>
                 <button class="report-tab" data-tab="void">Void Report</button>
+                <button class="report-tab" data-tab="register">Register Report</button>
             </div>
 
             <!-- SALES TAB -->
             <div id="tab-sales">
-                <!-- Single row: period btns | custom date pickers | Generate | spacer | Export CSV -->
                 <div class="toolbar-row">
                     <button class="period-btn active" data-period="daily">Daily</button>
                     <button class="period-btn" data-period="weekly">Weekly</button>
@@ -89,7 +82,14 @@
                     </div>
 
                     <div class="spacer"></div>
-                    <button class="btn btn-success" id="btn-export-csv">📥 Export CSV</button>
+                    <div class="export-dropdown" id="sales-export-dropdown">
+                        <button class="btn btn-outline" id="sales-export-toggle">Export ▾</button>
+                        <div class="export-menu hidden" id="sales-export-menu">
+                            <button class="export-menu-item" data-format="excel">Excel (.xlsx)</button>
+                            <button class="export-menu-item" data-format="pdf">PDF</button>
+                            <button class="export-menu-item" data-format="word">Word (.docx)</button>
+                        </div>
+                    </div>
                 </div>
 
                 <div class="summary-chips" id="sales-summary-chips" style="display:none">
@@ -104,10 +104,10 @@
                     <div class="table-container">
                         <table class="table">
                             <thead>
-                                <tr><th style="width:30px"></th><th>Order #</th><th>Date/Time</th><th>Cashier</th><th>Subtotal</th><th>Purchase Cost</th><th>Discount</th><th>Total</th><th>Profit</th><th>Payment</th></tr>
+                                <tr><th style="width:30px"></th><th>Order #</th><th>Date/Time</th><th>Pharmacy Assistant</th><th>Subtotal</th><th>Purchase Cost</th><th>Discount</th><th>Total</th><th>Profit</th></tr>
                             </thead>
                             <tbody id="sales-tbody">
-                                <tr><td colspan="10" class="text-center" style="padding:24px"><div class="spinner" style="margin:0 auto"></div></td></tr>
+                                <tr><td colspan="9" class="text-center" style="padding:24px"><div class="spinner" style="margin:0 auto"></div></td></tr>
                             </tbody>
                         </table>
                     </div>
@@ -116,6 +116,31 @@
 
             <!-- EXPIRED TAB -->
             <div id="tab-expired" style="display:none">
+                <div class="toolbar-row">
+                    <button class="period-btn active" data-expired-range="1">1 Month</button>
+                    <button class="period-btn" data-expired-range="3">3 Months</button>
+                    <button class="period-btn" data-expired-range="6">6 Months</button>
+                    <button class="period-btn" data-expired-range="all">All Time</button>
+                    <button class="period-btn" data-expired-range="custom">Custom</button>
+
+                    <div id="expired-custom-dates">
+                        <label>From</label>
+                        <input type="date" id="expired-start">
+                        <label>To</label>
+                        <input type="date" id="expired-end">
+                        <button class="btn btn-primary btn-sm" id="btn-run-expired">Apply</button>
+                    </div>
+
+                    <div class="spacer"></div>
+                    <div class="export-dropdown" id="expired-export-dropdown">
+                        <button class="btn btn-outline" id="expired-export-toggle">Export ▾</button>
+                        <div class="export-menu hidden" id="expired-export-menu">
+                            <button class="export-menu-item" data-format="excel">Excel (.xlsx)</button>
+                            <button class="export-menu-item" data-format="pdf">PDF</button>
+                            <button class="export-menu-item" data-format="word">Word (.docx)</button>
+                        </div>
+                    </div>
+                </div>
                 <div class="expired-stats" id="expired-stats"></div>
                 <div class="card" style="padding:0">
                     <div class="table-container">
@@ -132,14 +157,95 @@
             </div>
             <!-- VOID TAB -->
             <div id="tab-void" style="display:none">
+                <div class="toolbar-row">
+                    <button class="period-btn active" data-void-period="daily">Daily</button>
+                    <button class="period-btn" data-void-period="weekly">Weekly</button>
+                    <button class="period-btn" data-void-period="monthly">Monthly</button>
+                    <button class="period-btn" data-void-period="custom">Custom</button>
+
+                    <div id="void-custom-dates">
+                        <label>From</label>
+                        <input type="date" id="void-start">
+                        <label>To</label>
+                        <input type="date" id="void-end">
+                        <button class="btn btn-primary btn-sm" id="btn-run-void">Generate Report</button>
+                    </div>
+
+                    <div class="spacer"></div>
+                    <div class="export-dropdown" id="void-export-dropdown">
+                        <button class="btn btn-outline" id="void-export-toggle">Export ▾</button>
+                        <div class="export-menu hidden" id="void-export-menu">
+                            <button class="export-menu-item" data-format="excel">Excel (.xlsx)</button>
+                            <button class="export-menu-item" data-format="pdf">PDF</button>
+                            <button class="export-menu-item" data-format="word">Word (.docx)</button>
+                        </div>
+                    </div>
+                </div>
                 <div class="card" style="padding:0">
                     <div class="table-container">
                         <table class="table">
                             <thead>
-                                <tr><th style="width:30px"></th><th>Order #</th><th>Date/Time</th><th>Cashier</th><th>Voided By</th><th>Voided At</th><th>Total</th></tr>
+                                <tr><th style="width:30px"></th><th>Order #</th><th>Date/Time</th><th>Pharmacy Assistant</th><th>Voided By</th><th>Voided At</th><th>Total</th></tr>
                             </thead>
                             <tbody id="void-tbody">
                                 <tr><td colspan="7" class="text-center" style="padding:24px"><div class="spinner" style="margin:0 auto"></div></td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <!-- REGISTER TAB -->
+            <div id="tab-register" style="display:none">
+                <div class="toolbar-row">
+                    <button class="period-btn active" data-register-period="daily">Daily</button>
+                    <button class="period-btn" data-register-period="weekly">Weekly</button>
+                    <button class="period-btn" data-register-period="monthly">Monthly</button>
+                    <button class="period-btn" data-register-period="custom">Custom</button>
+
+                    <div id="register-custom-dates">
+                        <label>From</label>
+                        <input type="date" id="register-start">
+                        <label>To</label>
+                        <input type="date" id="register-end">
+                        <button class="btn btn-primary btn-sm" id="btn-run-register">Generate Report</button>
+                    </div>
+
+                    <div class="spacer"></div>
+                    <div class="export-dropdown" id="register-export-dropdown">
+                        <button class="btn btn-outline" id="register-export-toggle">Export ▾</button>
+                        <div class="export-menu hidden" id="register-export-menu">
+                            <button class="export-menu-item" data-format="excel">Excel (.xlsx)</button>
+                            <button class="export-menu-item" data-format="pdf">PDF</button>
+                            <button class="export-menu-item" data-format="word">Word (.docx)</button>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="summary-chips" id="register-summary-chips" style="display:none">
+                    <div class="summary-chip"><div class="chip-label">Sessions</div><div class="chip-value" id="chip-register-count">0</div></div>
+                    <div class="summary-chip"><div class="chip-label">Currently Open</div><div class="chip-value" id="chip-register-open">0</div></div>
+                    <div class="summary-chip"><div class="chip-label">Total Opening Cash</div><div class="chip-value" id="chip-register-opened">₱0</div></div>
+                    <div class="summary-chip"><div class="chip-label">Total Variance</div><div class="chip-value" id="chip-register-variance">₱0</div></div>
+                </div>
+
+                <div class="card" style="padding:0">
+                    <div class="table-container">
+                        <table class="table">
+                            <thead>
+                                <tr>
+                                    <th>Pharmacy Assistant</th>
+                                    <th>Opened At</th>
+                                    <th>Opening Cash</th>
+                                    <th>Opened Approved By</th>
+                                    <th>Status</th>
+                                    <th>Closed At</th>
+                                    <th>Variance</th>
+                                    <th>Closed Approved By</th>
+                                </tr>
+                            </thead>
+                            <tbody id="register-tbody">
+                                <tr><td colspan="8" class="text-center" style="padding:24px"><div class="spinner" style="margin:0 auto"></div></td></tr>
                             </tbody>
                         </table>
                     </div>
@@ -160,6 +266,41 @@ document.addEventListener('DOMContentLoaded', () => {
     const endInput    = document.getElementById('report-end');
     const customDates = document.getElementById('custom-dates');
     const periodBtns  = document.querySelectorAll('.period-btn');
+
+    // ── Generic export-dropdown wiring ─────────────────────────
+    // One small helper reused by all four tabs -- each just supplies its
+    // own dropdown element ids, the backend path segment, and a function
+    // returning the query params that match whatever's currently on
+    // screen for that tab.
+    function wireExportDropdown({ toggleId, menuId, wrapId, endpointPath, filenameBase, getParams }) {
+        const toggleBtn = document.getElementById(toggleId);
+        const menu       = document.getElementById(menuId);
+
+        toggleBtn?.addEventListener('click', (e) => {
+            e.stopPropagation();
+            document.querySelectorAll('.export-menu').forEach(m => { if (m !== menu) m.classList.add('hidden'); });
+            menu?.classList.toggle('hidden');
+        });
+        document.addEventListener('click', (e) => {
+            if (menu && !menu.classList.contains('hidden') && !e.target.closest(`#${wrapId}`)) {
+                menu.classList.add('hidden');
+            }
+        });
+        menu?.querySelectorAll('.export-menu-item').forEach(btn => {
+            btn.addEventListener('click', async () => {
+                menu.classList.add('hidden');
+                const format = btn.dataset.format;
+                const params = getParams();
+                const config = typeof getRuntimeConfig === 'function' ? getRuntimeConfig() : CONFIG;
+                Toast.show('Preparing report…', 'info');
+                const ext = format === 'excel' ? 'xlsx' : format === 'word' ? 'docx' : 'pdf';
+                await downloadAuthenticatedFile(
+                    `${config.API_BASE}${endpointPath}/export/${format}?${params.toString()}`,
+                    `${filenameBase}.${ext}`
+                );
+            });
+        });
+    }
 
     // ── Date range helper ─────────────────────────────────────
     function getDateRange(period) {
@@ -222,16 +363,22 @@ document.addEventListener('DOMContentLoaded', () => {
         loadSalesReport(s, e);
     });
 
+    wireExportDropdown({
+        toggleId: 'sales-export-toggle', menuId: 'sales-export-menu', wrapId: 'sales-export-dropdown',
+        endpointPath: '/reports/sales', filenameBase: 'PharmaTrack_Sales_Report',
+        getParams: () => new URLSearchParams({ start_date: startInput.value, end_date: endInput.value })
+    });
+
     // ── Load sales report ─────────────────────────────────────
     async function loadSalesReport(start, end) {
         const tbody = document.getElementById('sales-tbody');
-        tbody.innerHTML = '<tr><td colspan="10" class="text-center" style="padding:24px"><div class="spinner" style="margin:0 auto"></div></td></tr>';
+        tbody.innerHTML = '<tr><td colspan="9" class="text-center" style="padding:24px"><div class="spinner" style="margin:0 auto"></div></td></tr>';
         document.getElementById('sales-summary-chips').style.display = 'none';
 
         const data = await API.get(`/reports/sales?start_date=${start}&end_date=${end}&limit=500`);
         if (!data?.success) {
             Toast.show('Failed to load report.', 'error');
-            tbody.innerHTML = '<tr><td colspan="10" class="text-center text-muted" style="padding:24px">Failed to load data.</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="9" class="text-center text-muted" style="padding:24px">Failed to load data.</td></tr>';
             return;
         }
 
@@ -245,7 +392,7 @@ document.addEventListener('DOMContentLoaded', () => {
         document.getElementById('sales-summary-chips').style.display = 'flex';
 
         if (!salesData.length) {
-            tbody.innerHTML = '<tr><td colspan="10" class="text-center text-muted" style="padding:24px">No transactions found for this period.</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="9" class="text-center text-muted" style="padding:24px">No transactions found for this period.</td></tr>';
             return;
         }
         tbody.innerHTML = salesData.map((o, idx) => `
@@ -259,10 +406,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 <td>${Fmt.currency(o.discount)}</td>
                 <td class="fw-600" style="color:var(--primary)">${Fmt.currency(o.total)}</td>
                 <td class="fw-600" style="color:${parseFloat(o.profit || 0) >= 0 ? 'var(--success)' : 'var(--danger)'}">${Fmt.currency(o.profit)}</td>
-                <td><span class="badge badge-primary">${o.payment_method.toUpperCase()}</span></td>
             </tr>
             <tr class="detail-row hidden" id="order-detail-${idx}">
-                <td colspan="10">
+                <td colspan="9">
                     <strong style="font-size:0.82rem">Items Sold:</strong>
                     <div class="table-container" style="margin-top:8px">
                         <table class="table" style="white-space:normal">
@@ -294,37 +440,76 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    // ── Export CSV ────────────────────────────────────────────
-    document.getElementById('btn-export-csv')?.addEventListener('click', () => {
-        if (!salesData.length) { Toast.show('Generate a report first.', 'warning'); return; }
-        const headers = ['Order #','Date','Cashier','Subtotal','Purchase Cost','Discount','Total','Profit','Payment'];
-        const rows    = salesData.map(o => [o.order_number, Fmt.datetime(o.created_at), o.cashier_name, o.subtotal, o.purchase_cost, o.discount, o.total, o.profit, o.payment_method]);
-        const csv     = [headers, ...rows].map(r => r.map(v => `"${v}"`).join(',')).join('\n');
-        const a       = Object.assign(document.createElement('a'), { href: URL.createObjectURL(new Blob([csv], {type:'text/csv'})), download: `pharmatrack_sales_${new Date().toISOString().split('T')[0]}.csv` });
-        a.click();
-    });
-
     // ── Tab switching ─────────────────────────────────────────
     document.querySelectorAll('.report-tab').forEach(tab => {
         tab.addEventListener('click', () => {
             document.querySelectorAll('.report-tab').forEach(t => t.classList.remove('active'));
             tab.classList.add('active');
             const id = tab.dataset.tab;
-            document.getElementById('tab-sales').style.display   = id === 'sales'   ? '' : 'none';
-            document.getElementById('tab-expired').style.display = id === 'expired' ? '' : 'none';
-            document.getElementById('tab-void').style.display    = id === 'void'    ? '' : 'none';
-            if (id === 'expired') loadExpiredReport();
-            if (id === 'void')    loadVoidReport();
+            document.getElementById('tab-sales').style.display    = id === 'sales'    ? '' : 'none';
+            document.getElementById('tab-expired').style.display  = id === 'expired'  ? '' : 'none';
+            document.getElementById('tab-void').style.display     = id === 'void'     ? '' : 'none';
+            document.getElementById('tab-register').style.display = id === 'register' ? '' : 'none';
+            if (id === 'expired') loadExpiredReport({ months: '1' });
+            if (id === 'void') {
+                const r = getDateRange('daily');
+                voidStartInput.value = r.start;
+                voidEndInput.value   = r.end;
+                loadVoidReport(r.start, r.end);
+            }
+            if (id === 'register') {
+                const r = getDateRange('daily');
+                registerStartInput.value = r.start;
+                registerEndInput.value   = r.end;
+                loadRegisterReport(r.start, r.end);
+            }
         });
     });
 
     // ── Expired Inventory ─────────────────────────────────────
-    async function loadExpiredReport() {
+    const expiredStartInput  = document.getElementById('expired-start');
+    const expiredEndInput    = document.getElementById('expired-end');
+    const expiredCustomDates = document.getElementById('expired-custom-dates');
+    let expiredCurrentRange  = { months: '1' }; // tracks whatever's currently applied, for export to mirror
+
+    document.querySelectorAll('[data-expired-range]').forEach(btn => {
+        btn.addEventListener('click', () => {
+            document.querySelectorAll('[data-expired-range]').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            const range = btn.dataset.expiredRange;
+
+            if (range === 'custom') {
+                expiredCustomDates.classList.add('visible');
+                return;
+            }
+
+            expiredCustomDates.classList.remove('visible');
+            loadExpiredReport(range === 'all' ? {} : { months: range });
+        });
+    });
+
+    document.getElementById('btn-run-expired')?.addEventListener('click', () => {
+        const s = expiredStartInput.value, e = expiredEndInput.value;
+        if (!s || !e) { Toast.show('Select both dates.', 'warning'); return; }
+        if (s > e)    { Toast.show('Start date must be before end date.', 'warning'); return; }
+        loadExpiredReport({ start_date: s, end_date: e });
+    });
+
+    wireExportDropdown({
+        toggleId: 'expired-export-toggle', menuId: 'expired-export-menu', wrapId: 'expired-export-dropdown',
+        endpointPath: '/reports/expired', filenameBase: 'PharmaTrack_Expired_Inventory_Report',
+        getParams: () => new URLSearchParams(expiredCurrentRange)
+    });
+
+    async function loadExpiredReport(params) {
+        params = params || {};
+        expiredCurrentRange = params;
         const tbody = document.getElementById('expired-tbody');
         tbody.innerHTML = '<tr><td colspan="8" class="text-center" style="padding:24px"><div class="spinner" style="margin:0 auto"></div></td></tr>';
         document.getElementById('expired-stats').innerHTML = '';
 
-        const data = await API.get('/reports/expired');
+        const qs = new URLSearchParams(params).toString();
+        const data = await API.get('/reports/expired' + (qs ? '?' + qs : ''));
         if (!data?.success) {
             Toast.show('Failed to load expired inventory.', 'error');
             tbody.innerHTML = '<tr><td colspan="8" class="text-center text-muted" style="padding:24px">Failed to load data.</td></tr>';
@@ -337,7 +522,7 @@ document.addEventListener('DOMContentLoaded', () => {
             <div class="expired-stat-card"><div class="stat-label">Total Value Lost</div><div class="stat-value">${Fmt.currency(summary.total_value_lost)}</div></div>`;
 
         if (!expired.length) {
-            tbody.innerHTML = '<tr><td colspan="8" class="text-center text-muted" style="padding:24px">✅ No expired products on record.</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="8" class="text-center text-muted" style="padding:24px">No expired products for this period.</td></tr>';
             return;
         }
         tbody.innerHTML = expired.map(p => `
@@ -353,11 +538,53 @@ document.addEventListener('DOMContentLoaded', () => {
             </tr>`).join('');
     }
 
-    async function loadVoidReport() {
+    const voidStartInput  = document.getElementById('void-start');
+    const voidEndInput    = document.getElementById('void-end');
+    const voidCustomDates = document.getElementById('void-custom-dates');
+
+    document.querySelectorAll('[data-void-period]').forEach(btn => {
+        btn.addEventListener('click', () => {
+            document.querySelectorAll('[data-void-period]').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            const period = btn.dataset.voidPeriod;
+
+            if (period === 'custom') {
+                voidCustomDates.classList.add('visible');
+                if (!voidStartInput.value) {
+                    const t = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Manila', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
+                    voidStartInput.value = voidEndInput.value = t;
+                }
+                return;
+            }
+
+            voidCustomDates.classList.remove('visible');
+            const range = getDateRange(period);
+            if (range) { voidStartInput.value = range.start; voidEndInput.value = range.end; loadVoidReport(range.start, range.end); }
+        });
+    });
+
+    document.getElementById('btn-run-void')?.addEventListener('click', () => {
+        const s = voidStartInput.value, e = voidEndInput.value;
+        if (!s || !e) { Toast.show('Select both dates.', 'warning'); return; }
+        if (s > e)    { Toast.show('Start date must be before end date.', 'warning'); return; }
+        loadVoidReport(s, e);
+    });
+
+    wireExportDropdown({
+        toggleId: 'void-export-toggle', menuId: 'void-export-menu', wrapId: 'void-export-dropdown',
+        endpointPath: '/reports/void', filenameBase: 'PharmaTrack_Void_Report',
+        getParams: () => new URLSearchParams({ start_date: voidStartInput.value, end_date: voidEndInput.value })
+    });
+
+    async function loadVoidReport(start, end) {
         const tbody = document.getElementById('void-tbody');
         tbody.innerHTML = '<tr><td colspan="7" class="text-center" style="padding:24px"><div class="spinner" style="margin:0 auto"></div></td></tr>';
 
-        const data = await API.get('/reports/void?limit=500');
+        const params = new URLSearchParams({ limit: 500 });
+        if (start) params.set('start_date', start);
+        if (end)   params.set('end_date', end);
+
+        const data = await API.get('/reports/void?' + params.toString());
         if (!data?.success) {
             Toast.show('Failed to load void report.', 'error');
             tbody.innerHTML = '<tr><td colspan="7" class="text-center text-muted" style="padding:24px">Failed to load data.</td></tr>';
@@ -366,7 +593,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         const voidData = data.data || [];
         if (!voidData.length) {
-            tbody.innerHTML = '<tr><td colspan="7" class="text-center text-muted" style="padding:24px">✅ No voided transactions on record.</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="7" class="text-center text-muted" style="padding:24px">No voided transactions for this period.</td></tr>';
             return;
         }
 
@@ -410,6 +637,96 @@ document.addEventListener('DOMContentLoaded', () => {
                 btn.textContent = isHidden ? '▼' : '▶';
             });
         });
+    }
+
+    // ── Register Report ───────────────────────────────────────
+    const registerStartInput  = document.getElementById('register-start');
+    const registerEndInput    = document.getElementById('register-end');
+    const registerCustomDates = document.getElementById('register-custom-dates');
+
+    document.querySelectorAll('[data-register-period]').forEach(btn => {
+        btn.addEventListener('click', () => {
+            document.querySelectorAll('[data-register-period]').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            const period = btn.dataset.registerPeriod;
+
+            if (period === 'custom') {
+                registerCustomDates.classList.add('visible');
+                if (!registerStartInput.value) {
+                    const t = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Manila', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
+                    registerStartInput.value = registerEndInput.value = t;
+                }
+                return;
+            }
+
+            registerCustomDates.classList.remove('visible');
+            const range = getDateRange(period);
+            if (range) { registerStartInput.value = range.start; registerEndInput.value = range.end; loadRegisterReport(range.start, range.end); }
+        });
+    });
+
+    document.getElementById('btn-run-register')?.addEventListener('click', () => {
+        const s = registerStartInput.value, e = registerEndInput.value;
+        if (!s || !e) { Toast.show('Select both dates.', 'warning'); return; }
+        if (s > e)    { Toast.show('Start date must be before end date.', 'warning'); return; }
+        loadRegisterReport(s, e);
+    });
+
+    wireExportDropdown({
+        toggleId: 'register-export-toggle', menuId: 'register-export-menu', wrapId: 'register-export-dropdown',
+        endpointPath: '/reports/register', filenameBase: 'PharmaTrack_Register_Report',
+        getParams: () => new URLSearchParams({ start_date: registerStartInput.value, end_date: registerEndInput.value })
+    });
+
+    async function loadRegisterReport(start, end) {
+        const tbody = document.getElementById('register-tbody');
+        tbody.innerHTML = '<tr><td colspan="8" class="text-center" style="padding:24px"><div class="spinner" style="margin:0 auto"></div></td></tr>';
+        document.getElementById('register-summary-chips').style.display = 'none';
+
+        const params = new URLSearchParams({ limit: 500 });
+        if (start) params.set('start_date', start);
+        if (end)   params.set('end_date', end);
+
+        const data = await API.get('/reports/register?' + params.toString());
+        if (!data?.success) {
+            Toast.show('Failed to load register report.', 'error');
+            tbody.innerHTML = '<tr><td colspan="8" class="text-center text-muted" style="padding:24px">Failed to load data.</td></tr>';
+            return;
+        }
+
+        const sessions = data.data || [];
+        const s = data.summary || {};
+        document.getElementById('chip-register-count').textContent    = s.total_sessions || 0;
+        document.getElementById('chip-register-open').textContent     = s.open_count || 0;
+        document.getElementById('chip-register-opened').textContent   = Fmt.currency(s.total_opened || 0);
+        document.getElementById('chip-register-variance').textContent = Fmt.currency(s.total_variance || 0);
+        document.getElementById('register-summary-chips').style.display = 'flex';
+
+        if (!sessions.length) {
+            tbody.innerHTML = '<tr><td colspan="8" class="text-center text-muted" style="padding:24px">No register sessions found for this period.</td></tr>';
+            return;
+        }
+
+        tbody.innerHTML = sessions.map(s => {
+            const isOpen = s.status === 'OPEN';
+            const varianceVal = parseFloat(s.variance);
+            const varianceText = s.status === 'CLOSED' && !isNaN(varianceVal)
+                ? `${varianceVal >= 0 ? '+' : ''}${Fmt.currency(varianceVal)}`
+                : '—';
+            const varianceColor = varianceVal > 0 ? 'var(--success)' : (varianceVal < 0 ? 'var(--danger)' : 'var(--secondary)');
+
+            return `
+            <tr>
+                <td class="fw-600">${escHtml(s.cashier_name)}</td>
+                <td>${Fmt.datetime(s.opened_at)}</td>
+                <td>${Fmt.currency(s.opening_cash)}</td>
+                <td>${s.opened_approved_by_name ? escHtml(s.opened_approved_by_name) : '<span class="text-muted">—</span>'}</td>
+                <td><span class="badge ${isOpen ? 'badge-success' : 'badge-secondary'}">${isOpen ? 'Open' : 'Closed'}</span></td>
+                <td>${s.closed_at ? Fmt.datetime(s.closed_at) : '<span class="text-muted">—</span>'}</td>
+                <td style="font-weight:600;color:${varianceColor}">${varianceText}</td>
+                <td>${s.closed_approved_by_name ? escHtml(s.closed_approved_by_name) : '<span class="text-muted">—</span>'}</td>
+            </tr>`;
+        }).join('');
     }
 
     // ── Auto-load daily on open ───────────────────────────────

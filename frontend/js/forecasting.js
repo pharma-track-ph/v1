@@ -62,17 +62,14 @@ document.addEventListener('DOMContentLoaded', async () => {
     // ── Algorithm explainer texts ─────────────────────────────
     const ALGO_INFO = {
         'moving-average': {
-            icon:  '📊',
             title: 'Simple Average Method',
             desc:  'This method takes the average of the last 4 weeks of sales and uses that as the prediction for all future weeks. It works best for products with very stable, predictable demand that does not change much over time.'
         },
         'exponential': {
-            icon:  '📉',
             title: 'Weighted Average Method',
             desc:  'This method gives more importance to recent sales when making predictions. If sales went up last week, the forecast will reflect that faster than a plain average. Good for products whose demand is slowly changing in one direction.'
         },
         'holt-winters': {
-            icon:  '🌟',
             title: 'Seasonal Forecast Method (Recommended)',
             desc:  'This is the most advanced method. It tracks three things at once: the normal level of demand, whether demand is growing or shrinking over time, and repeating seasonal patterns (like higher antibiotic sales when there is a flu outbreak). This is the best choice for most pharmacy products in the Philippines.'
         }
@@ -97,7 +94,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     function renderProductOptions(products) {
         if (!productSelect) return;
-        productSelect.innerHTML = '<option value="">— Select a product —</option>';
+        productSelect.innerHTML = '<option value="">Select a product</option>';
         products.forEach(p => {
             const opt = document.createElement('option');
             opt.value = p.id;
@@ -123,6 +120,100 @@ document.addEventListener('DOMContentLoaded', async () => {
         runForecast();
     }
 
+    // A dedicated combobox for #product-search -- clicking/focusing it
+    // shows EVERY product (like opening a normal dropdown), and typing
+    // floats whatever matches to the top WITHOUT removing anything else
+    // from the list, so it never looks like products "disappeared". This
+    // is deliberately its own small implementation rather than the shared
+    // SearchSuggest component (main.js), which hides non-matching items
+    // entirely and shows nothing at all until there's a query -- exactly
+    // the opposite of what's needed here.
+    function setupProductCombobox() {
+        if (!productSearch) return;
+
+        const wrap = document.createElement('div');
+        wrap.className = 'search-suggest-wrap';
+        productSearch.parentNode.insertBefore(wrap, productSearch);
+        wrap.appendChild(productSearch);
+
+        const dropdown = document.createElement('div');
+        dropdown.className = 'search-suggest-dropdown hidden';
+        wrap.appendChild(dropdown);
+
+        function esc(str) {
+            return String(str ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+        }
+
+        // Every product, always -- just reordered so a name that STARTS
+        // WITH the typed text ranks above one where it's merely buried in
+        // the middle, and everything else keeps its normal order after
+        // those matches (same relevance idea SearchSuggest itself uses,
+        // minus the "hide anything that doesn't match" part).
+        function orderedProducts(query) {
+            const q = query.trim().toLowerCase();
+            if (!q) return allProducts;
+            const starts = [], contains = [], rest = [];
+            allProducts.forEach(p => {
+                const label = p.name.toLowerCase();
+                if (label.startsWith(q))      starts.push(p);
+                else if (label.includes(q))   contains.push(p);
+                else                          rest.push(p);
+            });
+            return [...starts, ...contains, ...rest];
+        }
+
+        function renderDropdown() {
+            const items = orderedProducts(productSearch.value);
+            if (!items.length) { dropdown.classList.add('hidden'); return; }
+
+            dropdown.innerHTML = items.map((p, i) => `
+                <button type="button" class="search-suggest-item" data-index="${i}">
+                    <span class="search-suggest-label">${esc(p.name)}</span>
+                    <span class="search-suggest-sub">${esc(p.category)}</span>
+                </button>
+            `).join('');
+
+            dropdown.querySelectorAll('.search-suggest-item').forEach(btn => {
+                // mousedown (not click) fires BEFORE the input's blur event,
+                // same reasoning as SearchSuggest -- otherwise blur hides the
+                // dropdown before the click ever registers.
+                btn.addEventListener('mousedown', (e) => {
+                    e.preventDefault();
+                    selectProduct(items[parseInt(btn.dataset.index)]);
+                });
+            });
+
+            dropdown.classList.remove('hidden');
+        }
+
+        function selectProduct(p) {
+            productSearch.value = p.name;
+            dropdown.classList.add('hidden');
+
+            // A direct pick from this dropdown isn't scoped to whichever
+            // quick filter happened to be active, so that filter no longer
+            // describes what's shown -- reset to "All" to match.
+            document.querySelectorAll('.btn-filter').forEach(b => b.classList.remove('active'));
+            document.querySelector('.btn-filter[data-filter="all"]')?.classList.add('active');
+            renderProductOptions(allProducts);
+
+            productSelect.value = p.id;
+            runForecast();
+        }
+
+        productSearch.addEventListener('focus', () => {
+            productSearch.select(); // next keystroke starts a fresh search
+            renderDropdown();
+        });
+        productSearch.addEventListener('input', renderDropdown);
+        productSearch.addEventListener('blur', () => {
+            setTimeout(() => dropdown.classList.add('hidden'), 120);
+        });
+        productSearch.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') dropdown.classList.add('hidden');
+        });
+    }
+
     // ────────────────────────────────────────────────────────
     // TRENDING PRODUCTS
     // ────────────────────────────────────────────────────────
@@ -145,14 +236,12 @@ document.addEventListener('DOMContentLoaded', async () => {
 
         grid.innerHTML = products.slice(0, 4).map(p => {
             const trendClass = p.trend > 5 ? 'up' : (p.trend < -5 ? 'down' : 'stable');
-            const trendIcon  = p.trend > 5 ? '📈' : (p.trend < -5 ? '📉' : '➡️');
             const trendLabel = p.trend > 5 ? `▲ ${p.trend}% vs last month`
                              : p.trend < -5 ? `▼ ${Math.abs(p.trend)}% vs last month`
                              : `Stable demand`;
 
             return `
                 <div class="trending-card" data-product-id="${p.id}" title="Click to forecast ${p.name}">
-                    <div class="trend-icon">${trendIcon}</div>
                     <div class="trend-name">${p.name}</div>
                     <div class="trend-category">${p.category}</div>
                     <div class="trend-stats">
@@ -267,7 +356,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         const isLowConfSES    = currentAlgorithm === 'exponential' && periods === 12;
 
         if (isLowConfSES) {
-            horizonConfidenceEl.textContent = '⚠️ 12-week forecasts with this method drift in a straight line and get less reliable past ~2 months — treat this as a rough estimate.';
+            horizonConfidenceEl.textContent = '12-week forecasts with this method drift in a straight line and get less reliable past ~2 months. Treat this as a rough estimate.';
             horizonConfidenceEl.classList.remove('hidden');
             return;
         }
@@ -275,7 +364,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         if (isLongHWHorizon) {
             const spanDays = lastForecastData?.data_span_days;
             if (spanDays != null && spanDays < 300) {
-                horizonConfidenceEl.textContent = `⚠️ Limited historical data — this product only has about ${Math.round(spanDays / 7)} week(s) of sales on record. Seasonal patterns need close to a year of data to be reliable, so treat this ${periods}-week forecast as lower confidence.`;
+                horizonConfidenceEl.textContent = `Limited historical data: this product only has about ${Math.round(spanDays / 7)} week(s) of sales on record. Seasonal patterns need close to a year of data to be reliable, so treat this ${periods}-week forecast as lower confidence.`;
                 horizonConfidenceEl.classList.remove('hidden');
                 return;
             }
@@ -296,17 +385,11 @@ document.addEventListener('DOMContentLoaded', async () => {
             if (productSelect.value) runForecast();
         });
 
-        // Live product search filter — auto-selects & forecasts the first match
-        productSearch?.addEventListener('input', e => {
-            const term     = e.target.value.toLowerCase().trim();
-            const filtered = term
-                ? allProducts.filter(p =>
-                    p.name.toLowerCase().includes(term) ||
-                    p.category.toLowerCase().includes(term))
-                : allProducts;
-            renderProductOptions(filtered);
-            selectFirstAndRun(filtered);
-        });
+        // The visible box is #product-search alone now -- see
+        // setupProductCombobox() for how it behaves (click to see every
+        // product, type to float matches to the top without hiding the
+        // rest).
+        setupProductCombobox();
 
         // Quick filters — auto-selects & forecasts the first product in
         // whichever filtered list results.
@@ -327,9 +410,24 @@ document.addEventListener('DOMContentLoaded', async () => {
                 updateAlgoExplainer(currentAlgorithm);
                 renderHorizonButtons(currentAlgorithm);
 
-                // Show advanced params only for holt-winters
-                const hwParams = document.getElementById('hw-params');
-                if (hwParams) hwParams.style.display = currentAlgorithm === 'holt-winters' ? '' : 'none';
+                // Advanced Parameters: alpha applies to both Exponential
+                // Smoothing and Holt-Winters, so the whole block shows for
+                // either -- only Moving Average has nothing to tune. The
+                // beta/gamma/season-length sub-group is Holt-Winters only.
+                const hwParams     = document.getElementById('hw-params');
+                const hwOnlyParams = document.querySelector('.hw-only-params');
+                const summaryText  = document.getElementById('hw-params-summary');
+                if (hwParams) {
+                    hwParams.style.display = currentAlgorithm === 'moving-average' ? 'none' : '';
+                }
+                if (hwOnlyParams) {
+                    hwOnlyParams.style.display = currentAlgorithm === 'holt-winters' ? 'flex' : 'none';
+                }
+                if (summaryText) {
+                    summaryText.textContent = currentAlgorithm === 'holt-winters'
+                        ? 'Advanced Parameters (α, β, γ) Holt-Winters only'
+                        : 'Advanced Parameters (α) Exponential Smoothing only';
+                }
 
                 if (productSelect?.value) runForecast();
             });
@@ -349,17 +447,15 @@ document.addEventListener('DOMContentLoaded', async () => {
             if (currentAlgorithm === 'holt-winters' && productSelect?.value) runForecast();
         });
 
-        // Close modal
+        // Close modal -- only the X button closes this now, not clicking
+        // outside (consistent with every other modal in the app).
         closeModal?.addEventListener('click', () => modal?.classList.add('hidden'));
-        modal?.addEventListener('click', e => { if (e.target === modal) modal.classList.add('hidden'); });
     }
 
     function updateAlgoExplainer(algo) {
         const info     = ALGO_INFO[algo];
-        const iconEl   = document.querySelector('.algo-explainer-icon');
         const titleEl  = document.getElementById('explainer-title');
         const descEl   = document.getElementById('explainer-desc');
-        if (iconEl)  iconEl.textContent  = info.icon;
         if (titleEl) titleEl.textContent = info.title;
         if (descEl)  descEl.textContent  = info.desc;
     }
@@ -384,9 +480,22 @@ document.addEventListener('DOMContentLoaded', async () => {
     // ────────────────────────────────────────────────────────
     // RUN FORECAST
     // ────────────────────────────────────────────────────────
+    // Keeps the visible combobox text in sync with whatever's actually
+    // selected in the (now-hidden) #forecast-product, regardless of HOW
+    // the selection happened -- trending-card click, quick filter,
+    // direct search-pick, or the ?product= URL param -- since runForecast
+    // is the one place all of those funnel through.
+    function syncSearchInputToSelection() {
+        if (!productSearch || !productSelect) return;
+        const opt = productSelect.options[productSelect.selectedIndex];
+        if (opt && opt.value) productSearch.value = opt.dataset.name || opt.textContent;
+    }
+
     async function runForecast() {
         const productId = productSelect?.value;
         if (!productId) { Toast.show('Please select a product first.', 'warning'); return; }
+
+        syncSearchInputToSelection();
 
         if (isCalculating) return; // avoid overlapping calls from rapid clicks
         isCalculating = true;
@@ -451,7 +560,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         const pattern = buildPattern(sales, fitted.filter(v => v !== null));
         const mape    = calcMAPE(sales.slice(window), fitted.slice(window).filter(v => v !== null));
 
-        return { predictions, components: { fitted, levels: [], trends: [], seasonals: [] }, pattern, mape, method: 'Simple Average' };
+        return { predictions, components: { fitted, levels: [], trends: [], seasonals: [] }, pattern, mape, method: 'Moving Average' };
     }
 
     // ── 2. Simple Exponential Smoothing ─────────────────────
@@ -476,7 +585,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         const pattern = buildPattern(sales, fitted);
         const mape    = calcMAPE(sales, fitted);
 
-        return { predictions, components: { fitted, levels: [], trends: [], seasonals: [] }, pattern, mape, method: 'Weighted Average' };
+        return { predictions, components: { fitted, levels: [], trends: [], seasonals: [] }, pattern, mape, method: 'Exponential Smoothing' };
     }
 
     // ── 3. Holt-Winters Triple Exponential Smoothing ─────────
@@ -491,7 +600,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         // Need at least 2 full seasons for HW; fall back to SES otherwise
         if (n < s * 2) {
             const result = runExponentialSmoothing(sales, periods);
-            result.method = 'Seasonal Forecast (limited data – used Weighted Average)';
+            result.method = 'Holt-Winters (limited data, used Exponential Smoothing instead)';
             return result;
         }
 
@@ -559,7 +668,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             components: { levels, trends, seasonals: seasonals.slice(0, n), fitted },
             pattern,
             mape,
-            method: 'Seasonal Forecast (Holt-Winters)'
+            method: 'Holt-Winters'
         };
     }
 
@@ -602,7 +711,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             : `₱${parseFloat(product.price || 0).toFixed(2)}`;
 
         document.getElementById('chart-title').textContent =
-            `${product.name} — ${method}`;
+            `${product.name}: ${method}`;
 
         renderPatternInsights(pattern, mape);
         renderForecastChart(history, predictions, components.fitted);
@@ -615,14 +724,13 @@ document.addEventListener('DOMContentLoaded', async () => {
         const container = document.getElementById('pattern-insights');
         if (!container) return;
 
-        const trendLabel = pattern.trend > 5  ? '📈 Sales are growing'
-                         : pattern.trend < -5 ? '📉 Sales are declining'
-                         : '➡️ Sales are stable';
+        const trendLabel = pattern.trend > 5  ? 'Sales are growing'
+                         : pattern.trend < -5 ? 'Sales are declining'
+                         : 'Sales are stable';
         const trendColor = pattern.trend > 5 ? '#4ade80' : pattern.trend < -5 ? '#f87171' : '#94a3b8';
 
         container.innerHTML = `
             <div class="pattern-item">
-                <span class="pattern-icon">📦</span>
                 <div class="pattern-info">
                     <div class="pattern-label">Average Weekly Sales</div>
                     <div class="pattern-value">${pattern.baseline} units/week</div>
@@ -630,7 +738,6 @@ document.addEventListener('DOMContentLoaded', async () => {
                 </div>
             </div>
             <div class="pattern-item">
-                <span class="pattern-icon">📊</span>
                 <div class="pattern-info">
                     <div class="pattern-label">Sales Trend</div>
                     <div class="pattern-value" style="color:${trendColor}">${trendLabel}</div>
@@ -638,7 +745,6 @@ document.addEventListener('DOMContentLoaded', async () => {
                 </div>
             </div>
             <div class="pattern-item">
-                <span class="pattern-icon">🗓️</span>
                 <div class="pattern-info">
                     <div class="pattern-label">Seasonal Pattern</div>
                     <div class="pattern-value">+${pattern.seasonalSpike}% at peak</div>
@@ -649,30 +755,32 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
 
     function renderPredictionsGrid(predictions) {
-        const grid = document.getElementById('predictions-grid');
-        if (!grid) return;
-
         const maxFcst = Math.max(...predictions.map(p => p.forecast), 1);
 
-        grid.innerHTML = predictions.map((p, i) => {
-            let cardClass = 'good', tagClass = 'good', tagText = '✅ Normal';
-
+        const rows = predictions.map((p, i) => {
+            let tagClass = 'good', tagText = 'Normal';
             if (p.forecast >= maxFcst * 0.9) {
-                cardClass = 'urgent'; tagClass = 'urgent'; tagText = '🔴 Peak Week';
+                tagClass = 'urgent'; tagText = 'Peak Week';
             } else if (p.forecast >= maxFcst * 0.7) {
-                cardClass = 'warning'; tagClass = 'warning'; tagText = '⚠️ High Demand';
+                tagClass = 'warning'; tagText = 'High Demand';
             }
+            return { week: i + 1, forecast: p.forecast, lower: p.lowerBound, upper: p.upperBound, tagClass, tagText };
+        });
 
-            return `
-                <div class="prediction-card ${cardClass}">
-                    <div class="pred-week">Week ${i + 1}</div>
-                    <div class="pred-value">${p.forecast}</div>
-                    <div class="pred-unit">units expected</div>
-                    <div class="pred-range">Range: ${p.lowerBound}–${p.upperBound}</div>
-                    <span class="pred-tag ${tagClass}">${tagText}</span>
-                </div>
-            `;
-        }).join('');
+        renderPaginatedTable({
+            tbodyId:      'predictions-tbody',
+            paginationId: 'predictions-pagination',
+            rows,
+            pageSize:     10,
+            rowRenderer:  r => `
+                <tr>
+                    <td class="fw-600">Week ${r.week}</td>
+                    <td class="fw-700">${r.forecast} <span class="text-muted" style="font-weight:400">units</span></td>
+                    <td>${r.lower}–${r.upper} units</td>
+                    <td><span class="pred-tag ${r.tagClass}">${r.tagText}</span></td>
+                </tr>
+            `
+        });
     }
 
     function renderRecommendation(predictions, product) {
@@ -686,10 +794,10 @@ document.addEventListener('DOMContentLoaded', async () => {
         const shortage         = Math.max(0, recommendedOrder - currentStock);
 
         const stockStatus = currentStock >= recommendedOrder
-            ? '✅ You have enough'
+            ? 'You have enough'
             : currentStock >= totalForecast
-            ? '⚠️ Borderline — consider ordering'
-            : '🔴 Order Now';
+            ? 'Borderline, consider ordering'
+            : 'Order Now';
 
         const orderDate = new Date();
         orderDate.setDate(orderDate.getDate() + 7);
@@ -703,25 +811,25 @@ document.addEventListener('DOMContentLoaded', async () => {
 
         container.innerHTML = `
             <div class="rec-stat">
-                <div class="rec-label">📦 Total Expected Demand</div>
+                <div class="rec-label">Total Expected Demand</div>
                 <div class="rec-value">${fmtNum(totalForecast)}</div>
                 <small>units over next ${predictions.length} week${predictions.length > 1 ? 's' : ''}</small>
             </div>
             <div class="rec-stat">
-                <div class="rec-label">🛒 Current Stock</div>
+                <div class="rec-label">Current Stock</div>
                 <div class="rec-value" style="font-size:1.3rem">${stockStatus}</div>
                 <small>${fmtNum(currentStock)} units on hand</small>
             </div>
             <div class="rec-stat">
-                <div class="rec-label">🛡️ Recommended Order</div>
+                <div class="rec-label">Recommended Order</div>
                 <div class="rec-value">${fmtNum(recommendedOrder)}</div>
                 <small>includes 20% safety buffer</small>
             </div>
             <div class="rec-action">
                 <div class="rec-message">
                     ${shortage > 0
-                        ? `⚠️ You may run short by ${fmtNum(shortage)} units — place an order by <strong>${orderDateLabel}</strong>`
-                        : `✅ Stock levels look good for the next ${predictions.length} week${predictions.length > 1 ? 's' : ''}.`}
+                        ? `You may run short by ${fmtNum(shortage)} units. Place an order by <strong>${orderDateLabel}</strong>`
+                        : `Stock levels look good for the next ${predictions.length} week${predictions.length > 1 ? 's' : ''}.`}
                 </div>
                 <div class="rec-deadline" style="margin-top:8px;opacity:0.85">
                     Estimated value of order: ${fmtCur(recommendedOrder * parseFloat(product.price || 0))}
@@ -730,27 +838,82 @@ document.addEventListener('DOMContentLoaded', async () => {
         `;
     }
 
+    // How many of the most recently fetched weeks to actually PLOT on the
+    // chart -- separate from how many weeks the algorithm itself used
+    // (still the full `history` array passed in, always up to the 52
+    // weeks fetched in runForecast). Fewer weeks on screen just means a
+    // less crowded chart; it never changes what the forecast math was
+    // computed from.
+    function resolveHistoryDisplayWeeks(periods) {
+        if (periods <= 4)  return 12;
+        if (periods <= 12) return 26;
+        // Holt-Winters Custom beyond 12 weeks -- scale a bit with the
+        // horizon so a long forecast still has enough context behind it,
+        // but never just dump the entire fetched dataset on screen.
+        return Math.min(52, Math.max(26, periods * 2));
+    }
+
     function renderForecastChart(history, predictions, fitted) {
         const ctx = document.getElementById('forecast-chart')?.getContext('2d');
         if (!ctx) return;
         if (forecastChart) forecastChart.destroy();
 
-        const histLabels = history.map(h => h.week_label);
+        // Trim to a readable recent window for DISPLAY only -- `history`
+        // and `predictions` themselves are already computed from the full,
+        // un-trimmed series (still up to 52 weeks, fetched once in
+        // runForecast), so this never changes what the algorithm actually
+        // used, only how much of it gets drawn.
+        const displayWeeks   = Math.min(resolveHistoryDisplayWeeks(predictions.length), history.length);
+        const trimStart      = history.length - displayWeeks;
+        const displayHistory = history.slice(trimStart);
+        const displayFitted  = (fitted || []).slice(trimStart, history.length);
+
+        const histLabels = displayHistory.map(h => h.week_label);
         const predLabels = predictions.map((_, i) => `Week +${i + 1} (forecast)`);
         const allLabels  = [...histLabels, ...predLabels];
 
-        const actualData  = [...history.map(h => h.total_qty), ...Array(predictions.length).fill(null)];
-        const fittedData  = [...(fitted || []).slice(0, history.length), ...Array(predictions.length).fill(null)];
+        const actualData  = [...displayHistory.map(h => h.total_qty), ...Array(predictions.length).fill(null)];
+        const fittedData  = [...displayFitted, ...Array(predictions.length).fill(null)];
 
         // Bridge: connect last actual point to first forecast
         const forecastData = [
-            ...Array(history.length - 1).fill(null),
-            history[history.length - 1].total_qty,
+            ...Array(displayHistory.length - 1).fill(null),
+            displayHistory[displayHistory.length - 1].total_qty,
             ...predictions.map(p => p.forecast)
         ];
 
-        const upperData = [...Array(history.length).fill(null), ...predictions.map(p => p.upperBound)];
-        const lowerData = [...Array(history.length).fill(null), ...predictions.map(p => p.lowerBound)];
+        const upperData = [...Array(displayHistory.length).fill(null), ...predictions.map(p => p.upperBound)];
+        const lowerData = [...Array(displayHistory.length).fill(null), ...predictions.map(p => p.lowerBound)];
+
+        // A light vertical "TODAY" marker at the historical/forecast
+        // boundary, so that split is visually unambiguous on its own --
+        // not just implied by the Actual-Sales-vs-Forecast color change.
+        const todayMarkerPlugin = {
+            id: 'todayMarker',
+            afterDraw(chart) {
+                if (!predictions.length) return;
+                const xScale = chart.scales.x;
+                const yScale = chart.scales.y;
+                const idx = displayHistory.length - 1;
+                if (idx < 0) return;
+                const x = xScale.getPixelForValue(idx);
+                const c = chart.ctx;
+                c.save();
+                c.beginPath();
+                c.moveTo(x, yScale.top);
+                c.lineTo(x, yScale.bottom);
+                c.lineWidth = 1.5;
+                c.strokeStyle = 'rgba(33,37,41,0.35)';
+                c.setLineDash([4, 4]);
+                c.stroke();
+                c.setLineDash([]);
+                c.fillStyle = '#495057';
+                c.font = '600 10px ' + (window.getComputedStyle(document.body).fontFamily || 'sans-serif');
+                c.textAlign = 'center';
+                c.fillText('TODAY', x, yScale.top - 8);
+                c.restore();
+            }
+        };
 
         forecastChart = new Chart(ctx, {
             type: 'line',
@@ -816,9 +979,15 @@ document.addEventListener('DOMContentLoaded', async () => {
                     }
                 ]
             },
+            plugins: [todayMarkerPlugin],
             options: {
                 responsive: true,
                 maintainAspectRatio: false,
+                // Reserves room above the plot area specifically for the
+                // "TODAY" text the todayMarkerPlugin draws just above the
+                // chart -- without this, that text sits right at (or past)
+                // the canvas's own top edge and gets clipped.
+                layout: { padding: { top: 22 } },
                 interaction: { intersect: false, mode: 'index' },
                 plugins: {
                     legend: {
@@ -837,7 +1006,7 @@ document.addEventListener('DOMContentLoaded', async () => {
                             afterBody: items => {
                                 const forecastItem = items.find(i => i.dataset.label === 'Forecast (predicted)');
                                 if (forecastItem && forecastItem.raw !== null) {
-                                    const idx = forecastItem.dataIndex - history.length;
+                                    const idx = forecastItem.dataIndex - displayHistory.length;
                                     if (idx >= 0 && idx < predictions.length) {
                                         const p = predictions[idx];
                                         return [`  Expected range: ${p.lowerBound}–${p.upperBound} units`];
@@ -853,10 +1022,22 @@ document.addEventListener('DOMContentLoaded', async () => {
                     x: {
                         ticks: {
                             maxRotation: 45,
+                            // Chart.js thins these out on its own once there are
+                            // more than ~10 ticks worth of room, evenly spacing
+                            // whichever it keeps -- this is what actually fixes
+                            // the "crowded with Week of … labels" problem, on
+                            // top of the display window already being much
+                            // smaller than the full fetched history.
+                            autoSkip: true,
+                            maxTicksLimit: 10,
                             font: { size: 10 },
-                            callback: function(val, index) {
+                            callback: function(val) {
+                                // Concise on the axis ("Sep 8" instead of "Week of
+                                // Sep 8") -- the tooltip TITLE above still uses the
+                                // full original label untouched, since this
+                                // callback only affects what's drawn on the axis.
                                 const label = this.getLabelForValue(val);
-                                return label.length > 15 ? label.substring(0, 13) + '…' : label;
+                                return label.replace(/^Week of /, '');
                             }
                         },
                         grid: { color: 'rgba(0,0,0,0.05)' }
@@ -877,37 +1058,95 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
 
     function renderComponentsTable(history, components) {
-        const tbody = document.getElementById('components-tbody');
+        const rows = history.map((h, i) => ({
+            label:    h.week_label,
+            qty:      h.total_qty,
+            level:    components.levels?.[i],
+            trend:    components.trends?.[i],
+            seasonal: components.seasonals?.[i],
+            fitted:   components.fitted?.[i]
+        }));
+
+        renderPaginatedTable({
+            tbodyId:      'components-tbody',
+            paginationId: 'components-pagination',
+            rows,
+            pageSize:     10,
+            rowRenderer:  r => `
+                <tr>
+                    <td>${r.label}</td>
+                    <td><strong>${r.qty}</strong></td>
+                    <td>${r.level    != null ? r.level                : '—'}</td>
+                    <td>${r.trend    != null ? r.trend.toFixed(2)     : '—'}</td>
+                    <td>${r.seasonal != null ? r.seasonal.toFixed(2)  : '—'}</td>
+                    <td>${r.fitted   != null ? r.fitted               : '—'}</td>
+                </tr>
+            `
+        });
+    }
+
+    // Shared by Weekly Demand Predictions and Historical Data -- renders
+    // `pageSize` rows at a time into the given tbody, with Prev/Next
+    // controls in the given pagination container. Keeps its own page
+    // state per call (a fresh call, e.g. from a new forecast, always
+    // starts back at page 1).
+    function renderPaginatedTable({ tbodyId, paginationId, rows, pageSize, rowRenderer }) {
+        const tbody = document.getElementById(tbodyId);
+        const paginationEl = document.getElementById(paginationId);
         if (!tbody) return;
 
-        tbody.innerHTML = history.map((h, i) => `
-            <tr>
-                <td>${h.week_label}</td>
-                <td><strong>${h.total_qty}</strong></td>
-                <td>${components.levels?.[i] != null   ? components.levels[i]               : '—'}</td>
-                <td>${components.trends?.[i] != null   ? components.trends[i].toFixed(2)    : '—'}</td>
-                <td>${components.seasonals?.[i] != null ? components.seasonals[i].toFixed(2) : '—'}</td>
-                <td>${components.fitted?.[i]  != null  ? components.fitted[i]               : '—'}</td>
-            </tr>
-        `).join('');
+        let currentPage = 1;
+        const totalPages = Math.max(1, Math.ceil(rows.length / pageSize));
+
+        function renderPage() {
+            const start = (currentPage - 1) * pageSize;
+            tbody.innerHTML = rows.slice(start, start + pageSize).map(rowRenderer).join('');
+
+            if (!paginationEl) return;
+
+            if (totalPages <= 1) {
+                paginationEl.innerHTML = '';
+                return;
+            }
+
+            paginationEl.innerHTML = `
+                <button type="button" class="pg-btn" id="${paginationId}-prev" ${currentPage === 1 ? 'disabled' : ''}>‹ Prev</button>
+                <span class="pg-info">Page ${currentPage} of ${totalPages}</span>
+                <button type="button" class="pg-btn" id="${paginationId}-next" ${currentPage === totalPages ? 'disabled' : ''}>Next ›</button>
+            `;
+            document.getElementById(`${paginationId}-prev`)?.addEventListener('click', () => { currentPage--; renderPage(); });
+            document.getElementById(`${paginationId}-next`)?.addEventListener('click', () => { currentPage++; renderPage(); });
+        }
+
+        renderPage();
     }
 
     // ────────────────────────────────────────────────────────
     // COMPARE ALL METHODS
     // ────────────────────────────────────────────────────────
+    // Each method only ever forecasts as far as ITS OWN available range
+    // supports (see HORIZON_OPTIONS above) -- Moving Average tops out at 4
+    // weeks, Exponential Smoothing at 12, Holt-Winters at the full custom
+    // range (26). Forcing every method to the same horizon regardless of
+    // what it actually supports would mean either capping everything down
+    // to Moving Average's ceiling (hiding what the other two can really
+    // do) or projecting Moving Average further out than it was ever
+    // designed for.
+    const METHOD_MAX_PERIODS = { 'moving-average': 4, 'exponential': 12, 'holt-winters': 26 };
+
     async function compareAllMethods() {
         const productId = productSelect?.value;
         if (!productId) { Toast.show('Please select a product first.', 'warning'); return; }
 
         compareBtn.disabled    = true;
-        compareBtn.textContent = '⏳ Comparing…';
+        compareBtn.textContent = 'Comparing…';
 
-        // Comparison always uses a fixed 4-week horizon for all 3 methods —
-        // that's the largest horizon Moving Average can meaningfully support,
-        // so it's the fair common ground for an apples-to-apples comparison,
-        // independent of whatever horizon is currently selected for the
-        // single-method view.
-        const COMPARE_PERIODS = 4;
+        // Uses whatever forecast range is CURRENTLY selected on screen, so
+        // the comparison reflects the same horizon the person is already
+        // looking at -- clamped per method to what that method actually
+        // supports (see METHOD_MAX_PERIODS above), rather than a horizon
+        // hard-coded to 4 weeks regardless of the on-screen selection.
+        const requestedPeriods = resolvePeriods();
 
         try {
             // Fetch history and run all 3 algorithms client-side for consistent results
@@ -927,14 +1166,21 @@ document.addEventListener('DOMContentLoaded', async () => {
                 return;
             }
 
-            // Run all 3 locally, all at the same fixed horizon
+            // Run all 3 locally, each capped to its own supported range
             const history = data.history;
+            const sales   = history.map(h => h.total_qty);
 
-            const maResult  = runMovingAverage(history.map(h => h.total_qty), COMPARE_PERIODS);
-            const sesResult = runExponentialSmoothing(history.map(h => h.total_qty), COMPARE_PERIODS);
-            const hwResult  = runHoltWinters(history.map(h => h.total_qty), COMPARE_PERIODS);
+            const periodsByMethod = {
+                'moving-average': Math.min(requestedPeriods, METHOD_MAX_PERIODS['moving-average']),
+                'exponential':    Math.min(requestedPeriods, METHOD_MAX_PERIODS['exponential']),
+                'holt-winters':   Math.min(requestedPeriods, METHOD_MAX_PERIODS['holt-winters'])
+            };
 
-            renderComparisonModalLocal(data.product, maResult, sesResult, hwResult, COMPARE_PERIODS);
+            const maResult  = runMovingAverage(sales, periodsByMethod['moving-average']);
+            const sesResult = runExponentialSmoothing(sales, periodsByMethod['exponential']);
+            const hwResult  = runHoltWinters(sales, periodsByMethod['holt-winters']);
+
+            renderComparisonModalLocal(data.product, maResult, sesResult, hwResult, periodsByMethod, requestedPeriods);
             modal?.classList.remove('hidden');
 
         } catch (err) {
@@ -942,75 +1188,113 @@ document.addEventListener('DOMContentLoaded', async () => {
             Toast.show('Error comparing methods.', 'error');
         } finally {
             compareBtn.disabled    = false;
-            compareBtn.textContent = '📊 Compare All Methods';
+            compareBtn.textContent = 'Compare All Methods';
         }
     }
 
-    function renderComparisonModalLocal(product, ma, ses, hw, periods) {
+    function renderComparisonModalLocal(product, ma, ses, hw, periodsByMethod, requestedPeriods) {
         const body = document.getElementById('comparison-body');
         if (!body) return;
 
+        const titleEl = document.getElementById('comparison-modal-title');
+        if (titleEl) titleEl.textContent = `Algorithm Comparison: ${product.name}`;
+
+        // Same names shown on the algorithm cards earlier on this page
+        // (Moving Average / Exponential Smoothing / Holt-Winters) -- this
+        // table used to call them "Simple Average"/"Weighted Average"/
+        // "Seasonal Forecast" instead, which read as three DIFFERENT,
+        // unrelated methods rather than the exact three already selected
+        // from above.
         const methods = [
-            { name: 'Simple Average',    emoji: '📊', result: ma,  desc: 'Best for stable, predictable products' },
-            { name: 'Weighted Average',  emoji: '📉', result: ses, desc: 'Best for products with gradual growth/decline' },
-            { name: 'Seasonal Forecast', emoji: '🌟', result: hw,  desc: 'Best for seasonal patterns (recommended)' }
+            { key: 'moving-average', name: 'Moving Average',        result: ma,  desc: 'Best for stable, predictable products' },
+            { key: 'exponential',    name: 'Exponential Smoothing', result: ses, desc: 'Best for products with gradual growth/decline' },
+            // No "(recommended)" here -- the BEST FIT badge below already
+            // says which method actually won for THIS product; hardcoding
+            // a recommendation onto Holt-Winters regardless of the real
+            // result would contradict that badge whenever a different
+            // method scores better (as seen above: Exponential Smoothing).
+            { key: 'holt-winters',   name: 'Holt-Winters',          result: hw,  desc: 'Best for seasonal patterns' }
         ];
 
-        // Find best method (lowest MAPE)
-        const bestMethod = methods.reduce((best, m) => m.result.mape < best.result.mape ? m : best, methods[0]);
+        // Only methods with a measurable MAPE can be meaningfully compared.
+        // A null MAPE means "not enough sales history to score" -- not "0%
+        // error" -- and must never accidentally win "best fit" through JS's
+        // null-coerces-to-0 comparison quirk (null < 5 is true!).
+        const scorable = methods.filter(m => m.result.mape !== null);
+
+        // A "best" pick is only meaningful if at least one method actually
+        // scored reasonably well. When every method's error is this high
+        // (>=90%), the underlying sales history is too sparse for the
+        // comparison to mean anything -- reduce() would still pick ONE as
+        // "BEST FIT" in that case (usually just whichever comes first when
+        // every score ties), which looks like a real recommendation but
+        // isn't one.
+        const bestMethod = (scorable.length && scorable.some(m => m.result.mape < 90))
+            ? scorable.reduce((best, m) => m.result.mape < best.result.mape ? m : best, scorable[0])
+            : null;
 
         body.innerHTML = `
-            <p style="font-size:0.85rem;color:var(--secondary);margin-bottom:20px">
-                Comparing 3 prediction methods for <strong>${product.name}</strong>.
-                "Error %" shows how accurate each method was against past sales — lower is better.
-            </p>
             <div style="overflow-x:auto">
-                <table style="width:100%;border-collapse:collapse;font-size:0.875rem">
+                <table style="width:100%;border-collapse:collapse;font-size:0.85rem">
                     <thead>
                         <tr style="background:var(--light-blue)">
-                            <th style="padding:12px 10px;text-align:left;border-bottom:2px solid var(--primary)">Method</th>
-                            <th style="padding:12px 10px;text-align:center;border-bottom:2px solid var(--primary)">Accuracy (lower = better)</th>
-                            <th style="padding:12px 10px;text-align:center;border-bottom:2px solid var(--primary)">Total Predicted (${periods} wks)</th>
-                            <th style="padding:12px 10px;text-align:left;border-bottom:2px solid var(--primary)">Best Used For</th>
+                            <th style="padding:10px 8px;text-align:left;border-bottom:2px solid var(--primary)">Method</th>
+                            <th style="padding:10px 8px;text-align:center;border-bottom:2px solid var(--primary)">Accuracy (lower = better)</th>
+                            <th style="padding:10px 8px;text-align:center;border-bottom:2px solid var(--primary)">Total Predicted</th>
+                            <th style="padding:10px 8px;text-align:left;border-bottom:2px solid var(--primary)">Best Used For</th>
                         </tr>
                     </thead>
                     <tbody>
                         ${methods.map(m => {
-                            const isBest  = m.name === bestMethod.name;
-                            const total   = m.result.predictions.reduce((s, p) => s + p.forecast, 0);
+                            const isBest   = bestMethod && m.name === bestMethod.name;
+                            const total    = m.result.predictions.reduce((s, p) => s + p.forecast, 0);
+                            const hasScore = m.result.mape !== null;
+                            const periods  = periodsByMethod[m.key];
                             return `
                             <tr style="border-bottom:1px solid var(--gray-200);${isBest ? 'background:#f0f7ff' : ''}">
-                                <td style="padding:12px 10px">
-                                    <span style="font-size:1.2rem">${m.emoji}</span>
-                                    <strong style="margin-left:8px">${m.name}</strong>
-                                    ${isBest ? '<span style="margin-left:8px;background:var(--primary);color:white;padding:2px 8px;border-radius:10px;font-size:0.68rem;font-weight:700">BEST FIT</span>' : ''}
+                                <td style="padding:10px 8px">
+                                    <strong>${m.name}</strong>
+                                    ${isBest ? '<span style="margin-left:6px;background:var(--primary);color:white;padding:2px 7px;border-radius:10px;font-size:0.65rem;font-weight:700">BEST FIT</span>' : ''}
                                 </td>
-                                <td style="padding:12px 10px;text-align:center">
-                                    <span style="font-size:1.1rem;font-weight:700;color:${m.result.mape < 20 ? 'var(--success)' : m.result.mape < 40 ? '#f0ad4e' : 'var(--danger)'}">
+                                <td style="padding:10px 8px;text-align:center">
+                                    ${hasScore ? `
+                                    <span style="font-size:1.05rem;font-weight:700;color:${m.result.mape < 20 ? 'var(--success)' : m.result.mape < 40 ? '#f0ad4e' : 'var(--danger)'}">
                                         ${m.result.mape}%
                                     </span>
-                                    <div style="font-size:0.72rem;color:var(--secondary)">${m.result.mape < 20 ? 'Excellent' : m.result.mape < 40 ? 'Acceptable' : 'Less accurate'}</div>
+                                    <div style="font-size:0.68rem;color:var(--secondary)">${m.result.mape < 20 ? 'Excellent' : m.result.mape < 40 ? 'Acceptable' : 'Less accurate'}</div>
+                                    ` : `
+                                    <span style="font-size:1.05rem;font-weight:700;color:var(--secondary)">N/A</span>
+                                    <div style="font-size:0.68rem;color:var(--secondary)">No sales data yet</div>
+                                    `}
                                 </td>
-                                <td style="padding:12px 10px;text-align:center;font-size:1.1rem;font-weight:700;color:var(--primary)">${total} units</td>
-                                <td style="padding:12px 10px;font-size:0.82rem;color:var(--secondary)">${m.desc}</td>
+                                <td style="padding:10px 8px;text-align:center;font-size:1.05rem;font-weight:700;color:var(--primary)">
+                                    ${total} units
+                                    <div style="font-size:0.68rem;font-weight:600;color:var(--secondary)">${periods} wk${periods > 1 ? 's' : ''}${periods < requestedPeriods ? ' (max for this method)' : ''}</div>
+                                </td>
+                                <td style="padding:10px 8px;font-size:0.8rem;color:var(--secondary)">${m.desc}</td>
                             </tr>`;
                         }).join('')}
                     </tbody>
                 </table>
             </div>
-            <div style="margin-top:20px;padding:16px;background:#eef4ff;border-radius:10px;border-left:4px solid var(--primary)">
-                <strong>💡 Our Recommendation for ${product.name}:</strong>
-                <p style="margin-top:8px;font-size:0.875rem">
-                    Based on historical sales, the <strong>${bestMethod.emoji} ${bestMethod.name}</strong> method has the lowest error rate
+            ${bestMethod ? `
+            <div style="margin-top:14px;padding:12px 14px;background:#eef4ff;border-radius:10px;border-left:4px solid var(--primary)">
+                <strong style="font-size:0.88rem">Our Recommendation for ${product.name}:</strong>
+                <p style="margin-top:6px;font-size:0.83rem">
+                    Based on historical sales, the <strong>${bestMethod.name}</strong> method has the lowest error rate
                     (${bestMethod.result.mape}%). This means it would have predicted past sales most accurately.
                     We recommend using this method for future forecasts of this product.
                 </p>
-                <p style="margin-top:8px;font-size:0.8rem;color:var(--secondary)">
-                    Note: If this product has strong seasonal demand patterns (e.g., cold medicine, antihistamines),
-                    the Seasonal Forecast method is generally the most reliable regardless of past error rates,
-                    because it accounts for future seasonal spikes that may not have appeared in the training data.
+            </div>
+            ` : `
+            <div style="margin-top:14px;padding:12px 14px;background:#fff8e6;border-radius:10px;border-left:4px solid #f0ad4e">
+                <strong style="font-size:0.88rem">Not enough sales data to compare reliably</strong>
+                <p style="margin-top:6px;font-size:0.83rem">
+                    This product's sales history is too limited or inconsistent for any of the three methods to be scored with confidence right now.
+                    The predictions above are still shown, but treat them as rough starting estimates until more real sales accumulate.
                 </p>
             </div>
+            `}
         `;
     }
 
@@ -1018,6 +1302,10 @@ document.addEventListener('DOMContentLoaded', async () => {
     function renderComparisonModal(data) {
         const body = document.getElementById('comparison-body');
         if (!body) return;
+
+        const titleEl = document.getElementById('comparison-modal-title');
+        if (titleEl) titleEl.textContent = data?.product?.name ? `Algorithm Comparison: ${data.product.name}` : 'Algorithm Comparison';
+
         body.innerHTML = `
             <table style="width:100%;border-collapse:collapse;font-size:0.875rem">
                 <thead>
@@ -1028,12 +1316,17 @@ document.addEventListener('DOMContentLoaded', async () => {
                     </tr>
                 </thead>
                 <tbody>
-                    ${(data.methods || []).map(m => `
+                    ${(data.methods || []).map(m => {
+                        const mapeDisplay = m.mape === null ? 'N/A'
+                            : m.mape === 'Calculated on-demand' ? m.mape
+                            : `${m.mape}%`;
+                        return `
                     <tr style="border-bottom:1px solid var(--gray-200)">
                         <td style="padding:10px"><strong>${m.name}</strong></td>
-                        <td style="padding:10px;text-align:center">${m.mape}${typeof m.mape === 'number' ? '%' : ''}</td>
+                        <td style="padding:10px;text-align:center">${mapeDisplay}</td>
                         <td style="padding:10px;font-size:0.82rem;color:var(--secondary)">${m.bestFor}</td>
-                    </tr>`).join('')}
+                    </tr>`;
+                    }).join('')}
                 </tbody>
             </table>
             ${data.recommendation ? `<div style="margin-top:16px;padding:14px;background:#eef4ff;border-radius:8px;border-left:4px solid var(--primary);font-size:0.875rem">${data.recommendation}</div>` : ''}
@@ -1051,7 +1344,10 @@ document.addEventListener('DOMContentLoaded', async () => {
                 count++;
             }
         }
-        return count === 0 ? 0 : parseFloat(((sum / count) * 100).toFixed(1));
+        // No comparable weeks means accuracy genuinely cannot be measured —
+        // return null rather than 0, since 0% would misleadingly imply a
+        // perfect score when really there was nothing to score at all.
+        return count === 0 ? null : parseFloat(((sum / count) * 100).toFixed(1));
     }
 
     function checkUrlParams() {

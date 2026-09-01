@@ -7,6 +7,7 @@ const Product      = require('../models/Product');
 const Order        = require('../models/Order');
 const OrderItem    = require('../models/OrderItem');
 const User         = require('../models/User');
+const CashSession  = require('../models/CashSession');
 const { logAudit } = require('../middleware/authMiddleware');
 
 function getManilaDateString() {
@@ -98,8 +99,27 @@ const searchProducts = async (req, res, next) => {
  *   payment_method: 'cash',
  *   amount_tendered: 500,
  *   discount: 0,
- *   notes: ''
+ *   notes: '',
+ *   cash_session_id: 12   // the OPEN register this sale belongs to
  * }
+ *
+ * ── Cash register gating ──────────────────────────────────────
+ * A sale can only be completed while the cashier has an OPEN cash
+ * session ("register"). The frontend sends the `cash_session_id` it
+ * had cached at the moment Checkout was clicked — this matters for
+ * offline mode: if a sale is queued while offline and only syncs
+ * later (possibly after that shift has since closed and a new one
+ * opened), we must NOT silently attach it to whatever session happens
+ * to be open at sync time. Instead we verify the *specific* session ID
+ * the sale was originally meant for is still open, and reject cleanly
+ * if not, rather than misattributing it to the wrong shift's totals.
+ *
+ * The check is done via SELECT ... FOR UPDATE inside this transaction,
+ * so it's impossible for a concurrent "Close Register" request to slip
+ * in between the check and the order being created — whichever request
+ * (checkout or close) begins its transaction first, InnoDB makes the
+ * other one wait until the first commits, so there's no window where
+ * a sale can be silently lost from a shift's totals.
  *
  * Cart lines represent a *product family* (grouped across batches in the
  * UI), not a single exact batch row. Each line carries an ordered
@@ -108,18 +128,9 @@ const searchProducts = async (req, res, next) => {
  * first, spilling into the next batch only if needed — this keeps
  * unit_cost accurate per batch actually sold, so profit reporting stays
  * correct even when a single sale spans multiple batches.
- *
- * ── Transaction flow ──────────────────────────────────────────
- * 1. Validate each item (resolve FEFO across batches, check stock)
- * 2. BEGIN TRANSACTION
- * 3. Create order header
- * 4. Create order items (snapshots of price/batch/cost, one per batch used)
- * 5. Decrement stock for each batch actually consumed
- * 6. COMMIT
- * 7. Return receipt data
  */
 const checkout = async (req, res, next) => {
-    const { items, payment_method = 'cash', amount_tendered, discount = 0, notes = '' } = req.body;
+    const { items, payment_method = 'cash', amount_tendered, discount = 0, notes = '', cash_session_id } = req.body;
 
     if (!items || !items.length) {
         return res.status(400).json({ success: false, message: 'Cart is empty.' });
@@ -209,6 +220,38 @@ const checkout = async (req, res, next) => {
     try {
         await connection.beginTransaction();
 
+        // Row-lock this cashier's open session for the duration of this
+        // transaction. If a concurrent Close Register request is also in
+        // flight, InnoDB serializes them — whichever started first wins,
+        // the other waits, so a sale can never be silently dropped from a
+        // shift's totals due to a timing coincidence.
+        const openSession = await CashSession.lockOpenByCashier(req.user.id, connection);
+
+        if (!openSession) {
+            await connection.rollback();
+            return res.status(400).json({
+                success: false,
+                blocked: true,
+                reason: 'no_open_register',
+                message: 'Please open your register before processing sales.'
+            });
+        }
+
+        // If the frontend had a specific session cached (the normal case,
+        // and the important case for offline-queued sales), it must match
+        // the session that's ACTUALLY open right now. A mismatch means the
+        // original shift this sale was meant for is no longer open — reject
+        // cleanly rather than silently attaching it to a different shift.
+        if (cash_session_id && parseInt(cash_session_id) !== openSession.id) {
+            await connection.rollback();
+            return res.status(409).json({
+                success: false,
+                blocked: true,
+                reason: 'session_mismatch',
+                message: 'Your register session has changed since this sale was started. Please refresh and try again.'
+            });
+        }
+
         const order_number = await Order.generateOrderNumber();
 
         // Create order header
@@ -222,7 +265,8 @@ const checkout = async (req, res, next) => {
             payment_method,
             amount_tendered: tenderedAmount,
             change_amount:  change,
-            notes
+            notes,
+            cash_session_id: openSession.id
         }, connection);
 
         // Create order items
@@ -313,16 +357,13 @@ const aiSuggest = async (req, res) => {
 
 /**
  * GET /api/pos/void-candidate
- * Returns the transaction that a Void click would target, so the frontend
- * can show a confirmation with real details before committing to anything.
- * Scoped to the CURRENT LOGIN SESSION only — every role (including
- * admin/super_admin) can only ever reach THEIR OWN most recent completed
- * sale, made after their current session began. Nothing system-wide,
- * nothing from before this login.
+ * Returns just the single MOST RECENT transaction (kept for backward
+ * compatibility) — new code should use GET /api/pos/void-candidates
+ * instead, which returns a list to choose from.
  */
 const getVoidCandidate = async (req, res, next) => {
     try {
-        const order = await Order.findLastCompletedInSession(req.user.id, req.user.session_iat);
+        const order = await Order.findLastCompletedInSession();
 
         if (!order) {
             return res.json({ success: true, data: null });
@@ -335,34 +376,67 @@ const getVoidCandidate = async (req, res, next) => {
 };
 
 /**
+ * GET /api/pos/void-candidates
+ * Returns up to the last 50 completed transactions from the last
+ * CALENDAR MONTH (see Order.js), from ANY cashier -- not just the
+ * requester's own -- each with its item list attached, so someone with
+ * void access can pick which one to void instead of only ever being able
+ * to void the very last sale. Useful when a wrong item (e.g. the wrong
+ * medicine) wasn't caught until later, possibly by a different cashier
+ * than the one who made the sale.
+ */
+const getVoidCandidates = async (req, res, next) => {
+    try {
+        const orders = await Order.findRecentCompletedInSession(50);
+
+        if (!orders.length) {
+            return res.json({ success: true, data: [] });
+        }
+
+        const withItems = await Promise.all(
+            orders.map(async (order) => ({
+                ...order,
+                items: await OrderItem.findByOrderId(order.id)
+            }))
+        );
+
+        res.json({ success: true, data: withItems });
+    } catch (err) { next(err); }
+};
+
+/**
  * POST /api/pos/void
- * Voids the same transaction returned by /void-candidate, restoring stock
- * to the exact batches it was originally deducted from.
+ * Voids a specific transaction (body: { order_id }), restoring stock to
+ * the exact batches it was originally deducted from. Falls back to "the
+ * last transaction" if no order_id is given, for backward compatibility
+ * with anything still calling this the old way.
  *
  * ── Rules ──────────────────────────────────────────────────
- * - Scoped to the CURRENT LOGIN SESSION, for every role. This is stricter
- *   than "today" — it's tied to the JWT that was issued at THIS login, so
- *   logging out and back in (even as the same person) starts a fresh
- *   boundary. An admin/owner can never reach a cashier's transaction this
- *   way, and can't even reach their OWN transactions from a previous login.
- * - Cashiers cannot void on their own authority: an admin or super_admin
- *   ("owner") must approve by entering their own email + password in the
- *   request body (manager_email / manager_password). The void is then
- *   attributed to that approving admin/owner in the audit log — not the
- *   cashier — since they're the one who actually authorized it. Approval
- *   does NOT change which order gets targeted — it's still whatever the
- *   cashier's OWN current session last completed.
- * - Admins/super_admins void on their own authority (no approval needed),
- *   but only their OWN current-session transactions — same rule as anyone
- *   else.
+ * - Scoped to a rolling ONE CALENDAR MONTH window, system-wide -- no
+ *   longer restricted to "your own" transactions. Anyone with void access
+ *   can void ANY cashier's completed sale from within that window, not
+ *   just their own. Picking a SPECIFIC order_id doesn't relax the window
+ *   at all -- it's checked with the exact same WHERE clause as "the last
+ *   one" (see Order.findByIdInSession).
+ * - Cashiers still cannot void on their own authority: an admin or
+ *   super_admin ("owner") must approve by entering their own email +
+ *   password in the request body (manager_email / manager_password),
+ *   regardless of whose sale is being voided.
+ * - Audit attribution: logged under req.user.id -- the person who actually
+ *   PERFORMED the void -- not the order's original cashier, since those
+ *   can now be different people. The order's original cashier name/id is
+ *   recorded in `details` (original_cashier / original_cashier_id) so the
+ *   trail still clearly shows whose sale it was, alongside approved_by
+ *   when a cashier needed manager sign-off.
  * - Stock is restored per batch (order_items.product_id is the exact batch
  *   row consumed at checkout time), not just added back to "the product"
  *   generically — so batch-level stock stays accurate.
  */
 const voidLastOrder = async (req, res, next) => {
     const isCashier = req.user.role === 'cashier';
-    let approverId   = req.user.id;
-    let approverName = req.user.name;
+    const { order_id } = req.body;
+    let approverId   = null;  // stays null unless a cashier's void needed manager approval
+    let approverName = null;
 
     // ── Manager/owner override required for cashiers ──────────
     if (isCashier) {
@@ -386,22 +460,23 @@ const voidLastOrder = async (req, res, next) => {
             return res.status(401).json({ success: false, message: 'Invalid admin/owner credentials.' });
         }
 
-        // The void is attributed to the APPROVING admin/owner, not the cashier
-        // who requested it — they're the one who authorized it.
         approverId   = manager.id;
         approverName = manager.name;
     }
 
     const connection = await db.getConnection();
     try {
-        // Always scoped to the REQUESTING session's own user + own session
-        // start — manager approval authorizes the void, it does not expand
-        // which order is reachable.
-        const order = await Order.findLastCompletedInSession(req.user.id, req.user.session_iat);
+        // A specific order_id picks exactly that transaction (still fully
+        // scoped to the 1-month window — see Order.findByIdInSession);
+        // omitting it falls back to "the last one", for anything still
+        // calling this the old way.
+        const order = order_id
+            ? await Order.findByIdInSession(order_id)
+            : await Order.findLastCompletedInSession();
 
         if (!order) {
             connection.release();
-            return res.status(404).json({ success: false, message: 'No transaction from this session available to void.' });
+            return res.status(404).json({ success: false, message: 'That transaction is not available to void.' });
         }
 
         const items = await OrderItem.findByOrderId(order.id);
@@ -430,19 +505,26 @@ const voidLastOrder = async (req, res, next) => {
 
         await connection.commit();
 
-        await logAudit(approverId, 'VOID_ORDER', 'orders', order.id,
+        // Attributed to whoever actually PERFORMED the void (req.user.id) --
+        // the order's original cashier is recorded separately in details,
+        // since the two can now be different people (see docstring above).
+        await logAudit(req.user.id, 'VOID_ORDER', 'orders', order.id,
             {
                 order_number: order.order_number,
                 total: order.total,
-                ...(isCashier ? { requested_by: req.user.name, requested_by_id: req.user.id } : {})
+                original_cashier: order.cashier_name,
+                original_cashier_id: order.cashier_id,
+                ...(approverName ? { approved_by: approverName, approved_by_id: approverId } : {})
             },
             req.ip);
+
+        const originalCashierNote = order.cashier_id !== req.user.id ? ` (originally rung up by ${order.cashier_name})` : '';
 
         res.json({
             success: true,
             message: isCashier
-                ? `Order ${order.order_number} voided by ${approverName}. Stock has been restored.`
-                : `Order ${order.order_number} voided. Stock has been restored.`
+                ? `Order ${order.order_number}${originalCashierNote} voided by ${approverName}. Stock has been restored.`
+                : `Order ${order.order_number}${originalCashierNote} voided. Stock has been restored.`
         });
 
     } catch (err) {
@@ -453,4 +535,4 @@ const voidLastOrder = async (req, res, next) => {
     }
 };
 
-module.exports = { searchProducts, checkout, aiSuggest, getVoidCandidate, voidLastOrder };
+module.exports = { searchProducts, checkout, aiSuggest, getVoidCandidate, getVoidCandidates, voidLastOrder };

@@ -21,7 +21,6 @@ document.addEventListener('DOMContentLoaded', () => {
     const dateFilter   = document.getElementById('filter-date');
     const clearBtn     = document.getElementById('btn-clear-filters');
     const refreshBtn   = document.getElementById('btn-refresh');
-    const exportBtn    = document.getElementById('btn-export-audit');
 
     // ── Boot ─────────────────────────────────────────────────
     loadAuditLogs();
@@ -33,12 +32,59 @@ document.addEventListener('DOMContentLoaded', () => {
     dateFilter?.addEventListener('change',    applyFilters);
     clearBtn?.addEventListener('click',       clearFilters);
     refreshBtn?.addEventListener('click',     loadAuditLogs);
-    exportBtn?.addEventListener('click',      exportCSV);
+
+    // Suggests by cashier/user name -- the field most audit searches are
+    // actually looking for ("who did this"). It won't suggest matches by
+    // action/entity text, but the box still filters by all three once you
+    // hit Enter or keep typing, same as before.
+    SearchSuggest.attach(searchInput, {
+        getItems:    () => allLogs,
+        getLabel:    l => l.user_name || '',
+        getSubLabel: l => (l.action || '').replace(/_/g, ' ')
+    });
+
+    // ── Export dropdown (Excel / PDF / Word) ────────────
+    // Mirrors whatever filters are currently applied on screen, so the
+    // export always matches what's actually visible in the table.
+    const exportToggleBtn = document.getElementById('btn-export-toggle');
+    const exportMenu       = document.getElementById('export-menu');
+
+    exportToggleBtn?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        exportMenu?.classList.toggle('hidden');
+    });
+    document.addEventListener('click', (e) => {
+        if (exportMenu && !exportMenu.classList.contains('hidden') && !e.target.closest('#export-dropdown')) {
+            exportMenu.classList.add('hidden');
+        }
+    });
+    document.querySelectorAll('.export-menu-item').forEach(btn => {
+        btn.addEventListener('click', () => {
+            exportMenu?.classList.add('hidden');
+            exportAuditLogs(btn.dataset.format);
+        });
+    });
+
+    async function exportAuditLogs(format) {
+        const params = new URLSearchParams();
+        if (searchInput?.value.trim()) params.set('search', searchInput.value.trim());
+        if (actionFilter?.value)       params.set('action', actionFilter.value);
+        if (entityFilter?.value)       params.set('entity', entityFilter.value);
+        if (dateFilter?.value)         params.set('date', dateFilter.value);
+
+        Toast.show('Preparing report…', 'info');
+        const config = typeof getRuntimeConfig === 'function' ? getRuntimeConfig() : CONFIG;
+        const ok = await downloadAuthenticatedFile(
+            `${config.API_BASE}/auth/audit-logs/export/${format}?${params.toString()}`,
+            `PharmaTrack_Audit_Log.${format === 'excel' ? 'xlsx' : format === 'word' ? 'docx' : 'pdf'}`
+        );
+        if (!ok) Toast.show('Export failed. Check your connection.', 'error');
+    }
 
     // ── Load audit logs from API ──────────────────────────────
     async function loadAuditLogs() {
         if (tbody) {
-            tbody.innerHTML = `<tr><td colspan="7" class="text-center" style="padding:40px">
+            tbody.innerHTML = `<tr><td colspan="6" class="text-center" style="padding:40px">
                 <div class="spinner" style="margin:0 auto"></div>
             </td></tr>`;
         }
@@ -48,7 +94,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!data?.success) {
             Toast.show('Failed to load audit logs.', 'error');
             if (tbody) {
-                tbody.innerHTML = `<tr><td colspan="7" class="text-center text-muted" style="padding:40px">
+                tbody.innerHTML = `<tr><td colspan="6" class="text-center text-muted" style="padding:40px">
                     Failed to load audit logs. Check your connection.
                 </td></tr>`;
             }
@@ -113,6 +159,30 @@ document.addEventListener('DOMContentLoaded', () => {
         applyFilters();
     }
 
+    // Display-only maps — underlying values in the database/logic (role,
+    // entity) never change, only what's shown on screen here.
+    const ROLE_LABELS = { super_admin: 'Owner', admin: 'Admin', cashier: 'Pharmacy Assistant' };
+
+    function roleLabel(role) {
+        if (!role) return '';
+        return ROLE_LABELS[role] || role.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+    }
+
+    const ENTITY_LABELS = {
+        products:       'Product',
+        users:          'User',
+        orders:         'Order',
+        order_items:    'Order Item',
+        cash_sessions:  'Cash Session',
+        cash_movements: 'Cash Movement',
+        audit_logs:     'Audit Log'
+    };
+
+    function entityLabel(entity) {
+        if (!entity) return '—';
+        return ENTITY_LABELS[entity] || entity.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+    }
+
     // ── Render table ──────────────────────────────────────────
     function renderTable() {
         if (!tbody) return;
@@ -122,9 +192,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
         if (!filteredLogs.length) {
             tbody.innerHTML = `
-                <tr><td colspan="7">
+                <tr><td colspan="6">
                     <div class="empty-audit">
-                        <div class="empty-icon">🔍</div>
                         <div>No audit logs found for the selected filters.</div>
                     </div>
                 </td></tr>`;
@@ -134,7 +203,7 @@ document.addEventListener('DOMContentLoaded', () => {
         tbody.innerHTML = page.map((log, i) => {
             const globalIdx = start + i;
             const badgeHtml = getActionBadge(log.action);
-            const roleLabel = log.user_role ? `<span style="font-size:0.68rem;color:var(--secondary);margin-left:4px">(${log.user_role.replace('_', ' ')})</span>` : '';
+            const roleLabelText = log.user_role ? `<span style="font-size:0.68rem;color:var(--secondary);margin-left:4px">(${roleLabel(log.user_role)})</span>` : '';
 
             return `
             <tr>
@@ -143,17 +212,16 @@ document.addEventListener('DOMContentLoaded', () => {
                 </td>
                 <td style="white-space:nowrap;font-size:0.83rem">${Fmt.datetime(log.created_at)}</td>
                 <td>
-                    <span class="fw-600">${escHtml(log.user_name || '—')}</span>${roleLabel}
+                    <span class="fw-600">${escHtml(log.user_name || '—')}</span>${roleLabelText}
                 </td>
                 <td>${badgeHtml}</td>
-                <td style="font-size:0.83rem">${log.entity ? escHtml(log.entity) : '—'}</td>
+                <td style="font-size:0.83rem">${entityLabel(log.entity)}</td>
                 <td style="font-size:0.83rem;color:var(--secondary)">${log.entity_id || '—'}</td>
-                <td style="font-size:0.83rem;color:var(--secondary)">${log.ip_address || '—'}</td>
             </tr>
             <tr class="detail-row hidden" id="detail-${globalIdx}">
-                <td colspan="7">
-                    <strong style="font-size:0.82rem">Details / Snapshot:</strong>
-                    <div class="detail-json">${formatDetails(log.details)}</div>
+                <td colspan="6">
+                    <strong style="font-size:0.82rem">Details:</strong>
+                    ${formatDetails(log)}
                 </td>
             </tr>`;
         }).join('');
@@ -188,15 +256,106 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // ── Format details JSON ───────────────────────────────────
-    function formatDetails(details) {
-        if (!details) return 'No details recorded.';
-        try {
-            const parsed = typeof details === 'string' ? JSON.parse(details) : details;
-            if (Object.keys(parsed).length === 0) return 'No additional details.';
-            return JSON.stringify(parsed, null, 2);
-        } catch {
-            return String(details);
+    function detailGrid(rows) {
+        return `<div class="detail-grid">${rows.map(([label, value]) =>
+            `<div class="detail-row-item"><span class="detail-label">${label}</span><span class="detail-value">${value}</span></div>`
+        ).join('')}</div>`;
+    }
+
+    function prettyLabel(key) {
+        return String(key).replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+    }
+
+    function formatDetails(log) {
+        const raw = log.details;
+        let parsed;
+        try { parsed = typeof raw === 'string' ? JSON.parse(raw) : raw; } catch (e) { parsed = null; }
+
+        if (!parsed || typeof parsed !== 'object' || Object.keys(parsed).length === 0) {
+            return '<span class="text-muted">No additional details.</span>';
         }
+
+        const action = log.action || '';
+
+        if (action === 'OPEN_CASH_SESSION') {
+            return detailGrid([['Opening Cash', Fmt.currency(parsed.opening_cash)]]);
+        }
+
+        if (action === 'CLOSE_CASH_SESSION') {
+            const variance = parseFloat(parsed.variance || 0);
+            const label = variance === 0 ? 'Balanced' : variance > 0 ? 'Overage' : 'Shortage';
+            const color = variance === 0 ? 'var(--success)' : variance > 0 ? '#92400e' : 'var(--danger)';
+            return detailGrid([
+                ['Expected Cash', Fmt.currency(parsed.expected)],
+                ['Actual Cash', Fmt.currency(parsed.actual)],
+                ['Variance', `<span style="color:${color}">${Fmt.currency(Math.abs(variance))} (${label})</span>`]
+            ]);
+        }
+
+        if (action === 'CASH_IN' || action === 'CASH_OUT') {
+            return detailGrid([
+                ['Amount', Fmt.currency(parsed.amount)],
+                ['Reason', escHtml(parsed.reason || '—')]
+            ]);
+        }
+
+        if (action === 'VOID_ORDER') {
+            const rows = [
+                ['Order #', escHtml(parsed.order_number || '—')],
+                ['Total', Fmt.currency(parsed.total)]
+            ];
+            if (parsed.requested_by) rows.push(['Requested By (Pharmacy Assistant)', escHtml(parsed.requested_by)]);
+            return detailGrid(rows);
+        }
+
+        if (action === 'CHECKOUT') {
+            return detailGrid([
+                ['Order #', escHtml(parsed.order_number || '—')],
+                ['Total', Fmt.currency(parsed.total)]
+            ]);
+        }
+
+        if (action === 'IMPORT_INVENTORY') {
+            return detailGrid([
+                ['Inserted', parsed.inserted != null ? parsed.inserted : 0],
+                ['Updated', parsed.updated != null ? parsed.updated : 0],
+                ['Errors', (parsed.errors || []).length]
+            ]);
+        }
+
+        if (action === 'UPDATE_PRODUCT' && parsed.before && parsed.after) {
+            const changed = Object.keys(parsed.after).filter(function(k) {
+                const b = parsed.before[k] == null ? '' : parsed.before[k];
+                const a = parsed.after[k]  == null ? '' : parsed.after[k];
+                return String(b) !== String(a);
+            });
+            if (!changed.length) return '<span class="text-muted">No fields changed.</span>';
+            return detailGrid(changed.map(function(k) {
+                const displayVal = v => k === 'role' ? roleLabel(v) : (v || '—');
+                return [prettyLabel(k), escHtml(displayVal(parsed.before[k])) + ' → ' + escHtml(displayVal(parsed.after[k]))];
+            }));
+        }
+
+        if (action === 'CREATE_PRODUCT') {
+            return detailGrid(
+                Object.entries(parsed)
+                    .filter(function(entry) { return entry[0] !== 'description'; })
+                    .map(function(entry) { return [prettyLabel(entry[0]), escHtml(entry[1] || '—')]; })
+            );
+        }
+
+        // Generic fallback for any action without a dedicated handler above
+        // (e.g. UPDATE_USER falls through to here) -- role-shaped keys are
+        // translated the same way the main table's role badge is, so a raw
+        // "super_admin"/"admin" value never leaks through untranslated.
+        return detailGrid(Object.entries(parsed).map(function(entry) {
+            const k = entry[0], v = entry[1];
+            if (k === 'role' || k.endsWith('_role')) {
+                return [prettyLabel(k), escHtml(roleLabel(v))];
+            }
+            const display = (typeof v === 'object' && v !== null) ? JSON.stringify(v) : v;
+            return [prettyLabel(k), escHtml(display == null ? '—' : display)];
+        }));
     }
 
     // ── Pagination ────────────────────────────────────────────
@@ -244,34 +403,6 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    // ── CSV Export ────────────────────────────────────────────
-    function exportCSV() {
-        if (!filteredLogs.length) {
-            Toast.show('No logs to export.', 'warning');
-            return;
-        }
-
-        const headers = ['Date/Time', 'User', 'Role', 'Action', 'Entity', 'Entity ID', 'IP Address', 'Details'];
-        const rows = filteredLogs.map(log => [
-            Fmt.datetime(log.created_at),
-            log.user_name  || '',
-            log.user_role  || '',
-            log.action     || '',
-            log.entity     || '',
-            log.entity_id  || '',
-            log.ip_address || '',
-            JSON.stringify(log.details || {}).replace(/"/g, '""')
-        ]);
-
-        const csv   = [headers, ...rows].map(r => r.map(v => `"${v}"`).join(',')).join('\n');
-        const fname = `pharmatrack_audit_${new Date().toISOString().split('T')[0]}.csv`;
-        const a     = Object.assign(document.createElement('a'), {
-            href:     URL.createObjectURL(new Blob([csv], { type: 'text/csv' })),
-            download: fname
-        });
-        a.click();
-        Toast.show('Audit log exported.', 'success');
-    }
 });
 
 // ── Utilities ─────────────────────────────────────────────────

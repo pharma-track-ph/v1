@@ -83,6 +83,7 @@
 }
 
 .user-stat-icon.purple { background: #ede7f6; }
+.user-stat-icon.owner  { background: #f3e8ff; }
 .user-stat-icon.blue   { background: var(--primary-light); }
 .user-stat-icon.green  { background: var(--success-light); }
 
@@ -121,3 +122,54 @@
 
 /* Action buttons column */
 .action-cell { white-space: nowrap; }
+
+/* ── Responsive ──────────────────────────────────────────── */
+@media (max-width: 768px) {
+    .users-toolbar {
+        display:        flex;
+        flex-direction: row;
+        flex-wrap:      nowrap;
+        align-items:    stretch;
+        gap:            6px;
+    }
+
+    .users-toolbar .search-wrap {
+        flex:      1 1 auto;
+        min-width: 0;
+        width:     auto;
+    }
+
+    .users-toolbar select {
+        width:      auto !important;
+        flex:       0 1 28%;
+        min-width:  0;
+        font-size:  0.8rem;
+        padding:    8px 8px;
+    }
+
+    .user-stats {
+        grid-template-columns: repeat(2, 1fr);
+        gap: 8px;
+        margin-bottom: 12px;
+    }
+
+    .user-stat-card {
+        padding:         10px 8px;
+        flex-direction:  column;
+        text-align:      center;
+        gap:             4px;
+    }
+
+    .user-stat-icon {
+        width:     28px;
+        height:    28px;
+        font-size: 0.9rem;
+    }
+
+    .user-stat-label { font-size: 0.65rem; }
+    .user-stat-value { font-size: 1.15rem; }
+}
+
+@media (max-width: 480px) {
+    .user-stats { grid-template-columns: repeat(2, 1fr); }
+}

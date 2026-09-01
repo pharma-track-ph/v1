@@ -1,0 +1,134 @@
+/* ── Backup & Restore page styles ──────────────────────── */
+
+.backup-schedule-card {
+    padding: 18px 20px;
+    margin-bottom: 20px;
+}
+
+.backup-schedule-row {
+    display: grid;
+    grid-template-columns: 1.5fr 1fr 1fr 0.8fr;
+    gap: 30px;
+    margin-bottom: 14px;
+    align-items: start;
+}
+
+
+.backup-schedule-label {
+    font-size: 0.75rem;
+    color: var(--secondary);
+    margin-bottom: 8px;
+    min-height: 18px;
+}
+
+.backup-schedule-value {
+    font-size: 0.95rem;
+    font-weight: 700;
+    color: var(--dark);
+    min-height: 38px;
+    display: flex;
+    align-items: center;
+}
+
+.backup-schedule-edit {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    min-height: 38px;
+}
+
+.backup-now-cell {
+    align-self: center;
+    display: flex;
+}
+
+.backup-schedule-note {
+    font-size: 0.8rem;
+    color: var(--secondary);
+    line-height: 1.5;
+    padding-top: 12px;
+    border-top: 1px solid var(--gray-200);
+    margin: 0;
+}
+
+/* Backup type pill (manual / scheduled / pre-restore safety) */
+
+.backup-type-badge {
+    display: inline-block;
+    padding: 2px 10px;
+    border-radius: 50px;
+    font-size: 0.72rem;
+    font-weight: 600;
+    white-space: nowrap;
+}
+
+.backup-type-badge.manual {
+    background: var(--primary-light);
+    color: var(--primary-dark);
+}
+
+.backup-type-badge.scheduled {
+    background: var(--success-light);
+    color: var(--success);
+}
+
+.backup-type-badge.pre-restore-safety {
+    background: var(--warning-light);
+    color: #92400e;
+}
+
+.action-cell {
+    white-space: nowrap;
+}
+
+/* Labeled action buttons in the backup table */
+.backup-action-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    white-space: nowrap;
+}
+
+/* ── Responsive ──────────────────────────────────────────── */
+@media (max-width: 768px) {
+    .backup-schedule-card {
+        padding:        14px 14px;
+        margin-bottom:  12px;
+    }
+
+    .backup-schedule-row {
+        grid-template-columns: 1fr 1fr;
+        gap:                   12px;
+        margin-bottom:         0;
+    }
+
+    .backup-schedule-row > :first-child {
+        grid-column: 1 / -1;
+    }
+
+    .backup-schedule-edit {
+        flex-wrap: wrap;
+        gap:       6px;
+        min-height: 0;
+    }
+
+    .backup-schedule-value {
+        min-height: 0;
+        font-size:  0.85rem;
+    }
+
+    .backup-schedule-label {
+        min-height:    0;
+        margin-bottom: 4px;
+    }
+
+    .backup-now-cell {
+        grid-column: 1 / -1;
+        width:        100%;
+    }
+
+    .backup-now-cell .btn {
+        width:           100%;
+        justify-content: center;
+    }
+}

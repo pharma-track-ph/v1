@@ -29,15 +29,12 @@
             </ul>
             <p class="nav-section-label">Admin</p>
             <ul>
-                <li class="nav-item" data-roles="super_admin"><a href="users.html"><span class="nav-icon"></span> Users</a></li>
+                <li class="nav-item" data-roles="super_admin"><a href="users.html"><span class="nav-icon"></span> User Management</a></li>
                 <li class="nav-item active" data-roles="super_admin"><a href="audit.html"><span class="nav-icon"></span> Audit Logs</a></li>
+                <li class="nav-item" data-roles="super_admin"><a href="backup.html"><span class="nav-icon"></span> Backup & Restore</a></li>
                 <li class="nav-item"><a href="#" data-action="logout"><span class="nav-icon"></span> Sign Out</a></li>
             </ul>
         </nav>
-        <div class="sidebar-footer">
-            <div id="sidebar-user-name" class="fw-600">—</div>
-            <div id="sidebar-user-role" style="font-size:0.7rem;opacity:0.7">—</div>
-        </div>
     </aside>
     <div class="sidebar-overlay" id="sidebar-overlay"></div>
 
@@ -48,8 +45,8 @@
                 <div class="header-title">Audit Logs</div>
             </div>
             <div class="header-right">
-                <div class="header-alert-btn">📦 Low Stock <span class="alert-badge" id="badge-low-stock" style="display:none">0</span></div>
-                <div class="header-alert-btn">⚠️ Near Expiry <span class="alert-badge amber" id="badge-near-expiry" style="display:none">0</span></div>
+                <div class="header-alert-btn">Low Stock <span class="alert-badge" id="badge-low-stock" style="display:none">0</span></div>
+                <div class="header-alert-btn">Near Expiry <span class="alert-badge amber" id="badge-near-expiry" style="display:none">0</span></div>
                 <div class="header-user">
                     <div class="user-avatar" id="header-avatar">?</div>
                     <div class="user-info">
@@ -61,39 +58,27 @@
         </header>
 
         <main class="page-content">
-            <div class="page-header">
-                <div>
-                    <h2>🔍 Audit Logs</h2>
-                    <p>Full trail of all system actions — create, update, delete, login, checkout.</p>
-                </div>
-                <button class="btn btn-outline" id="btn-export-audit">📥 Export CSV</button>
-            </div>
-
-            <!-- ── Stats ────────────────────────────────────── -->
+            <!-- Stats -->
             <div class="audit-stats">
                 <div class="audit-stat-card">
-                    <div class="audit-stat-icon blue">📋</div>
                     <div>
                         <div class="audit-stat-label">Total Events</div>
                         <div class="audit-stat-value" id="stat-total">—</div>
                     </div>
                 </div>
                 <div class="audit-stat-card">
-                    <div class="audit-stat-icon yellow">🔑</div>
                     <div>
                         <div class="audit-stat-label">Logins Today</div>
                         <div class="audit-stat-value" id="stat-logins">—</div>
                     </div>
                 </div>
                 <div class="audit-stat-card">
-                    <div class="audit-stat-icon green">✏️</div>
                     <div>
                         <div class="audit-stat-label">Edits Today</div>
                         <div class="audit-stat-value" id="stat-edits">—</div>
                     </div>
                 </div>
                 <div class="audit-stat-card">
-                    <div class="audit-stat-icon red">🗑️</div>
                     <div>
                         <div class="audit-stat-label">Deletions Today</div>
                         <div class="audit-stat-value" id="stat-deletes">—</div>
@@ -101,7 +86,7 @@
                 </div>
             </div>
 
-            <!-- ── Toolbar ──────────────────────────────────── -->
+            <!-- Toolbar -->
             <div class="audit-toolbar">
                 <div class="search-wrap">
                     <span class="search-icon">🔍</span>
@@ -124,11 +109,25 @@
                     <option value="orders">Orders</option>
                 </select>
                 <input type="date" id="filter-date" class="form-control" style="width:auto" title="Filter by date">
-                <button class="btn btn-light" id="btn-clear-filters">✕ Clear</button>
-                <button class="btn btn-primary" id="btn-refresh">↻ Refresh</button>
+                <button class="btn btn-light" id="btn-clear-filters">Clear</button>
+                <button class="btn btn-primary" id="btn-refresh">Refresh</button>
             </div>
 
-            <!-- ── Audit Table ──────────────────────────────── -->
+            <!-- Export button -- moved down to sit between the toolbar and
+                 the table, closing the gap that used to sit empty at the
+                 top of the page. -->
+            <div class="page-header" style="justify-content:flex-end;margin-bottom:12px">
+                <div class="export-dropdown" id="export-dropdown">
+                    <button class="btn btn-outline" id="btn-export-toggle">Export ▾</button>
+                    <div class="export-menu hidden" id="export-menu">
+                        <button class="export-menu-item" data-format="excel">Excel (.xlsx)</button>
+                        <button class="export-menu-item" data-format="pdf">PDF</button>
+                        <button class="export-menu-item" data-format="word">Word (.docx)</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Audit Table -->
             <div class="card" style="padding:0">
                 <div class="table-container">
                     <table class="table">
@@ -140,11 +139,10 @@
                                 <th>Action</th>
                                 <th>Entity</th>
                                 <th>Entity ID</th>
-                                <th>IP Address</th>
                             </tr>
                         </thead>
                         <tbody id="audit-tbody">
-                            <tr><td colspan="7" class="text-center" style="padding:40px">
+                            <tr><td colspan="6" class="text-center" style="padding:40px">
                                 <div class="spinner" style="margin:0 auto"></div>
                             </td></tr>
                         </tbody>
@@ -152,7 +150,7 @@
                 </div>
             </div>
 
-            <!-- ── Pagination ─────────────────────────────────── -->
+            <!-- Pagination -->
             <div class="pagination" id="pagination"></div>
         </main>
     </div>

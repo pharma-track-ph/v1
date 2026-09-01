@@ -104,6 +104,30 @@
     margin-top: 6px;
 }
 
+/* Readable detail grid — replaces raw JSON with plain label:value rows */
+.detail-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 8px 20px;
+    background: var(--white);
+    border: 1px solid var(--gray-200);
+    border-radius: 6px;
+    padding: 12px 14px;
+    margin-top: 6px;
+}
+
+.detail-row-item {
+    display: flex;
+    justify-content: space-between;
+    gap: 10px;
+    font-size: 0.83rem;
+    padding: 4px 0;
+    border-bottom: 1px solid var(--gray-100);
+}
+
+.detail-row-item .detail-label { color: var(--secondary); font-weight: 500; }
+.detail-row-item .detail-value { color: var(--dark); font-weight: 600; text-align: right; }
+
 /* Pagination */
 .pagination {
     display: flex;
@@ -155,3 +179,71 @@
 }
 
 .btn-expand:hover { background: var(--gray-100); }
+
+/* ── Responsive ──────────────────────────────────────────── */
+@media (max-width: 768px) {
+    .audit-stats {
+        grid-template-columns: repeat(2, 1fr);
+        gap: 8px;
+        margin-bottom: 12px;
+    }
+
+    .audit-stat-card {
+        padding: 10px 10px;
+        gap:     8px;
+    }
+
+    .audit-stat-icon {
+        width:     32px;
+        height:    32px;
+        font-size: 1rem;
+    }
+
+    .audit-stat-label { font-size: 0.65rem; }
+    .audit-stat-value { font-size: 1.15rem; }
+
+    .audit-toolbar {
+        display:               grid;
+        grid-template-columns: repeat(3, 1fr);
+        align-items:           stretch;
+        gap:                   8px;
+    }
+
+    .audit-toolbar .search-wrap {
+        min-width: 0;
+        width:     100%;
+    }
+
+    .audit-toolbar select,
+    .audit-toolbar input[type="date"] {
+        width:      100% !important;
+        min-width:  0;
+        font-size:  0.75rem;
+        padding:    8px 6px;
+    }
+
+    .audit-toolbar .btn {
+        width:           100%;
+        justify-content: center;
+        font-size:       0.75rem;
+        padding:         8px 6px;
+    }
+
+    .detail-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .detail-row-item {
+        flex-direction: column;
+        align-items:    flex-start;
+        gap:            2px;
+    }
+
+    .detail-row-item .detail-value {
+        text-align: left;
+    }
+}
+
+@media (max-width: 480px) {
+    .audit-stats { grid-template-columns: repeat(2, 1fr); }
+}

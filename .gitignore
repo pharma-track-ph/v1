@@ -11,6 +11,9 @@ node_modules/
 uploads/
 backend/uploads/
 
+# ── Database backups (full data dumps — never commit these) ──
+backend/backups/
+
 # ── Logs ─────────────────────────────────────────────────
 *.log
 npm-debug.log*

@@ -27,6 +27,7 @@
     --gray-300:       #dee2e6;
     --gray-500:       #adb5bd;
     --gray-700:       #495057;
+    --gray-800:       #212529;
     --sidebar-width:  260px;
     --sidebar-collapsed: 70px;
     --header-height:  64px;
@@ -196,6 +197,10 @@ img { max-width: 100%; display: block; }
     min-width:      0;   /* allow flex item to shrink below content width */
     overflow-x:     hidden;
     transition:     var(--transition);
+    /* .top-header below is now position:fixed and removed from normal
+       flow (see its own comment for why), so this padding reserves the
+       space it used to occupy, on every page that shares this layout. */
+    padding-top:    var(--header-height);
 }
 
 /* ── Top Header ───────────────────────────────────────────── */
@@ -207,9 +212,26 @@ img { max-width: 100%; display: block; }
     justify-content:space-between;
     padding:        0 24px;
     box-shadow:     var(--shadow-sm);
-    position:       sticky;
+    /* position: fixed instead of sticky — sticky requires every ancestor
+       between this element and the viewport to have overflow:visible, but
+       .main-wrapper (used globally, on every page) has overflow-x:hidden
+       — and per the CSS spec, setting overflow on just one axis silently
+       forces the OTHER axis into a scroll container too, which breaks
+       sticky positioning. fixed positions relative to the actual browser
+       viewport directly, bypassing that ancestor-overflow requirement, so
+       the header now stays pinned on every page while scrolling. */
+    position:       fixed;
     top:            0;
+    left:           var(--sidebar-width);
+    right:          0;
     z-index:        100;
+    transition:     var(--transition);
+}
+
+@media (max-width: 768px) {
+    /* Matches .main-wrapper's margin-left:0 on mobile (sidebar slides
+       off-screen instead of pushing content over). */
+    .top-header { left: 0; }
 }
 
 .header-left { display: flex; align-items: center; gap: 16px; }
@@ -474,6 +496,7 @@ img { max-width: 100%; display: block; }
 .btn {
     display:       inline-flex;
     align-items:   center;
+    justify-content: center;
     gap:           6px;
     padding:       8px 16px;
     border-radius: var(--border-radius);
@@ -571,7 +594,7 @@ select.form-control { appearance: none; background-image: url("data:image/svg+xm
 
 .table thead th {
     background:    var(--light-blue);
-    padding:       11px 14px;
+    padding:       10px 16px;
     text-align:    left;
     font-size:     0.75rem;
     font-weight:   700;
@@ -582,7 +605,7 @@ select.form-control { appearance: none; background-image: url("data:image/svg+xm
 }
 
 .table tbody td {
-    padding:      11px 14px;
+    padding:      10px 16px;
     border-bottom: 1px solid var(--gray-100);
     color:        var(--dark);
 }
@@ -760,7 +783,9 @@ body { overflow-x: hidden; }
 /* ── Expiry row coloring in tables ─────────────────────────── */
 tr.row-expired   td { background: #fff0f0 !important; }
 tr.row-expiring  td { background: #fffbf0 !important; }
+tr.row-expiring-3mo td { background: #f0f9ff !important; }
 tr.row-low-stock td { background: #f0f0ff !important; }
+tr.row-soldout   td { background: #f4f4f5 !important; }
 
 /* ── Utility classes ───────────────────────────────────────── */
 .text-center  { text-align: center; }
@@ -865,9 +890,96 @@ tr.row-low-stock td { background: #f0f0ff !important; }
 
     .btn-menu-toggle { display: flex; }
 
+    .top-header {
+        padding: 0 12px;
+        gap:     8px;
+    }
+
+    .header-left {
+        min-width: 0;
+        flex:      1;
+        gap:       10px;
+    }
+
+    .header-left > div {
+        min-width: 0;
+        overflow:  hidden;
+    }
+
+    .header-title {
+        font-size:     0.95rem;
+        overflow:      hidden;
+        text-overflow: ellipsis;
+        white-space:   nowrap;
+    }
+
+    .header-right {
+        flex-shrink: 0;
+        gap:         8px;
+    }
+
+    .user-info { display: none; }
+
+    .header-user {
+        padding: 4px;
+        gap:     0;
+    }
+
+    .notif-dropdown {
+        right:  -4px;
+        width:  min(260px, calc(100vw - 24px));
+    }
+
+    .profile-dropdown {
+        width: min(220px, calc(100vw - 24px));
+    }
+
+    #offline-banner {
+        display: none;
+    }
+
     .page-content { padding: 16px; }
 
-    .kpi-grid { grid-template-columns: repeat(2, 1fr); gap: 12px; }
+    .page-header h2 { font-size: 1.2rem; }
+
+    .page-header > .d-flex,
+    .page-header .d-flex.gap-8 {
+        width:           100%;
+        justify-content: stretch !important;
+    }
+
+    .page-header > .d-flex .btn,
+    .page-header .d-flex.gap-8 .btn {
+        flex:      1 1 calc(50% - 4px);
+        min-width: 0;
+    }
+
+    .page-header > .d-flex .export-dropdown,
+    .page-header .d-flex.gap-8 .export-dropdown {
+        flex: 1 1 calc(50% - 4px);
+    }
+
+    .page-header > .d-flex .export-dropdown .btn,
+    .page-header .d-flex.gap-8 .export-dropdown .btn {
+        width: 100%;
+    }
+
+    .card { padding: 16px; }
+
+    .kpi-grid { grid-template-columns: repeat(2, 1fr); gap: 8px; }
+
+    .kpi-card { padding: 12px; gap: 8px; }
+
+    .kpi-icon {
+        width:     36px;
+        height:    36px;
+        font-size: 1.1rem;
+        border-radius: 10px;
+    }
+
+    .kpi-info .kpi-label { font-size: 0.7rem; }
+    .kpi-info .kpi-value { font-size: 1.1rem; }
+    .kpi-info .kpi-sub   { font-size: 0.65rem; }
 
     .form-row, .form-row-3 { grid-template-columns: 1fr; }
 
@@ -876,15 +988,70 @@ tr.row-low-stock td { background: #f0f0ff !important; }
         align-items:    flex-start;
     }
 
-    .modal { max-width: 100%; margin: 0; max-height: 100vh; border-radius: 16px 16px 0 0; align-self: flex-end; }
+    .modal {
+        max-width:    100%;
+        margin:       0;
+        max-height:   100vh;
+        border-radius: 16px 16px 0 0;
+        align-self:   flex-end;
+    }
 
     .modal-overlay { align-items: flex-end; padding: 0; }
 
+    .modal-header { padding: 16px; }
+    .modal-body   { padding: 16px; }
+    .modal-footer {
+        padding:        12px 16px;
+        flex-direction: column-reverse;
+        align-items:    stretch;
+    }
+
+    .modal-footer .btn { width: 100%; }
+
     .toast-container { right: 12px; max-width: calc(100% - 24px); }
+
+    .login-card { padding: 28px 20px; }
+    .login-logo h1 { font-size: 1.4rem; }
 }
 
 @media (max-width: 480px) {
-    .kpi-grid { grid-template-columns: 1fr; }
+    .top-header { padding: 0 10px; }
+
+    .header-title { font-size: 0.88rem; }
+
+    .page-content { padding: 12px; }
+
+    .kpi-grid { grid-template-columns: repeat(2, 1fr); gap: 8px; }
+
+    .card { padding: 14px; }
+
+    .login-page { padding: 16px; }
+    .login-card { padding: 24px 18px; }
+}
+
+@supports (padding: max(0px)) {
+    @media (max-width: 768px) {
+        .top-header {
+            padding-left:  max(12px, env(safe-area-inset-left));
+            padding-right: max(12px, env(safe-area-inset-right));
+        }
+
+        .page-content {
+            padding-left:  max(16px, env(safe-area-inset-left));
+            padding-right: max(16px, env(safe-area-inset-right));
+        }
+
+        .toast-container {
+            right: max(12px, env(safe-area-inset-right));
+        }
+    }
+
+    @media (max-width: 480px) {
+        .page-content {
+            padding-left:  max(12px, env(safe-area-inset-left));
+            padding-right: max(12px, env(safe-area-inset-right));
+        }
+    }
 }
 
 /* ── Sidebar overlay (mobile) ──────────────────────────────── */
@@ -897,3 +1064,236 @@ tr.row-low-stock td { background: #f0f0ff !important; }
 }
 
 .sidebar-overlay.active { display: block; }
+
+/* ── Offline indicator (persistent, while the browser has no connection) ──
+   A normal child of .top-header now, inserted between .header-left and
+   .header-right (see offlineSync.js's showOfflineBanner) -- .top-header's
+   own justify-content:space-between naturally centers it in the gap
+   that's already empty there on every page, so it never overlaps
+   anything (the earlier position:fixed version did, on both the header
+   and whatever page content sat directly below it). */
+#offline-banner {
+    background:    #f59e0b;
+    color:         #fff;
+    padding:       6px 16px;
+    border-radius: 999px;
+    font-size:     0.8rem;
+    font-weight:   600;
+    white-space:   nowrap;
+}
+
+/* -- Search-as-you-type suggestions (used on POS, Inventory, Users,
+   Audit Logs, Forecasting) -- */
+.search-suggest-wrap { position: relative; flex: 1; }
+
+.search-suggest-dropdown {
+    position:      absolute;
+    top:           calc(100% + 4px);
+    left:          0;
+    right:         0;
+    z-index:       60;
+    background:    var(--white);
+    border:        1px solid var(--gray-200);
+    border-radius: var(--border-radius);
+    box-shadow:    var(--shadow);
+    max-height:    280px;
+    overflow-y:    auto;
+    padding:       6px;
+}
+
+.search-suggest-item {
+    display:         flex;
+    justify-content: space-between;
+    align-items:     center;
+    width:           100%;
+    text-align:      left;
+    background:      none;
+    border:          none;
+    padding:         8px 10px;
+    border-radius:   6px;
+    font-size:       0.85rem;
+    font-family:     var(--font-family);
+    cursor:          pointer;
+    color:           var(--dark);
+}
+
+.search-suggest-item:hover,
+.search-suggest-item.active { background: var(--gray-100); }
+
+.search-suggest-label { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.search-suggest-sub   { font-size: 0.75rem; color: var(--secondary); margin-left: 10px; white-space: nowrap; flex-shrink: 0; }
+
+/* -- Export dropdown (used on Inventory, Reports, Audit Logs) -- */
+.export-dropdown {
+    position: relative;
+}
+
+.export-menu {
+    position:      absolute;
+    top:           calc(100% + 6px);
+    left:          0;
+    z-index:       50;
+    background:    var(--white);
+    border:        1px solid var(--gray-200);
+    border-radius: var(--border-radius);
+    box-shadow:    var(--shadow);
+    min-width:     170px;
+    padding:       6px;
+}
+
+.export-menu-item {
+    display:       block;
+    width:         100%;
+    text-align:    left;
+    background:    none;
+    border:        none;
+    padding:       8px 10px;
+    border-radius: 6px;
+    font-size:     0.85rem;
+    cursor:        pointer;
+    color:         var(--dark);
+    transition:    var(--transition);
+}
+
+.export-menu-item:hover { background: var(--gray-100); }
+
+/* -- Profile dropdown (avatar, top-right) -- */
+.profile-wrap { position: relative; }
+
+.profile-dropdown {
+    position:      absolute;
+    top:           calc(100% + 8px);
+    right:         0;
+    width:         220px;
+    background:    var(--white);
+    border:        1px solid var(--gray-200);
+    border-radius: var(--border-radius-lg);
+    box-shadow:    var(--shadow-lg);
+    z-index:       200;
+    overflow:      hidden;
+    padding:       6px;
+}
+
+.profile-dropdown-item {
+    width:           100%;
+    display:         flex;
+    align-items:     center;
+    justify-content: space-between;
+    gap:             10px;
+    padding:         10px 12px;
+    background:      none;
+    border:          none;
+    border-radius:   8px;
+    font-size:       0.85rem;
+    font-family:     var(--font-family);
+    color:           var(--dark);
+    cursor:          pointer;
+    text-align:      left;
+    transition:      var(--transition);
+}
+
+.profile-dropdown-item:hover { background: var(--gray-100); }
+
+.profile-toggle-track {
+    position:      relative;
+    width:         34px;
+    height:        18px;
+    background:    var(--gray-300);
+    border-radius: 999px;
+    flex-shrink:   0;
+    transition:    var(--transition);
+}
+
+.profile-toggle-track.active { background: var(--primary); }
+
+.profile-toggle-thumb {
+    position:      absolute;
+    top:           2px;
+    left:          2px;
+    width:         14px;
+    height:        14px;
+    background:    var(--white);
+    border-radius: 50%;
+    transition:    var(--transition);
+}
+
+.profile-toggle-track.active .profile-toggle-thumb { transform: translateX(16px); }
+
+/* ── Edit Profile modal ──────────────────────── */
+.edit-profile-avatar-preview {
+    width:           84px;
+    height:          84px;
+    border-radius:   50%;
+    background:      var(--primary);
+    background-size: cover;
+    background-position: center;
+    display:         flex;
+    align-items:     center;
+    justify-content: center;
+    color:           #fff;
+    font-weight:     700;
+    font-size:       1.8rem;
+    margin:          0 auto;
+    border:          3px solid var(--gray-200);
+}
+
+/* ── Dark Mode ────────────────────────────────────
+   Overrides the shared design tokens most of the UI is already built
+   from (cards, tables, forms, modals, the header) -- a real, working
+   theme for the majority of the app, but a nice-to-have, not an
+   exhaustive per-page repaint: a few page-specific hardcoded colors
+   (charts, some POS-specific styling) may not fully adapt. */
+body.dark-mode {
+    --white:      #1e2130;
+    --light:      #262a3d;
+    --light-blue: #181b28;
+    --dark:       #e8e8ec;
+    --secondary:  #9aa1b5;
+    --gray-100:   #262a3d;
+    --gray-200:   #333850;
+    --gray-300:   #40465f;
+    --gray-500:   #7b8199;
+    --gray-700:   #c5c9d6;
+    --gray-800:   #f1f1f4;
+    --success:        #4ade80;
+    --success-light:  #1a3a2a;
+    --danger:         #f87171;
+    --danger-light:   #3a1f24;
+    --info:           #38bdf8;
+    --info-light:     #1a3540;
+    --primary-light:  #1e3a5f;
+    --primary-bg:     #1a2f4d;
+    --warning-light:  #3d3420;
+    background-color: var(--light-blue);
+}
+
+body.dark-mode .table tbody tr:hover { background: var(--gray-100); }
+body.dark-mode ::-webkit-scrollbar-thumb { background: var(--gray-300); }
+
+/* The expiry/stock row tints below are hardcoded light colors with
+   !important (so they can win over the shared .table striping/hover
+   rules) -- same bug pattern as .trending-card: text correctly follows
+   var(--dark) (now light), but these rows stayed hardcoded-light,
+   leaving text nearly invisible. Needs matching !important to win over
+   the light-mode rule at the same specificity. */
+body.dark-mode tr.row-expired      td { background: #3a1f24 !important; }
+body.dark-mode tr.row-expiring     td { background: #3d3420 !important; }
+body.dark-mode tr.row-expiring-3mo td { background: #1a3540 !important; }
+body.dark-mode tr.row-low-stock    td { background: #241f3d !important; }
+body.dark-mode tr.row-soldout      td { background: #2a2a30 !important; }
+
+/* A handful of components use a hardcoded dark text color (not a
+   variable) paired with what used to be an always-light background --
+   e.g. badge-warning's text is always #92400e regardless of mode, which
+   the -light variable overrides above can't fix on their own since
+   there's no shared variable to flip for the TEXT. These need a direct
+   override instead. */
+body.dark-mode .badge-warning,
+body.dark-mode .text-warning {
+    color: #fcd34d;
+}
+
+body.dark-mode .alert-warning { color: #fcd34d; border-color: #4d3d1a; }
+body.dark-mode .alert-danger  { color: #fca5a5; border-color: #4d2020; }
+body.dark-mode .alert-success { color: #86efac; border-color: #1a4d2e; }
+body.dark-mode .alert-info    { color: #7dd3fc; border-color: #1a3d4d; }

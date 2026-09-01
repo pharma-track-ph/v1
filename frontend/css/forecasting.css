@@ -21,7 +21,7 @@
     gap: 8px;
 }
 
-.section-header h3 { font-size: 1.1rem; font-weight: 700; color: var(--gray-800, #212529); }
+.section-header h3 { font-size: 1.1rem; font-weight: 700; color: var(--dark); }
 .section-hint      { font-size: 0.8rem; color: var(--secondary); }
 
 .trending-grid {
@@ -172,28 +172,21 @@
     background: var(--gray-100);
     border: 2px solid transparent;
     border-radius: 12px;
-    padding: 16px;
+    padding: 20px 12px;
     cursor: pointer;
     transition: all 0.2s;
     text-align: center;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 60px;
 }
 
 .algo-card:hover         { background: #eef4ff; border-color: #b6d0fe; }
 .algo-card.active        { background: #eef4ff; border-color: var(--primary); box-shadow: 0 4px 12px rgba(13,110,253,0.15); }
 
-.algo-icon   { font-size: 2rem; margin-bottom: 8px; }
-.algo-name   { font-weight: 700; color: var(--dark); margin-bottom: 4px; font-size: 0.9rem; }
-.algo-desc   { font-size: 0.75rem; color: var(--secondary); margin-bottom: 8px; line-height: 1.4; }
-.algo-badge  {
-    display: inline-block;
-    padding: 3px 10px;
-    background: var(--gray-200);
-    border-radius: 20px;
-    font-size: 0.65rem;
-    font-weight: 600;
-    color: var(--secondary);
-}
-.algo-badge.highlight { background: var(--primary); color: white; }
+.algo-name   { font-weight: 700; color: var(--dark); font-size: 0.9rem; }
+.algo-card.active .algo-name { color: var(--primary); }
 
 /* ── Action Row ──────────────────────────────────────────── */
 .action-row { display: flex; gap: 16px; align-items: center; flex-wrap: wrap; }
@@ -266,42 +259,49 @@
 /* Alpha/beta hint text */
 .alpha-hint { font-size: 0.72rem; color: var(--secondary); margin-top: 4px; }
 
-/* ── Product Forecast Header ─────────────────────────────── */
-.product-forecast-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    background: var(--white);
-    border-radius: 16px;
-    padding: 20px 24px;
-    margin-bottom: 20px;
-    box-shadow: var(--shadow-sm);
-    border: 1px solid var(--gray-200);
-    flex-wrap: wrap;
-    gap: 16px;
-}
-
-.product-title-section h2    { font-size: 1.4rem; font-weight: 700; color: var(--dark); margin-bottom: 6px; }
-.product-category            { font-size: 0.85rem; color: var(--secondary); background: var(--gray-100); padding: 4px 12px; border-radius: 20px; display: inline-block; }
-
-.product-quick-stats { display: flex; gap: 20px; flex-wrap: wrap; }
-
-.quick-stat          { text-align: center; padding: 0 12px; }
-.quick-stat:not(:last-child) { border-right: 1px solid var(--gray-200); }
-.quick-stat .stat-label  { display: block; font-size: 0.75rem; color: var(--secondary); margin-bottom: 4px; }
-.quick-stat .stat-value  { font-size: 1.3rem; font-weight: 700; color: var(--dark); }
-.quick-stat.warning .stat-value { color: #f0ad4e; }
-
-/* ── What We Found Card ────────────────────────────────────── */
+/* ── What We Found Card (now also carries product info + quick stats) ── */
 .pattern-detection-card {
     background: linear-gradient(135deg, #1a237e 0%, #1565c0 100%);
     border-radius: 16px;
     padding: 20px 24px;
     margin-bottom: 20px;
     color: white;
+    box-shadow: var(--shadow-sm);
 }
 
-.pattern-detection-card h4 { font-size: 1rem; font-weight: 600; margin-bottom: 16px; opacity: 0.9; }
+.pdc-top-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 16px;
+}
+
+.pdc-product-info h4 { font-size: 1.25rem; font-weight: 700; color: white; margin-bottom: 4px; }
+
+/* .product-category normally sits on a light card (see e.g. Inventory) --
+   here it's on the dark gradient instead, so it needs its own translucent
+   treatment rather than the default light-gray-background/dark-text
+   look. */
+.pattern-detection-card .product-category {
+    background: rgba(255,255,255,0.18);
+    color:      white;
+}
+
+.pdc-quick-stats { display: flex; gap: 18px; flex-wrap: wrap; }
+.pdc-quick-stats .quick-stat { text-align: center; padding: 0 12px; }
+.pdc-quick-stats .quick-stat:not(:last-child) { border-right: 1px solid rgba(255,255,255,0.25); }
+.pdc-quick-stats .stat-label { display: block; font-size: 0.72rem; opacity: 0.75; margin-bottom: 2px; }
+.pdc-quick-stats .stat-value { font-size: 1.15rem; font-weight: 700; color: white; }
+.pdc-quick-stats .quick-stat.warning .stat-value { color: #ffc107; }
+
+.pdc-divider {
+    height:     1px;
+    background: rgba(255,255,255,0.18);
+    margin:     18px 0 16px;
+}
+
+.pdc-pattern-title { font-size: 0.95rem; font-weight: 600; margin-bottom: 14px; opacity: 0.9; }
 
 .pattern-insights {
     display: grid;
@@ -369,33 +369,15 @@
 .predictions-section h4 { font-size: 1rem; font-weight: 700; color: var(--dark); margin-bottom: 8px; }
 .predictions-section p  { font-size: 0.8rem; color: var(--secondary); margin-bottom: 16px; }
 
-.predictions-grid {
-    display: grid;
-    grid-template-columns: repeat(4, 1fr);
-    gap: 16px;
-}
-
-.prediction-card {
-    background: var(--white);
+.predictions-section .table-responsive {
+    background:    var(--white);
     border-radius: 12px;
-    padding: 20px;
-    text-align: center;
-    box-shadow: var(--shadow-sm);
-    border: 1px solid var(--gray-200);
-    border-top: 4px solid var(--primary);
-    transition: all 0.2s;
+    box-shadow:    var(--shadow-sm);
+    border:        1px solid var(--gray-200);
+    padding:       4px 16px;
 }
 
-.prediction-card.urgent  { border-top-color: #dc3545; }
-.prediction-card.warning { border-top-color: #ffc107; }
-.prediction-card.good    { border-top-color: #198754; }
-
-.pred-week  { font-size: 0.82rem; font-weight: 600; color: var(--secondary); margin-bottom: 10px; }
-.pred-value { font-size: 2.2rem; font-weight: 800; color: var(--dark); margin-bottom: 2px; }
-.pred-unit  { font-size: 0.72rem; color: var(--secondary); }
-.pred-range { font-size: 0.72rem; color: var(--secondary); margin-bottom: 8px; margin-top: 4px; }
-
-.pred-tag          { display: inline-block; padding: 3px 10px; border-radius: 20px; font-size: 0.65rem; font-weight: 600; }
+.pred-tag          { display: inline-block; padding: 3px 10px; border-radius: 20px; font-size: 0.7rem; font-weight: 600; }
 .pred-tag.urgent   { background: #dc3545; color: white; }
 .pred-tag.warning  { background: #ffc107; color: #664d03; }
 .pred-tag.good     { background: #198754; color: white; }
@@ -463,6 +445,29 @@
 .data-table td        { padding: 10px 8px; border-bottom: 1px solid var(--gray-200); }
 .data-table tr:hover  { background: var(--gray-100); }
 
+.table-pagination {
+    display:         flex;
+    align-items:     center;
+    justify-content: center;
+    gap:             14px;
+    padding:         14px 0 4px;
+}
+
+.pg-btn {
+    padding:       6px 14px;
+    border:        1px solid var(--gray-300);
+    background:    var(--white);
+    border-radius: 8px;
+    font-size:     0.82rem;
+    cursor:        pointer;
+    transition:    all 0.2s;
+    font-family:   var(--font-family);
+}
+.pg-btn:hover:not(:disabled) { background: var(--primary); color: white; border-color: var(--primary); }
+.pg-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+.pg-info { font-size: 0.82rem; color: var(--secondary); font-weight: 600; }
+
 /* ── Comparison Modal ────────────────────────────────────── */
 .modal-overlay {
     position: fixed;
@@ -473,6 +478,19 @@
     justify-content: center;
     z-index: 1000;
     padding: 20px;
+    /* This page's own .modal-overlay is a SEPARATE rule from global.css's
+       .active-toggled opacity/visibility version -- explicitly reset here
+       since global.css's base .modal-overlay defaults to opacity:0;
+       visibility:hidden and only reveals via an .active class this page's
+       JS never adds (forecasting.js only ever toggles the shared .hidden
+       utility class). Without this reset those two properties from
+       global.css still won the cascade (never overridden here), so this
+       modal was actually already display:flex the moment .hidden was
+       removed -- just permanently invisible and non-interactive
+       underneath, which is why "Compare All Methods" looked like it did
+       nothing at all. */
+    opacity: 1;
+    visibility: visible;
 }
 
 .modal-content {
@@ -491,7 +509,7 @@
     display: flex;
     justify-content: space-between;
     align-items: center;
-    padding: 20px 24px;
+    padding: 16px 20px;
     border-bottom: 1px solid var(--gray-200);
     position: sticky;
     top: 0;
@@ -502,7 +520,7 @@
 .modal-header h3  { font-size: 1.1rem; font-weight: 700; margin: 0; }
 .modal-close      { background: none; border: none; font-size: 1.5rem; cursor: pointer; color: var(--secondary); width: 32px; height: 32px; display: flex; align-items: center; justify-content: center; border-radius: 6px; padding: 0; }
 .modal-close:hover { background: var(--gray-100); }
-.modal-body       { padding: 24px; }
+.modal-body       { padding: 20px; }
 
 .comparison-recommendation {
     margin-top: 20px;
@@ -548,20 +566,194 @@ details summary { padding: 8px 0; user-select: none; }
 /* ── Responsive ──────────────────────────────────────────── */
 @media (max-width: 768px) {
     .selector-row        { grid-template-columns: 1fr; }
-    .algorithm-cards     { grid-template-columns: 1fr; }
-    .predictions-grid    { grid-template-columns: repeat(2, 1fr); }
+
+    /* #forecast-product is hidden (see forecasting.html) -- this only
+       affects #product-search now, which just takes the full row width
+       via flex:1 below. */
+    .searchable-select   { flex-direction: row; }
+    .searchable-select > * { flex: 1; min-width: 0; }
+
+    /* All 4 quick filter buttons stay on one row -- more compact padding
+       so they actually fit rather than wrapping. Shared with the Forecast
+       Horizon buttons below, which benefit from the same compacting. */
+    .filter-buttons {
+        flex-wrap: nowrap;
+    }
+    .filter-buttons .btn-filter,
+    #horizon-buttons .horizon-btn {
+        flex:      1;
+        min-width: 0;
+        padding:   6px 4px;
+        font-size: 0.68rem;
+        text-align: center;
+        justify-content: center;
+    }
+
+    /* 3 method cards side by side instead of stacked -- much more
+       feasible now that each card is just a name, not a whole
+       icon+description+badge block. */
+    .algorithm-cards     { grid-template-columns: repeat(3, 1fr); gap: 6px; }
+    .algo-card           { padding: 12px 6px; min-height: 48px; }
+    .algo-name           { font-size: 0.72rem; }
+
     .rec-body            { grid-template-columns: 1fr; }
-    .pattern-insights    { grid-template-columns: 1fr; gap: 12px; }
+
+    /* Pattern label/value/sub side by side (3 columns) instead of stacked */
+    .pattern-insights    { grid-template-columns: repeat(3, 1fr); gap: 8px; }
+    .pattern-item        { flex-direction: column; text-align: center; gap: 4px; }
+    .pattern-icon        { display: none; }
+    .pattern-info .pattern-value { font-size: 0.95rem; }
+    .pattern-info .pattern-sub   { font-size: 0.62rem; }
+
     .chart-legend        { margin-top: 12px; }
-    .product-quick-stats { width: 100%; justify-content: space-around; }
-    .product-forecast-header { flex-direction: column; align-items: flex-start; }
-    .trending-grid       { grid-template-columns: repeat(2, 1fr); }
+    .pdc-quick-stats     { width: 100%; justify-content: space-around; }
+    .pdc-top-row         { flex-direction: column; align-items: flex-start; }
+    .pattern-detection-card { padding: 14px; }
+    .trending-grid {
+        grid-template-columns: repeat(2, 1fr);
+        gap:                   8px;
+    }
+
+    /* Compact, centered, icon-on-top layout -- same idea as Dashboard's
+       KPI cards -- rather than the desktop card's wide icon-left/
+       stats-right layout, which doesn't fit two cards per row. */
+    .trending-card {
+        padding:    10px 8px;
+        text-align: center;
+    }
+
+    .trending-card .trend-icon {
+        display:       block;
+        font-size:     1.3rem;
+        margin-bottom: 4px;
+    }
+
+    .trending-card .trend-name {
+        font-size:     0.78rem;
+        margin-bottom: 2px;
+        overflow:      hidden;
+        text-overflow: ellipsis;
+        white-space:   nowrap;
+    }
+
+    .trending-card .trend-category {
+        font-size:     0.65rem;
+        margin-bottom: 6px;
+        overflow:      hidden;
+        text-overflow: ellipsis;
+        white-space:   nowrap;
+    }
+
+    .trending-card .trend-stats {
+        flex-direction: column;
+        gap:            4px;
+        align-items:    center;
+        margin-top:     0;
+    }
+
+    .trending-card .trend-badge { font-size: 0.6rem; padding: 2px 8px; }
+    .trending-card .trend-value { font-size: 0.85rem; }
+
+    .desktop-only-emoji  { display: none; }
+    .trending-section    { padding: 14px; margin-bottom: 14px; }
     .btn-lg              { width: 100%; justify-content: center; }
     .action-row          { flex-direction: column; align-items: stretch; }
     .btn-outline-secondary { text-align: center; justify-content: center; }
+    .forecast-chart-container { height: 280px; }
+
+    /* Restored and redesigned to match the same compact 2-column style as
+       Trending Products above, instead of being hidden entirely. */
+    .restock-suggestions { padding: 14px; margin-bottom: 14px; }
+    .restock-suggestions h4 { margin-bottom: 10px; }
+
+    .restock-grid {
+        grid-template-columns: repeat(2, 1fr);
+        gap:                   8px;
+    }
+
+    .restock-item {
+        flex-direction: column;
+        align-items:    center;
+        text-align:     center;
+        padding:        10px 8px;
+        gap:            4px;
+    }
+
+    .restock-info .restock-name {
+        font-size:     0.78rem;
+        overflow:      hidden;
+        text-overflow: ellipsis;
+        white-space:   nowrap;
+        max-width:     100%;
+    }
+
+    .restock-info .restock-reason {
+        font-size:  0.62rem;
+        line-height: 1.3;
+    }
+
+    .restock-action {
+        flex-direction: column;
+        gap:            6px;
+        width:          100%;
+    }
+
+    .restock-action .restock-qty { font-size: 0.78rem; }
+    .restock-action .btn { width: 100%; font-size: 0.72rem; padding: 5px 8px; }
+
+    .forecast-panel      { padding: 14px; }
+    .algo-card           { padding: 10px; }
 }
 
 @media (max-width: 480px) {
-    .predictions-grid    { grid-template-columns: 1fr 1fr; }
-    .trending-grid       { grid-template-columns: 1fr; }
+    .forecast-chart-container { height: 260px; }
+
+    .trending-section,
+    .forecast-panel,
+    .restock-suggestions,
+    .pattern-detection-card {
+        padding: 14px;
+    }
+
+    .pdc-quick-stats .quick-stat:not(:last-child) {
+        border-right: none;
+    }
+}
+
+/* -- Dark mode overrides -- */
+/* .trending-card's gradient mixed a hardcoded light color (#eef4ff) with
+   var(--white) -- var(--white) correctly goes dark in dark mode, but the
+   hardcoded half doesn't, leaving text (which correctly follows
+   var(--dark), now light-colored) sitting unreadably on the half that's
+   still light. This is the specific bug reported. */
+body.dark-mode .trending-card {
+    background:   linear-gradient(135deg, #1e2a45 0%, var(--white) 100%);
+    border-color: #2d3a5c;
+}
+
+body.dark-mode .trend-badge.stable {
+    background: #3a3f4a;
+    color:      #d1d5db;
+}
+
+body.dark-mode .algo-explainer {
+    background:   linear-gradient(135deg, #1a2540 0%, #16213a 100%);
+    border-color: #2d3a5c;
+}
+
+body.dark-mode .algo-card:hover,
+body.dark-mode .algo-card.active {
+    background:   #1a2540;
+    border-color: var(--primary);
+}
+
+body.dark-mode .chart-guide {
+    background: var(--gray-100);
+}
+
+body.dark-mode #horizon-confidence-note,
+body.dark-mode .horizon-btn:not(.active) .low-confidence-tag {
+    background:   #3d3420;
+    color:        #fcd34d;
+    border-color: #5c4d28;
 }
