@@ -144,6 +144,13 @@ document.addEventListener('DOMContentLoaded', () => {
         document.getElementById('pw-label').textContent = 'Password *';
         document.getElementById('field-password').required = true;
         document.getElementById('field-password').placeholder = 'Min. 8 characters';
+        // Undoes openEditModal's hiding of this field below -- without
+        // this, the password INPUT stayed hidden on every Add User after
+        // the first time you'd ever opened Edit on any user, while
+        // handleSubmit()'s validation still correctly demanded a
+        // password for new users -- a real deadlock (required, but no
+        // visible way to enter it).
+        document.getElementById('pw-group')?.classList.remove('hidden');
         document.getElementById('status-group')?.classList.add('hidden');
         document.getElementById('pw-bar').style.width = '0';
         document.getElementById('pw-hint').textContent = '';
@@ -208,6 +215,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const email    = document.getElementById('field-email')?.value.trim();
         const role     = document.getElementById('field-role')?.value;
         const password = document.getElementById('field-password')?.value;
+        const passwordConfirm = document.getElementById('field-password-confirm')?.value;
         const is_active= document.getElementById('field-is_active')?.value;
 
         // Validation
@@ -216,6 +224,10 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!role)  { Toast.show('Role is required.', 'error'); return; }
         if (!editingId && !password) { Toast.show('Password is required for new users.', 'error'); return; }
         if (password && password.length < 8) { Toast.show('Password must be at least 8 characters.', 'error'); return; }
+        // Confirm Password only exists/matters in Add mode -- the Edit
+        // modal never shows the password field at all (see openEditModal),
+        // so this only ever needs checking when creating a new user.
+        if (!editingId && password !== passwordConfirm) { Toast.show('Passwords do not match.', 'error'); return; }
 
         // Admin role restriction check
         if (!isSuperAdmin && role !== 'cashier') {
