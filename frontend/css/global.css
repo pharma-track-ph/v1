@@ -107,6 +107,14 @@ img { max-width: 100%; display: block; }
     flex-shrink:     0;
 }
 
+.sidebar-brand .brand-icon img,
+.login-logo .logo-icon img {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+    display: block;
+}
+
 .sidebar-brand .brand-text h1 {
     font-size:   1rem;
     font-weight: 700;
