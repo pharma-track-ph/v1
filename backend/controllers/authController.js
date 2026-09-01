@@ -102,7 +102,7 @@ const createUser = async (req, res, next) => {
         }
 
         if (req.user.role === 'admin' && role !== 'cashier') {
-            return res.status(403).json({ success: false, message: 'Admins can only create Cashier accounts.' });
+            return res.status(403).json({ success: false, message: 'Admins can only create Pharmacy Assistant accounts.' });
         }
 
         const existing = await User.findByEmail(email.toLowerCase().trim());
@@ -409,7 +409,7 @@ const AUDIT_COLUMNS = [
     { label: 'Entity ID',   excelWidth: 10, pdfWidth: 50  }
 ];
 
-const AUDIT_ROLE_LABELS   = { super_admin: 'Owner', admin: 'Admin', cashier: 'Cashier' };
+const AUDIT_ROLE_LABELS   = { super_admin: 'Owner', admin: 'Admin', cashier: 'Pharmacy Assistant' };
 const AUDIT_ENTITY_LABELS = {
     products: 'Product', users: 'User', orders: 'Order', order_items: 'Order Item',
     cash_sessions: 'Cash Session', cash_movements: 'Cash Movement', audit_logs: 'Audit Log',

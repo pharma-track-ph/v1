@@ -84,7 +84,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         tbody.innerHTML = users.map(u => {
             const isSelf    = u.id === currentUser?.id;
-            const roleLabel = { super_admin: 'Owner', admin: 'Admin', cashier: 'Cashier' }[u.role] || u.role;
+            const roleLabel = { super_admin: 'Owner', admin: 'Admin', cashier: 'Pharmacy Assistant' }[u.role] || u.role;
             const roleClass = u.role;
             const activeLabel = u.is_active
                 ? '<span class="status-dot active"></span>Active'
@@ -219,7 +219,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         // Admin role restriction check
         if (!isSuperAdmin && role !== 'cashier') {
-            Toast.show('Admins can only create Cashier accounts.', 'error');
+            Toast.show('Admins can only create Pharmacy Assistant accounts.', 'error');
             return;
         }
 

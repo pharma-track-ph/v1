@@ -96,14 +96,14 @@ const getSalesReport = async (req, res, next) => {
 };
 
 const SALES_COLUMNS = [
-    { label: 'Order #',       excelWidth: 20, pdfWidth: 100 },
-    { label: 'Date/Time',     excelWidth: 20, pdfWidth: 95  },
-    { label: 'Cashier',       excelWidth: 18, pdfWidth: 80  },
-    { label: 'Subtotal',      excelWidth: 12, pdfWidth: 60  },
-    { label: 'Purchase Cost', excelWidth: 14, pdfWidth: 65  },
-    { label: 'Discount',      excelWidth: 12, pdfWidth: 55  },
-    { label: 'Total',         excelWidth: 12, pdfWidth: 60  },
-    { label: 'Profit',        excelWidth: 12, pdfWidth: 60  }
+    { label: 'Order #',            excelWidth: 20, pdfWidth: 100 },
+    { label: 'Date/Time',          excelWidth: 20, pdfWidth: 95  },
+    { label: 'Pharmacy Assistant', excelWidth: 22, pdfWidth: 95  },
+    { label: 'Subtotal',           excelWidth: 12, pdfWidth: 60  },
+    { label: 'Purchase Cost',      excelWidth: 14, pdfWidth: 65  },
+    { label: 'Discount',           excelWidth: 12, pdfWidth: 55  },
+    { label: 'Total',              excelWidth: 12, pdfWidth: 60  },
+    { label: 'Profit',             excelWidth: 12, pdfWidth: 60  }
 ];
 
 /**
@@ -398,12 +398,12 @@ const getVoidReport = async (req, res, next) => {
 };
 
 const VOID_COLUMNS = [
-    { label: 'Order #',    excelWidth: 20, pdfWidth: 100 },
-    { label: 'Date/Time',   excelWidth: 20, pdfWidth: 95  },
-    { label: 'Cashier',     excelWidth: 18, pdfWidth: 95  },
-    { label: 'Voided By',   excelWidth: 18, pdfWidth: 95  },
-    { label: 'Voided At',   excelWidth: 20, pdfWidth: 95  },
-    { label: 'Total',       excelWidth: 12, pdfWidth: 65  }
+    { label: 'Order #',            excelWidth: 20, pdfWidth: 90  },
+    { label: 'Date/Time',           excelWidth: 20, pdfWidth: 85  },
+    { label: 'Pharmacy Assistant',  excelWidth: 22, pdfWidth: 95  },
+    { label: 'Voided By',           excelWidth: 18, pdfWidth: 90  },
+    { label: 'Voided At',           excelWidth: 20, pdfWidth: 90  },
+    { label: 'Total',               excelWidth: 12, pdfWidth: 60  }
 ];
 
 /**
@@ -480,14 +480,14 @@ const getRegisterReport = async (req, res, next) => {
 };
 
 const REGISTER_COLUMNS = [
-    { label: 'Cashier',            excelWidth: 18, pdfWidth: 80  },
-    { label: 'Opened At',           excelWidth: 20, pdfWidth: 90  },
-    { label: 'Opening Cash',        excelWidth: 14, pdfWidth: 65  },
-    { label: 'Opened Approved By',  excelWidth: 20, pdfWidth: 95  },
-    { label: 'Status',              excelWidth: 10, pdfWidth: 50  },
-    { label: 'Closed At',           excelWidth: 20, pdfWidth: 90  },
-    { label: 'Variance',            excelWidth: 12, pdfWidth: 60  },
-    { label: 'Closed Approved By',  excelWidth: 20, pdfWidth: 95  }
+    { label: 'Pharmacy Assistant', excelWidth: 22, pdfWidth: 90  },
+    { label: 'Opened At',           excelWidth: 20, pdfWidth: 85  },
+    { label: 'Opening Cash',        excelWidth: 14, pdfWidth: 60  },
+    { label: 'Opened Approved By',  excelWidth: 20, pdfWidth: 90  },
+    { label: 'Status',              excelWidth: 10, pdfWidth: 45  },
+    { label: 'Closed At',           excelWidth: 20, pdfWidth: 85  },
+    { label: 'Variance',            excelWidth: 12, pdfWidth: 55  },
+    { label: 'Closed Approved By',  excelWidth: 20, pdfWidth: 90  }
 ];
 
 /**

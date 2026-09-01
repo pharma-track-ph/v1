@@ -18,6 +18,7 @@ const posRoutes         = require('./routes/posRoutes');
 const reportRoutes      = require('./routes/reportRoutes');
 const forecastingRoutes = require('./routes/forecastingRoutes');
 const backupRoutes      = require('./routes/backupRoutes');
+const publicRoutes      = require('./routes/publicRoutes');
 const { scheduleDailyBackup } = require('./utils/backupScheduler');
 
 const app  = express();
@@ -98,6 +99,7 @@ app.use('/api/pos',         posRoutes);
 app.use('/api/reports',     reportRoutes);
 app.use('/api/forecasting', forecastingRoutes);
 app.use('/api/backup',      backupRoutes);
+app.use('/api/public',      publicRoutes);
 
 // ── Health check ─────────────────────────────────────────────
 app.get('/api/health', (req, res) => {

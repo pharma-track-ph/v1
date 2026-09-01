@@ -273,9 +273,12 @@ const Nav = {
         const user = Auth.getUser();
         if (!user) return;
 
-        // Display-only label — the underlying role value stays 'super_admin'
-        // everywhere in code/DB/JWT; this only changes what's shown on screen.
-        const roleLabel = user.role === 'super_admin' ? 'Owner' : user.role.replace('_', ' ');
+        // Display-only label — the underlying role value stays 'super_admin'/
+        // 'cashier' everywhere in code/DB/JWT; this only changes what's shown
+        // on screen, same as AUDIT_ROLE_LABELS/ROLE_LABELS elsewhere in the app.
+        const roleLabel = user.role === 'super_admin' ? 'Owner'
+            : user.role === 'cashier' ? 'Pharmacy Assistant'
+            : user.role.replace('_', ' ');
 
         // Header user info
         const nameEl   = document.getElementById('header-user-name');

@@ -284,7 +284,25 @@
 
             btn.disabled = true;
             btn.textContent = 'Sending…';
-            const result = await API.post('/auth/forgot-password', { email });
+
+            // try/catch here (and in every other step below) matters: without
+            // it, a request that fails at the NETWORK level -- a dropped
+            // connection, a host-level timeout, anything short of a clean
+            // JSON response -- throws out of the bare `await`, and the code
+            // that re-enables the button never runs. The button was
+            // observed stuck on "Sending…" forever this way even after the
+            // underlying cause (a Render env mismatch) was fixed, since nothing
+            // here was catching that class of failure to begin with.
+            let result;
+            try {
+                result = await API.post('/auth/forgot-password', { email });
+            } catch (err) {
+                btn.disabled = false;
+                btn.textContent = 'Send Code';
+                errorEl.textContent = 'Connection error. Please try again.';
+                return;
+            }
+
             btn.disabled = false;
             btn.textContent = 'Send Code';
 
@@ -321,7 +339,13 @@
         }
 
         document.getElementById('fp-resend-btn').addEventListener('click', async () => {
-            const result = await API.post('/auth/forgot-password', { email: fpVerifiedEmail });
+            let result;
+            try {
+                result = await API.post('/auth/forgot-password', { email: fpVerifiedEmail });
+            } catch (err) {
+                Toast.show('Connection error. Please try again.', 'error');
+                return;
+            }
             if (result?.success) {
                 Toast.show('A new code has been sent.', 'info');
                 fpStartResendCooldown();
@@ -341,7 +365,17 @@
 
             btn.disabled = true;
             btn.textContent = 'Verifying…';
-            const result = await API.post('/auth/verify-otp', { email: fpVerifiedEmail, otp });
+
+            let result;
+            try {
+                result = await API.post('/auth/verify-otp', { email: fpVerifiedEmail, otp });
+            } catch (err) {
+                btn.disabled = false;
+                btn.textContent = 'Verify Code';
+                errorEl.textContent = 'Connection error. Please try again.';
+                return;
+            }
+
             btn.disabled = false;
             btn.textContent = 'Verify Code';
 
@@ -372,7 +406,17 @@
 
             btn.disabled = true;
             btn.textContent = 'Updating…';
-            const result = await API.post('/auth/reset-password', { resetToken: fpResetToken, newPassword, confirmPassword });
+
+            let result;
+            try {
+                result = await API.post('/auth/reset-password', { resetToken: fpResetToken, newPassword, confirmPassword });
+            } catch (err) {
+                btn.disabled = false;
+                btn.textContent = 'Reset Password';
+                errorEl.textContent = 'Connection error. Please try again.';
+                return;
+            }
+
             btn.disabled = false;
             btn.textContent = 'Reset Password';
 

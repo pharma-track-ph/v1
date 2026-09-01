@@ -247,7 +247,13 @@
             <h3>Void a Transaction</h3>
             <button class="btn-close" onclick="Modal.close('void-list-modal')">✕</button>
         </div>
-        <div class="modal-body" id="void-list-body" style="max-height:420px;overflow-y:auto"></div>
+        <div class="modal-body" style="padding-bottom:0">
+            <div class="form-group" style="margin-bottom:10px">
+                <input type="text" id="void-search" class="form-control"
+                       placeholder="Search by order number…" autocomplete="off">
+            </div>
+        </div>
+        <div class="modal-body" id="void-list-body" style="max-height:380px;overflow-y:auto;padding-top:0"></div>
         <div class="modal-footer">
             <button class="btn btn-light" onclick="Modal.close('void-list-modal')">Close</button>
         </div>

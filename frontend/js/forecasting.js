@@ -560,7 +560,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         const pattern = buildPattern(sales, fitted.filter(v => v !== null));
         const mape    = calcMAPE(sales.slice(window), fitted.slice(window).filter(v => v !== null));
 
-        return { predictions, components: { fitted, levels: [], trends: [], seasonals: [] }, pattern, mape, method: 'Simple Average' };
+        return { predictions, components: { fitted, levels: [], trends: [], seasonals: [] }, pattern, mape, method: 'Moving Average' };
     }
 
     // ── 2. Simple Exponential Smoothing ─────────────────────
@@ -585,7 +585,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         const pattern = buildPattern(sales, fitted);
         const mape    = calcMAPE(sales, fitted);
 
-        return { predictions, components: { fitted, levels: [], trends: [], seasonals: [] }, pattern, mape, method: 'Weighted Average' };
+        return { predictions, components: { fitted, levels: [], trends: [], seasonals: [] }, pattern, mape, method: 'Exponential Smoothing' };
     }
 
     // ── 3. Holt-Winters Triple Exponential Smoothing ─────────
@@ -600,7 +600,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         // Need at least 2 full seasons for HW; fall back to SES otherwise
         if (n < s * 2) {
             const result = runExponentialSmoothing(sales, periods);
-            result.method = 'Seasonal Forecast (limited data – used Weighted Average)';
+            result.method = 'Holt-Winters (limited data, used Exponential Smoothing instead)';
             return result;
         }
 
@@ -668,7 +668,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             components: { levels, trends, seasonals: seasonals.slice(0, n), fitted },
             pattern,
             mape,
-            method: 'Seasonal Forecast (Holt-Winters)'
+            method: 'Holt-Winters'
         };
     }
 
@@ -1196,35 +1196,52 @@ document.addEventListener('DOMContentLoaded', async () => {
         const body = document.getElementById('comparison-body');
         if (!body) return;
 
+        const titleEl = document.getElementById('comparison-modal-title');
+        if (titleEl) titleEl.textContent = `Algorithm Comparison: ${product.name}`;
+
+        // Same names shown on the algorithm cards earlier on this page
+        // (Moving Average / Exponential Smoothing / Holt-Winters) -- this
+        // table used to call them "Simple Average"/"Weighted Average"/
+        // "Seasonal Forecast" instead, which read as three DIFFERENT,
+        // unrelated methods rather than the exact three already selected
+        // from above.
         const methods = [
-            { key: 'moving-average', name: 'Simple Average',    result: ma,  desc: 'Best for stable, predictable products' },
-            { key: 'exponential',    name: 'Weighted Average',  result: ses, desc: 'Best for products with gradual growth/decline' },
-            { key: 'holt-winters',   name: 'Seasonal Forecast', result: hw,  desc: 'Best for seasonal patterns (recommended)' }
+            { key: 'moving-average', name: 'Moving Average',        result: ma,  desc: 'Best for stable, predictable products' },
+            { key: 'exponential',    name: 'Exponential Smoothing', result: ses, desc: 'Best for products with gradual growth/decline' },
+            // No "(recommended)" here -- the BEST FIT badge below already
+            // says which method actually won for THIS product; hardcoding
+            // a recommendation onto Holt-Winters regardless of the real
+            // result would contradict that badge whenever a different
+            // method scores better (as seen above: Exponential Smoothing).
+            { key: 'holt-winters',   name: 'Holt-Winters',          result: hw,  desc: 'Best for seasonal patterns' }
         ];
 
         // Only methods with a measurable MAPE can be meaningfully compared.
-        // A null MAPE means "not enough sales history to score" — not "0%
-        // error" — and must never accidentally win "best fit" through JS's
+        // A null MAPE means "not enough sales history to score" -- not "0%
+        // error" -- and must never accidentally win "best fit" through JS's
         // null-coerces-to-0 comparison quirk (null < 5 is true!).
-        const scorable  = methods.filter(m => m.result.mape !== null);
-        const bestMethod = scorable.length
+        const scorable = methods.filter(m => m.result.mape !== null);
+
+        // A "best" pick is only meaningful if at least one method actually
+        // scored reasonably well. When every method's error is this high
+        // (>=90%), the underlying sales history is too sparse for the
+        // comparison to mean anything -- reduce() would still pick ONE as
+        // "BEST FIT" in that case (usually just whichever comes first when
+        // every score ties), which looks like a real recommendation but
+        // isn't one.
+        const bestMethod = (scorable.length && scorable.some(m => m.result.mape < 90))
             ? scorable.reduce((best, m) => m.result.mape < best.result.mape ? m : best, scorable[0])
             : null;
 
         body.innerHTML = `
-            <p style="font-size:0.85rem;color:var(--secondary);margin-bottom:20px">
-                Comparing 3 prediction methods for <strong>${product.name}</strong>, each up to its own
-                supported forecast range.
-                "Error %" shows how accurate each method was against past sales — lower is better.
-            </p>
             <div style="overflow-x:auto">
-                <table style="width:100%;border-collapse:collapse;font-size:0.875rem">
+                <table style="width:100%;border-collapse:collapse;font-size:0.85rem">
                     <thead>
                         <tr style="background:var(--light-blue)">
-                            <th style="padding:12px 10px;text-align:left;border-bottom:2px solid var(--primary)">Method</th>
-                            <th style="padding:12px 10px;text-align:center;border-bottom:2px solid var(--primary)">Accuracy (lower = better)</th>
-                            <th style="padding:12px 10px;text-align:center;border-bottom:2px solid var(--primary)">Total Predicted</th>
-                            <th style="padding:12px 10px;text-align:left;border-bottom:2px solid var(--primary)">Best Used For</th>
+                            <th style="padding:10px 8px;text-align:left;border-bottom:2px solid var(--primary)">Method</th>
+                            <th style="padding:10px 8px;text-align:center;border-bottom:2px solid var(--primary)">Accuracy (lower = better)</th>
+                            <th style="padding:10px 8px;text-align:center;border-bottom:2px solid var(--primary)">Total Predicted</th>
+                            <th style="padding:10px 8px;text-align:left;border-bottom:2px solid var(--primary)">Best Used For</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -1235,51 +1252,46 @@ document.addEventListener('DOMContentLoaded', async () => {
                             const periods  = periodsByMethod[m.key];
                             return `
                             <tr style="border-bottom:1px solid var(--gray-200);${isBest ? 'background:#f0f7ff' : ''}">
-                                <td style="padding:12px 10px">
+                                <td style="padding:10px 8px">
                                     <strong>${m.name}</strong>
-                                    ${isBest ? '<span style="margin-left:8px;background:var(--primary);color:white;padding:2px 8px;border-radius:10px;font-size:0.68rem;font-weight:700">BEST FIT</span>' : ''}
+                                    ${isBest ? '<span style="margin-left:6px;background:var(--primary);color:white;padding:2px 7px;border-radius:10px;font-size:0.65rem;font-weight:700">BEST FIT</span>' : ''}
                                 </td>
-                                <td style="padding:12px 10px;text-align:center">
+                                <td style="padding:10px 8px;text-align:center">
                                     ${hasScore ? `
-                                    <span style="font-size:1.1rem;font-weight:700;color:${m.result.mape < 20 ? 'var(--success)' : m.result.mape < 40 ? '#f0ad4e' : 'var(--danger)'}">
+                                    <span style="font-size:1.05rem;font-weight:700;color:${m.result.mape < 20 ? 'var(--success)' : m.result.mape < 40 ? '#f0ad4e' : 'var(--danger)'}">
                                         ${m.result.mape}%
                                     </span>
-                                    <div style="font-size:0.72rem;color:var(--secondary)">${m.result.mape < 20 ? 'Excellent' : m.result.mape < 40 ? 'Acceptable' : 'Less accurate'}</div>
+                                    <div style="font-size:0.68rem;color:var(--secondary)">${m.result.mape < 20 ? 'Excellent' : m.result.mape < 40 ? 'Acceptable' : 'Less accurate'}</div>
                                     ` : `
-                                    <span style="font-size:1.1rem;font-weight:700;color:var(--secondary)">N/A</span>
-                                    <div style="font-size:0.72rem;color:var(--secondary)">No sales data yet</div>
+                                    <span style="font-size:1.05rem;font-weight:700;color:var(--secondary)">N/A</span>
+                                    <div style="font-size:0.68rem;color:var(--secondary)">No sales data yet</div>
                                     `}
                                 </td>
-                                <td style="padding:12px 10px;text-align:center;font-size:1.1rem;font-weight:700;color:var(--primary)">
+                                <td style="padding:10px 8px;text-align:center;font-size:1.05rem;font-weight:700;color:var(--primary)">
                                     ${total} units
-                                    <div style="font-size:0.72rem;font-weight:600;color:var(--secondary)">${periods} wk${periods > 1 ? 's' : ''}${periods < requestedPeriods ? ' (max for this method)' : ''}</div>
+                                    <div style="font-size:0.68rem;font-weight:600;color:var(--secondary)">${periods} wk${periods > 1 ? 's' : ''}${periods < requestedPeriods ? ' (max for this method)' : ''}</div>
                                 </td>
-                                <td style="padding:12px 10px;font-size:0.82rem;color:var(--secondary)">${m.desc}</td>
+                                <td style="padding:10px 8px;font-size:0.8rem;color:var(--secondary)">${m.desc}</td>
                             </tr>`;
                         }).join('')}
                     </tbody>
                 </table>
             </div>
             ${bestMethod ? `
-            <div style="margin-top:20px;padding:16px;background:#eef4ff;border-radius:10px;border-left:4px solid var(--primary)">
-                <strong>Our Recommendation for ${product.name}:</strong>
-                <p style="margin-top:8px;font-size:0.875rem">
+            <div style="margin-top:14px;padding:12px 14px;background:#eef4ff;border-radius:10px;border-left:4px solid var(--primary)">
+                <strong style="font-size:0.88rem">Our Recommendation for ${product.name}:</strong>
+                <p style="margin-top:6px;font-size:0.83rem">
                     Based on historical sales, the <strong>${bestMethod.name}</strong> method has the lowest error rate
                     (${bestMethod.result.mape}%). This means it would have predicted past sales most accurately.
                     We recommend using this method for future forecasts of this product.
                 </p>
-                <p style="margin-top:8px;font-size:0.8rem;color:var(--secondary)">
-                    Note: If this product has strong seasonal demand patterns (e.g., cold medicine, antihistamines),
-                    the Seasonal Forecast method is generally the most reliable regardless of past error rates,
-                    because it accounts for future seasonal spikes that may not have appeared in the training data.
-                </p>
             </div>
             ` : `
-            <div style="margin-top:20px;padding:16px;background:#fff8e6;border-radius:10px;border-left:4px solid #f0ad4e">
-                <strong>Not enough sales data yet</strong>
-                <p style="margin-top:8px;font-size:0.875rem">
-                    This product has no recorded sales history, so none of the three methods can be scored for accuracy yet.
-                    The predictions above are still shown, but treat them as rough starting estimates until real sales accumulate.
+            <div style="margin-top:14px;padding:12px 14px;background:#fff8e6;border-radius:10px;border-left:4px solid #f0ad4e">
+                <strong style="font-size:0.88rem">Not enough sales data to compare reliably</strong>
+                <p style="margin-top:6px;font-size:0.83rem">
+                    This product's sales history is too limited or inconsistent for any of the three methods to be scored with confidence right now.
+                    The predictions above are still shown, but treat them as rough starting estimates until more real sales accumulate.
                 </p>
             </div>
             `}
@@ -1290,6 +1302,10 @@ document.addEventListener('DOMContentLoaded', async () => {
     function renderComparisonModal(data) {
         const body = document.getElementById('comparison-body');
         if (!body) return;
+
+        const titleEl = document.getElementById('comparison-modal-title');
+        if (titleEl) titleEl.textContent = data?.product?.name ? `Algorithm Comparison: ${data.product.name}` : 'Algorithm Comparison';
+
         body.innerHTML = `
             <table style="width:100%;border-collapse:collapse;font-size:0.875rem">
                 <thead>

@@ -1079,6 +1079,8 @@ document.addEventListener('DOMContentLoaded', () => {
     // from ANY cashier -- not just your own -- so a mistake noticed later,
     // possibly by someone other than who rang it up, can still be found
     // and corrected.
+    let voidCandidates = []; // full list from the server, filtered client-side by voidSearch below
+
     voidBtn?.addEventListener('click', async () => {
         const candidates = await OfflineAPI.get('/pos/void-candidates');
 
@@ -1087,13 +1089,33 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
 
-        renderVoidList(candidates.data);
+        voidCandidates = candidates.data;
+        const voidSearchInput = document.getElementById('void-search');
+        if (voidSearchInput) voidSearchInput.value = '';
+        renderVoidList(voidCandidates);
         Modal.open('void-list-modal');
+        setTimeout(() => voidSearchInput?.focus(), 50);
     });
+
+    // The full ~50-candidate list is already loaded client-side in one shot
+    // above (not paginated), so filtering by order number just narrows the
+    // in-memory array and re-renders -- no extra request needed.
+    document.getElementById('void-search')?.addEventListener('input', debounce((e) => {
+        const term = e.target.value.trim().toLowerCase();
+        const filtered = term
+            ? voidCandidates.filter(o => o.order_number.toLowerCase().includes(term))
+            : voidCandidates;
+        renderVoidList(filtered);
+    }, 150));
 
     function renderVoidList(orders) {
         const body = document.getElementById('void-list-body');
         if (!body) return;
+
+        if (!orders.length) {
+            body.innerHTML = '<p class="text-muted" style="text-align:center;padding:20px">No matching transactions.</p>';
+            return;
+        }
 
         body.innerHTML = orders.map(order => {
             const itemsSummary = (order.items || [])
@@ -1337,7 +1359,7 @@ document.addEventListener('DOMContentLoaded', () => {
             </div>
             <div style="margin-bottom:8px;font-size:0.82rem">
                 <strong>OR #:</strong> ${receipt.order_number}<br>
-                <strong>Cashier:</strong> ${receipt.cashier_name}
+                <strong>Pharmacy Assistant:</strong> ${receipt.cashier_name}
             </div>
             <div class="table-container" style="margin-bottom:12px">
                 <table class="table" style="white-space:normal">

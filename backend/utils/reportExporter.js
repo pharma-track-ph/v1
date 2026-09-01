@@ -494,17 +494,62 @@ async function exportWord({ res, title, generatedBy, filename, columns, rows, pe
     res.send(buffer);
 }
 
+function csvEscape(value) {
+    const str = String(value ?? '');
+    if (/[",\n\r]/.test(str)) {
+        return '"' + str.replace(/"/g, '""') + '"';
+    }
+    return str;
+}
+
 /**
- * Single entry point every controller uses — pass the format from the
+ * Plain-data CSV export -- deliberately NOT trying to replicate the
+ * branded title/date/signature block the other three formats have. CSV
+ * has no merged cells or styling at all, so faking that layout would
+ * just show up as a row of bare commas; CSV's actual use case is data
+ * interchange (reopening in a spreadsheet, filtering, or feeding into
+ * another tool), so this is just the header row + data rows + optional
+ * totals row, nothing decorative.
+ */
+function exportCSV({ res, filename, columns, rows, totalsRow }) {
+    const lines = [columns.map(c => csvEscape(c.label)).join(',')];
+
+    if (rows.length) {
+        rows.forEach(row => lines.push(row.map(csvEscape).join(',')));
+    } else {
+        lines.push('No records found for this period.');
+    }
+
+    if (totalsRow) {
+        lines.push(totalsRow.map(csvEscape).join(','));
+    }
+
+    // CRLF line endings -- the CSV spec's own recommendation, and what
+    // Excel/Sheets expect when opening a .csv directly.
+    const csvContent = lines.join('\r\n');
+
+    // UTF-8 BOM prefix -- without it, Excel on Windows misreads a UTF-8
+    // file with non-ASCII characters as a different encoding and shows
+    // mojibake instead of the real characters.
+    const bom = '\uFEFF';
+
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', 'attachment; filename="' + filename + '.csv"');
+    res.send(bom + csvContent);
+}
+
+/**
+ * Single entry point every controller uses -- pass the format from the
  * route param, plus the same opts object described above.
  */
 async function exportReport(format, opts) {
     if (format === 'excel') return exportExcel(opts);
     if (format === 'pdf')   return exportPDF(opts);
     if (format === 'word')  return exportWord(opts);
-    const err = new Error('Unknown export format. Use excel, pdf, or word.');
+    if (format === 'csv')   return exportCSV(opts);
+    const err = new Error('Unknown export format. Use excel, pdf, word, or csv.');
     err.statusCode = 400;
     throw err;
 }
 
-module.exports = { exportReport, exportExcel, exportPDF, exportWord, formatManilaDateTime, formatShortDate, formatShortDateTime };
+module.exports = { exportReport, exportExcel, exportPDF, exportWord, exportCSV, formatManilaDateTime, formatShortDate, formatShortDateTime };

@@ -82,18 +82,20 @@
             </div>
 
             <div class="page-header" style="justify-content:flex-end;margin-bottom:12px">
-                <div class="d-flex gap-8">
-                    <button class="btn btn-outline" id="btn-import-csv">Import CSV</button>
+                <div class="d-flex gap-8" style="align-items:center">
+                    <button class="btn btn-outline" id="btn-import-csv">Import CSV/Excel</button>
+                    <a href="#" id="btn-download-template" style="font-size:0.78rem;color:var(--secondary);text-decoration:underline;white-space:nowrap">Download Template</a>
                     <div class="export-dropdown" id="export-dropdown">
                         <button class="btn btn-outline" id="btn-export-toggle">Export ▾</button>
                         <div class="export-menu hidden" id="export-menu">
                             <button class="export-menu-item" data-format="excel">Excel (.xlsx)</button>
                             <button class="export-menu-item" data-format="pdf">PDF</button>
                             <button class="export-menu-item" data-format="word">Word (.docx)</button>
+                            <button class="export-menu-item" data-format="csv">CSV (.csv)</button>
                         </div>
                     </div>
                     <button class="btn btn-primary" id="btn-add-product">＋ Add Product</button>
-                    <input type="file" id="csv-import-input" accept=".csv" style="display:none">
+                    <input type="file" id="csv-import-input" accept=".csv,.xlsx,.xls" style="display:none">
                 </div>
             </div>
 
@@ -101,29 +103,27 @@
                 <div class="table-container">
                     <table class="table inventory-table">
                         <colgroup>
-                            <col style="width:14%">
-                            <col style="width:18%">
-                            <col style="width:13%">
-                            <col style="width:6%">
+                            <col style="width:21%">
+                            <col style="width:17%">
                             <col style="width:8%">
-                            <col style="width:13%">
+                            <col style="width:9%">
                             <col style="width:14%">
-                            <col style="width:14%">
+                            <col style="width:16%">
+                            <col style="width:15%">
                         </colgroup>
                         <thead>
                             <tr>
-                                <th>Batch No.</th>
-                                <th>Product Name</th>
+                                <th>Brand Name</th>
                                 <th>Category</th>
                                 <th>Stock</th>
                                 <th>Price</th>
-                                <th>Expiry Date</th>
+                                <th>Earliest Expiry</th>
                                 <th>Status</th>
                                 <th>Actions</th>
                             </tr>
                         </thead>
                         <tbody id="inv-tbody">
-                            <tr><td colspan="8" class="text-center" style="padding:40px">
+                            <tr><td colspan="7" class="text-center" style="padding:40px">
                                 <div class="spinner" style="margin:0 auto"></div>
                             </td></tr>
                         </tbody>
@@ -136,7 +136,7 @@
 
 <!-- ── Add/Edit Product Modal ───────────────────────────────── -->
 <div class="modal-overlay" id="product-modal">
-    <div class="modal">
+    <div class="modal modal-lg">
         <div class="modal-header">
             <h3 id="modal-title">Add New Product</h3>
             <button class="btn-close btn-close-modal">✕</button>
@@ -145,19 +145,7 @@
             <form id="product-form">
                 <div class="form-row">
                     <div class="form-group">
-                        <label class="form-label">Batch Number *</label>
-                        <input type="text" id="field-batch_number" name="batch_number"
-                               class="form-control" required placeholder="BATCH-XXX-001">
-                    </div>
-                    <div class="form-group">
-                        <label class="form-label">Barcode</label>
-                        <input type="text" id="field-barcode" name="barcode"
-                               class="form-control" placeholder="4800001000000">
-                    </div>
-                </div>
-                <div class="form-row">
-                    <div class="form-group">
-                        <label class="form-label">Product Name *</label>
+                        <label class="form-label">Brand Name *</label>
                         <input type="text" id="field-name" name="name"
                                class="form-control" required placeholder="Paracetamol 500mg">
                     </div>
@@ -190,30 +178,20 @@
                         <input type="number" id="field-cost" name="cost"
                                class="form-control" required step="0.01" min="0" placeholder="0.00">
                     </div>
-                    <!-- Add mode: shown when creating a new product -->
-                    <div class="form-group" id="field-stock-add">
-                        <label class="form-label">Stock Qty *</label>
-                        <input type="number" id="field-stock_quantity" name="stock_quantity"
-                               class="form-control" required min="0" placeholder="0">
-                    </div>
-                    <!--
-                        FIX Bug 5: Edit mode stock field now has a UNIQUE name="stock_quantity_edit"
-                        (was name="stock_quantity" — same as the add field, causing FormData
-                        to capture only one of them unpredictably).
-                        inventory.js reads this field by id="field-stock_quantity_edit" directly,
-                        so the name attribute here is just for labelling clarity.
-                    -->
-                    <div class="form-group hidden" id="field-stock-edit">
-                        <label class="form-label">Stock Qty</label>
-                        <input type="number" id="field-stock_quantity_edit" name="stock_quantity_edit"
-                               class="form-control" min="0">
-                    </div>
-                </div>
-                <div class="form-row">
                     <div class="form-group">
                         <label class="form-label">Low Stock Threshold</label>
                         <input type="number" id="field-low_stock_threshold" name="low_stock_threshold"
                                class="form-control" min="1" value="10">
+                    </div>
+                </div>
+
+                <!-- ADD mode only: the product's very first Item No.,
+                     captured together with its shared details in one step. -->
+                <div class="form-row" id="field-first-item-row">
+                    <div class="form-group">
+                        <label class="form-label">Initial Stock Qty *</label>
+                        <input type="number" id="field-stock_quantity" name="stock_quantity"
+                               class="form-control" required min="0" placeholder="0">
                     </div>
                     <div class="form-group">
                         <label class="form-label">Expiry Date *</label>
@@ -221,15 +199,54 @@
                                class="form-control" required>
                     </div>
                 </div>
+
+                <!-- EDIT mode only: the Item No. list (+ Removed Item No.
+                     reminder section) -->
+                <div class="hidden" id="edit-only-item-section">
+                    <div class="item-list-section">
+                        <div class="item-list-header">
+                            <label class="form-label">Item No. (restock batches)</label>
+                            <button type="button" class="btn btn-outline btn-sm" id="btn-add-item">+ Add Item No.</button>
+                        </div>
+                        <div id="item-list"></div>
+                        <div class="item-row-form hidden" id="add-item-form">
+                            <div class="form-group">
+                                <label class="form-label">Stock Qty</label>
+                                <input type="number" class="form-control" id="add-item-qty" min="0" placeholder="0">
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label">Expiry Date</label>
+                                <input type="date" class="form-control" id="add-item-expiry">
+                            </div>
+                            <div class="item-row-form-actions">
+                                <button type="button" class="btn btn-light btn-sm" id="btn-cancel-add-item">Cancel</button>
+                                <button type="button" class="btn btn-primary btn-sm" id="btn-save-add-item">Save</button>
+                            </div>
+                        </div>
+
+                        <!-- Only shown when at least one Item No. is expired
+                             or out of stock -- a reminder to physically clear
+                             those batches out. "Remove" here only hides it
+                             from THIS view for the rest of the session -- it
+                             never deletes anything from the database (use the
+                             item's own Delete button above for that). -->
+                        <div class="removed-items-section hidden" id="removed-items-section">
+                            <div class="item-list-header">
+                                <label class="form-label">Removed Item No. (for removing batches)</label>
+                            </div>
+                            <div id="removed-item-list"></div>
+                        </div>
+                    </div>
+                </div>
+
                 <div class="form-group">
                     <label class="form-label">Description</label>
                     <textarea id="field-description" name="description"
                               class="form-control" rows="2" placeholder="Optional notes…"></textarea>
                 </div>
-                <!-- Barcode preview — EDIT mode only. Every product always has a
-                     real, scannable barcode value (auto-generated if none was
-                     set), rendered here as an actual CODE128 image. -->
-                <div class="form-group hidden" id="field-barcode-preview">
+
+                <!-- EDIT mode only: barcode preview -->
+                <div class="hidden form-group" id="field-barcode-preview">
                     <label class="form-label">Product Barcode</label>
                     <div class="barcode-preview-box">
                         <svg id="barcode-svg"></svg>

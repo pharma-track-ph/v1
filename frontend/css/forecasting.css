@@ -478,6 +478,19 @@
     justify-content: center;
     z-index: 1000;
     padding: 20px;
+    /* This page's own .modal-overlay is a SEPARATE rule from global.css's
+       .active-toggled opacity/visibility version -- explicitly reset here
+       since global.css's base .modal-overlay defaults to opacity:0;
+       visibility:hidden and only reveals via an .active class this page's
+       JS never adds (forecasting.js only ever toggles the shared .hidden
+       utility class). Without this reset those two properties from
+       global.css still won the cascade (never overridden here), so this
+       modal was actually already display:flex the moment .hidden was
+       removed -- just permanently invisible and non-interactive
+       underneath, which is why "Compare All Methods" looked like it did
+       nothing at all. */
+    opacity: 1;
+    visibility: visible;
 }
 
 .modal-content {
@@ -496,7 +509,7 @@
     display: flex;
     justify-content: space-between;
     align-items: center;
-    padding: 20px 24px;
+    padding: 16px 20px;
     border-bottom: 1px solid var(--gray-200);
     position: sticky;
     top: 0;
@@ -507,7 +520,7 @@
 .modal-header h3  { font-size: 1.1rem; font-weight: 700; margin: 0; }
 .modal-close      { background: none; border: none; font-size: 1.5rem; cursor: pointer; color: var(--secondary); width: 32px; height: 32px; display: flex; align-items: center; justify-content: center; border-radius: 6px; padding: 0; }
 .modal-close:hover { background: var(--gray-100); }
-.modal-body       { padding: 24px; }
+.modal-body       { padding: 20px; }
 
 .comparison-recommendation {
     margin-top: 20px;

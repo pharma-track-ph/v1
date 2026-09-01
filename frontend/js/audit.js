@@ -161,7 +161,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Display-only maps — underlying values in the database/logic (role,
     // entity) never change, only what's shown on screen here.
-    const ROLE_LABELS = { super_admin: 'Owner', admin: 'Admin', cashier: 'Cashier' };
+    const ROLE_LABELS = { super_admin: 'Owner', admin: 'Admin', cashier: 'Pharmacy Assistant' };
 
     function roleLabel(role) {
         if (!role) return '';
@@ -304,7 +304,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 ['Order #', escHtml(parsed.order_number || '—')],
                 ['Total', Fmt.currency(parsed.total)]
             ];
-            if (parsed.requested_by) rows.push(['Requested By (Cashier)', escHtml(parsed.requested_by)]);
+            if (parsed.requested_by) rows.push(['Requested By (Pharmacy Assistant)', escHtml(parsed.requested_by)]);
             return detailGrid(rows);
         }
 
