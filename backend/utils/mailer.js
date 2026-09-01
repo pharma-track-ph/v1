@@ -25,26 +25,58 @@ let transporter = null;
 
 // Render's containers have no outbound IPv6 routing at all -- Gmail's
 // SMTP host (smtp.gmail.com) resolves to BOTH an IPv4 and an IPv6
-// address, and depending on DNS ordering Node can end up trying the
-// unreachable IPv6 one first, failing with ENETUNREACH or hanging until
-// a connection timeout. server.js already sets
-// dns.setDefaultResultOrder('ipv4first') globally, but that setting only
-// governs dns.lookup() specifically -- it turned out NOT to be enough on
-// its own here (confirmed live: the exact same ENETUNREACH/timeout
-// errors kept happening on Render even with that in place), most likely
-// because nodemailer's own connection setup doesn't route its DNS
-// resolution through dns.lookup() in a way that setting actually
-// reaches. `family: 4` below is the more direct fix -- it's passed
-// straight through to the underlying net/tls socket options and forces
-// an IPv4-only connection at the actual point of failure, regardless of
-// how the hostname got resolved. Harmless locally too (real IPv6 routing
-// exists there, but forcing IPv4 doesn't break anything -- Gmail is
-// reachable over both).
-function getTransporter() {
+// address, and depending on DNS ordering/library behavior Node can end
+// up trying the unreachable IPv6 one, failing with ENETUNREACH or
+// hanging until a connection timeout.
+//
+// Two previous attempts at this, in order, for anyone revisiting:
+//   1. dns.setDefaultResultOrder('ipv4first') in server.js -- only
+//      governs Node's own dns.lookup() specifically, and evidently
+//      nodemailer's connection setup doesn't route through it in a way
+//      that setting actually reaches (confirmed live: same errors kept
+//      happening on Render with this in place).
+//   2. Passing `family: 4` directly to nodemailer's createTransport --
+//      SHOULD be forwarded to the underlying net/tls socket options, but
+//      whether smtp-connection (the library nodemailer uses internally)
+//      actually propagates that option all the way down isn't something
+//      to just trust blindly, especially after (1) turned out not to be
+//      enough either.
+//
+// This is the belt-and-suspenders version: resolve smtp.gmail.com to a
+// literal IPv4 address OURSELVES first (dns.resolve4, not dns.lookup --
+// asks for A records specifically, no IPv6 result possible even in
+// principle), then connect to that literal IP as `host` instead of the
+// hostname. A literal IPv4 address can only ever be reached over IPv4 --
+// there's no DNS ambiguity or library behavior left to depend on at that
+// point. `tls.servername` is set to the real hostname explicitly since
+// `host` is now a bare IP -- otherwise TLS certificate validation would
+// check the cert against the IP itself and fail (Gmail's cert is issued
+// for the hostname, not for any specific IP). `family: 4` is kept too,
+// pure defense in depth -- doesn't hurt, and covers the (currently
+// unlikely but not impossible) case where DNS resolution itself returns
+// something unexpected.
+//
+// Falls back to the plain hostname if the resolve4() call itself fails
+// for any reason (e.g. a transient DNS hiccup) -- better to attempt the
+// original approach than to hard-fail sending an OTP entirely over a
+// resolver blip.
+async function getTransporter() {
     if (!transporter) {
+        let host = 'smtp.gmail.com';
+        try {
+            const dns = require('dns').promises;
+            const addresses = await dns.resolve4('smtp.gmail.com');
+            if (addresses.length) host = addresses[0];
+        } catch (err) {
+            console.error('[mailer] Could not resolve smtp.gmail.com to an IPv4 address, falling back to hostname:', err.message);
+        }
+
         transporter = nodemailer.createTransport({
-            service: 'gmail',
-            family:  4,
+            host,
+            port:   465,
+            secure: true,
+            family: 4,
+            tls:    { servername: 'smtp.gmail.com' },
             auth: {
                 user: process.env.EMAIL_USER,
                 pass: process.env.EMAIL_APP_PASSWORD
@@ -63,7 +95,8 @@ function getTransporter() {
 async function sendOtpEmail(toEmail, otp, userName) {
     const fromAddress = process.env.EMAIL_USER;
 
-    await getTransporter().sendMail({
+    const transporterInstance = await getTransporter();
+    await transporterInstance.sendMail({
         from: `"PharmaTrack" <${fromAddress}>`,
         to: toEmail,
         subject: 'Your PharmaTrack password reset code',
@@ -100,7 +133,8 @@ async function sendOtpEmail(toEmail, otp, userName) {
 async function sendEmailChangeOtp(toEmail, otp, requesterName, targetUserName, newEmail) {
     const fromAddress = process.env.EMAIL_USER;
 
-    await getTransporter().sendMail({
+    const transporterInstance = await getTransporter();
+    await transporterInstance.sendMail({
         from: `"PharmaTrack" <${fromAddress}>`,
         to: toEmail,
         subject: 'Your PharmaTrack email change verification code',
@@ -140,7 +174,8 @@ async function sendEmailChangeOtp(toEmail, otp, requesterName, targetUserName, n
 async function sendActionOtp(toEmail, otp, requesterName, actionDescriptionHtml) {
     const fromAddress = process.env.EMAIL_USER;
 
-    await getTransporter().sendMail({
+    const transporterInstance = await getTransporter();
+    await transporterInstance.sendMail({
         from: `"PharmaTrack" <${fromAddress}>`,
         to: toEmail,
         subject: 'Your PharmaTrack action verification code',
