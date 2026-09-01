@@ -56,6 +56,15 @@ let transporter = null;
 // unlikely but not impossible) case where DNS resolution itself returns
 // something unexpected.
 //
+// Port 587 (STARTTLS) instead of 465 (implicit TLS) -- this fix alone
+// swapped the failure from ENETUNREACH to a plain connection TIMEOUT on
+// port 465, which is the fingerprint of a firewall silently dropping the
+// connection attempt rather than actively rejecting it -- consistent
+// with free-tier cloud hosts commonly blocking outbound SMTP ports
+// specifically to prevent spam relay abuse. 587 is a different port that
+// isn't always blocked even when 465 is; worth trying before assuming
+// this is a hard block Render enforces on every SMTP port.
+//
 // Falls back to the plain hostname if the resolve4() call itself fails
 // for any reason (e.g. a transient DNS hiccup) -- better to attempt the
 // original approach than to hard-fail sending an OTP entirely over a
@@ -73,8 +82,9 @@ async function getTransporter() {
 
         transporter = nodemailer.createTransport({
             host,
-            port:   465,
-            secure: true,
+            port:   587,
+            secure: false,   // port 587 uses STARTTLS (upgrades after connecting), not implicit TLS like 465
+            requireTLS: true, // refuse to send unless the STARTTLS upgrade actually succeeds
             family: 4,
             tls:    { servername: 'smtp.gmail.com' },
             auth: {
