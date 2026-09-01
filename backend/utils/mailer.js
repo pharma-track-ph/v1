@@ -1,13 +1,29 @@
 // ============================================================
 // Mailer Utility
-// Sends transactional emails (currently just password-reset OTP codes)
-// via Gmail SMTP using an App Password — not the account's real
-// password. See EMAIL_USER / EMAIL_APP_PASSWORD in .env.
+// Sends transactional emails (OTP codes) via the Gmail API (HTTPS),
+// authenticated as pharma.track.ph@gmail.com through OAuth2 -- NOT via
+// SMTP. See GMAIL_OAUTH_CLIENT_ID / GMAIL_OAUTH_CLIENT_SECRET /
+// GMAIL_OAUTH_REFRESH_TOKEN in .env.
 //
-// Nodemailer's 'gmail' shorthand service handles the host/port/security
-// details automatically (smtp.gmail.com, port 465, TLS).
+// Why the Gmail API instead of SMTP: Render's free tier blocks ALL
+// outbound SMTP ports (25, 465, 587) as an anti-spam measure -- this is
+// documented, deliberate platform policy, not a bug (confirmed via
+// Render's own changelog + support threads; every SMTP attempt here,
+// across multiple ports and multiple IPv4-forcing workarounds, timed out
+// identically). The Gmail API sends over plain HTTPS (port 443), which
+// is never blocked, so it sidesteps the restriction entirely rather than
+// fighting it.
+//
+// The refresh token was generated ONCE via get-gmail-refresh-token.js
+// (see that file for the one-time OAuth authorization flow) and lets
+// this app request short-lived access tokens indefinitely afterward,
+// without ever needing to re-authorize. Scope is gmail.send only --
+// this credential can send email as that account and do nothing else
+// (can't read the inbox, can't touch contacts, etc).
 // ============================================================
-const nodemailer = require('nodemailer');
+const { google } = require('googleapis');
+
+const GMAIL_FROM_ADDRESS = process.env.EMAIL_USER || 'pharma.track.ph@gmail.com';
 
 // Small (32x32, ~1.4KB) base64-embedded copy of the real PharmaTrack
 // logo, used inline in the emails below via a data: URI -- deliberately
@@ -21,79 +37,54 @@ const nodemailer = require('nodemailer');
 // code the person needs to read right now.
 const LOGO_DATA_URI = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAFV0lEQVR42s2XS2wcVRaGv3NvdVVXtbudkASbQQrYiIiAICBASDxmpDARbJDYGJZICJAAhQWyYMEjYkMQsOChbLKIZoQEAxlmpGEYZhIBIRAgoEAgwZg8nBiCSGLHSdxtu7se97AovxPHNhEMJV21quveOv/9z/n/Ohf+z5dMuVuzxnR0XSa/ZsCNl36jPPWUO80jld9u3xOxvAkmRK+8Ye2KYnlRu4vrqlZERBWAdNpsQFWmABZRJQUbWKz1IEuJs2x8bSZGfb8otaH+/bu2yq5R9lU6Ot6wGzfekV298uVVUdPCd6wXWNSBzJMQBWOFRiOjEWdYK0RhAVUFHZ0ghjRtpMPVgVu+eP+h9zo63rBeT89xA2SeZ/9cCJps3DjZQCfvdW6XMcJgNaZtaYWL286hf2CEnd/0EfgFjAFVQEj9oDlIR2orgfd6eo6b8UBiJFbNFLAiYucbvDYUc/ut7XQ+cD1hGADw1n+7ePql7VhbABRFVTVTROPxtZPqQubPe74iThznt0Q8uvpGwjAgyxzOKbfdeimr/riUai3GGpm0YiKOOWsdS573C5c24/sFnANrDc450syxfNkSsmzmmjprAKpK4Ft6Dw1ycnBkNN+KMQbPGrr39mPtWBH8KgAg8C3f/1jl2z1Hc8llijHCfzZ3s2lrL+Umn8ydHoB39imAOMloXRKxfNm5+Us9w/PrPuSVv3fTXAln3P2sDIyVy5mGNYZ6I+Xy5YuplIs4pwxWR9j0QS/lcjFPyRlinJGBJM1NRFGE0xeRs444zlj1p3ZEBBHYufswR/pGqJRD4sThWZk/AAEWLShgjCAiOKeInMqmiFAuSdrXdyLdvKW7qKps/eQHWhaHhKFHlinVWjojC95M3KdpwjOP30zbBYtIklQDv0DmHIKojr9OxjLl1YZjz2X5/9dedQG+b0Gh99AA93X+D2Ps3GvAGqE2lNK97zjFwOf+zn/J0f4hSlFRoyigFBVHR0ApCiSKAs5dXKa1pUJrS4WFCyKiMKBUCth34ARDw2kuxbkCUFWKQYE3/92NMcIfWius/+tnAkiSZDJdhqo6+jt5KKrKW5v24nk2/yidGcBEj+CcEkUFuvYMsO2zgzzRuZJt23s5+P2AFApWnFMzutbkapApysiNSNjx1SF27u6jFBVwbp5GpE4JAp8X139OcyXk/ruvY+0LW8YZms2cADa8+tWsXjfjU6dKFHrs6TnJug2fcsftKzi/tczf3vxy1OtPDyJNHdYKb2/u5pMdh2lq8mecO6sRZZljQXORDa/uZtOWPTz5yCqODdTY9ul+xAhuGhPOKZ5n2H+gn+fWbadUCnDO/TIGJhdkVApY8+xHvPPudzx47014Hhw5cgIjMk63U0VE2NX1E/c8/DaNRPCsMEu25gIgrzRjLPt6jhEnKdddcxFLFld0rItQzTsu5xzGwNVXtCLorMHnBMAYYaSesqy9wup7r8cv5N41Wdci+TxrDZddch533Xk59XqCMbP3NxNOKGMK5pS8FgPLvgODvLj+Y26+qY3zWso0NQXiF3J3S5KMoeGY/mPDfLu3j9f+0UVQnEl6U+N4E7ITX8QKkKlOPSOMGe5fXu/itX92U6n4NJUKhL4HItQbCUPDCdVawvBIhu97BL49tQCFTMR6qPjjANrbF7odOyBNkneTRq3T88IA1aktVN7RsuicCKdQbziGRxSnyfgHyRofPwgIw1wdbnoXpgpibFyvZo2k/j5Ae/tCJ5M2qVfesHZFWFnSFsd1tepk5qRZrJ0uWYCJg8gpkh49mFSrR3p2f/TY12MxfzdHM0D0tzuciuP3cv0MEYFpBaRji5wAAAAASUVORK5CYII=';
 
-let transporter = null;
+let gmailClient = null;
 
-// Render's containers have no outbound IPv6 routing at all -- Gmail's
-// SMTP host (smtp.gmail.com) resolves to BOTH an IPv4 and an IPv6
-// address, and depending on DNS ordering/library behavior Node can end
-// up trying the unreachable IPv6 one, failing with ENETUNREACH or
-// hanging until a connection timeout.
-//
-// Two previous attempts at this, in order, for anyone revisiting:
-//   1. dns.setDefaultResultOrder('ipv4first') in server.js -- only
-//      governs Node's own dns.lookup() specifically, and evidently
-//      nodemailer's connection setup doesn't route through it in a way
-//      that setting actually reaches (confirmed live: same errors kept
-//      happening on Render with this in place).
-//   2. Passing `family: 4` directly to nodemailer's createTransport --
-//      SHOULD be forwarded to the underlying net/tls socket options, but
-//      whether smtp-connection (the library nodemailer uses internally)
-//      actually propagates that option all the way down isn't something
-//      to just trust blindly, especially after (1) turned out not to be
-//      enough either.
-//
-// This is the belt-and-suspenders version: resolve smtp.gmail.com to a
-// literal IPv4 address OURSELVES first (dns.resolve4, not dns.lookup --
-// asks for A records specifically, no IPv6 result possible even in
-// principle), then connect to that literal IP as `host` instead of the
-// hostname. A literal IPv4 address can only ever be reached over IPv4 --
-// there's no DNS ambiguity or library behavior left to depend on at that
-// point. `tls.servername` is set to the real hostname explicitly since
-// `host` is now a bare IP -- otherwise TLS certificate validation would
-// check the cert against the IP itself and fail (Gmail's cert is issued
-// for the hostname, not for any specific IP). `family: 4` is kept too,
-// pure defense in depth -- doesn't hurt, and covers the (currently
-// unlikely but not impossible) case where DNS resolution itself returns
-// something unexpected.
-//
-// Port 587 (STARTTLS) instead of 465 (implicit TLS) -- this fix alone
-// swapped the failure from ENETUNREACH to a plain connection TIMEOUT on
-// port 465, which is the fingerprint of a firewall silently dropping the
-// connection attempt rather than actively rejecting it -- consistent
-// with free-tier cloud hosts commonly blocking outbound SMTP ports
-// specifically to prevent spam relay abuse. 587 is a different port that
-// isn't always blocked even when 465 is; worth trying before assuming
-// this is a hard block Render enforces on every SMTP port.
-//
-// Falls back to the plain hostname if the resolve4() call itself fails
-// for any reason (e.g. a transient DNS hiccup) -- better to attempt the
-// original approach than to hard-fail sending an OTP entirely over a
-// resolver blip.
-async function getTransporter() {
-    if (!transporter) {
-        let host = 'smtp.gmail.com';
-        try {
-            const dns = require('dns').promises;
-            const addresses = await dns.resolve4('smtp.gmail.com');
-            if (addresses.length) host = addresses[0];
-        } catch (err) {
-            console.error('[mailer] Could not resolve smtp.gmail.com to an IPv4 address, falling back to hostname:', err.message);
-        }
-
-        transporter = nodemailer.createTransport({
-            host,
-            port:   587,
-            secure: false,   // port 587 uses STARTTLS (upgrades after connecting), not implicit TLS like 465
-            requireTLS: true, // refuse to send unless the STARTTLS upgrade actually succeeds
-            family: 4,
-            tls:    { servername: 'smtp.gmail.com' },
-            auth: {
-                user: process.env.EMAIL_USER,
-                pass: process.env.EMAIL_APP_PASSWORD
-            }
-        });
+function getGmailClient() {
+    if (!gmailClient) {
+        const oauth2Client = new google.auth.OAuth2(
+            process.env.GMAIL_OAUTH_CLIENT_ID,
+            process.env.GMAIL_OAUTH_CLIENT_SECRET
+        );
+        oauth2Client.setCredentials({ refresh_token: process.env.GMAIL_OAUTH_REFRESH_TOKEN });
+        gmailClient = google.gmail({ version: 'v1', auth: oauth2Client });
     }
-    return transporter;
+    return gmailClient;
+}
+
+// Builds a raw RFC 2822 email and base64url-encodes it -- the Gmail
+// API's messages.send doesn't take a plain {to, subject, html} object
+// the way nodemailer did; it wants one fully-formed raw MIME message.
+// Subject is base64-encoded in its own header (RFC 2047) so it survives
+// intact even though it's plain ASCII here -- harmless either way, just
+// future-proofing if a subject ever needs non-ASCII characters.
+function buildRawMessage({ to, subject, html }) {
+    const messageParts = [
+        `From: "PharmaTrack" <${GMAIL_FROM_ADDRESS}>`,
+        `To: ${to}`,
+        `Subject: =?utf-8?B?${Buffer.from(subject, 'utf8').toString('base64')}?=`,
+        'MIME-Version: 1.0',
+        'Content-Type: text/html; charset=utf-8',
+        '',
+        html
+    ];
+    const message = messageParts.join('\r\n');
+
+    // Gmail API requires base64URL encoding (- and _ instead of + and /,
+    // no padding), not plain base64.
+    return Buffer.from(message, 'utf8')
+        .toString('base64')
+        .replace(/\+/g, '-')
+        .replace(/\//g, '_')
+        .replace(/=+$/, '');
+}
+
+async function sendViaGmailApi({ to, subject, html }) {
+    const gmail = getGmailClient();
+    const raw = buildRawMessage({ to, subject, html });
+    await gmail.users.messages.send({
+        userId: 'me',
+        requestBody: { raw }
+    });
 }
 
 /**
@@ -103,11 +94,7 @@ async function getTransporter() {
  * @param {string} userName
  */
 async function sendOtpEmail(toEmail, otp, userName) {
-    const fromAddress = process.env.EMAIL_USER;
-
-    const transporterInstance = await getTransporter();
-    await transporterInstance.sendMail({
-        from: `"PharmaTrack" <${fromAddress}>`,
+    await sendViaGmailApi({
         to: toEmail,
         subject: 'Your PharmaTrack password reset code',
         html: `
@@ -141,11 +128,7 @@ async function sendOtpEmail(toEmail, otp, userName) {
  * @param {string} newEmail - the email address being changed TO
  */
 async function sendEmailChangeOtp(toEmail, otp, requesterName, targetUserName, newEmail) {
-    const fromAddress = process.env.EMAIL_USER;
-
-    const transporterInstance = await getTransporter();
-    await transporterInstance.sendMail({
-        from: `"PharmaTrack" <${fromAddress}>`,
+    await sendViaGmailApi({
         to: toEmail,
         subject: 'Your PharmaTrack email change verification code',
         html: `
@@ -182,11 +165,7 @@ async function sendEmailChangeOtp(toEmail, otp, requesterName, targetUserName, n
  * @param {string} actionDescriptionHtml - plain-language HTML description of what's being confirmed, e.g. "create a new Pharmacy Assistant account for Maria Santos"
  */
 async function sendActionOtp(toEmail, otp, requesterName, actionDescriptionHtml) {
-    const fromAddress = process.env.EMAIL_USER;
-
-    const transporterInstance = await getTransporter();
-    await transporterInstance.sendMail({
-        from: `"PharmaTrack" <${fromAddress}>`,
+    await sendViaGmailApi({
         to: toEmail,
         subject: 'Your PharmaTrack action verification code',
         html: `
