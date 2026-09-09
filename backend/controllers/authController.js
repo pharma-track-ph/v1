@@ -240,7 +240,10 @@ const requestEmailChangeOtp = async (req, res, next) => {
         try {
             await sendEmailChangeOtp(requester.email, otp, requester.name, target.name, normalizedEmail);
         } catch (mailErr) {
-            console.error('[requestEmailChangeOtp] Failed to send OTP email:', mailErr.message);
+            // See forgotPassword's comment above -- EmailJS rejects with
+            // {status, text}, not a standard Error, so .message alone
+            // logs nothing useful.
+            console.error('[requestEmailChangeOtp] Failed to send OTP email:', mailErr?.text || mailErr?.message || mailErr);
             EmailChangeOtpStore.clear(req.user.id);
             return res.status(500).json({ success: false, message: 'Could not send the verification email. Please try again later.' });
         }
@@ -412,7 +415,10 @@ const requestActionOtp = async (req, res, next) => {
         try {
             await sendActionOtp(requester.email, otp, requester.name, actionDescription);
         } catch (mailErr) {
-            console.error('[requestActionOtp] Failed to send OTP email:', mailErr.message);
+            // See forgotPassword's comment above -- EmailJS rejects with
+            // {status, text}, not a standard Error, so .message alone
+            // logs nothing useful.
+            console.error('[requestActionOtp] Failed to send OTP email:', mailErr?.text || mailErr?.message || mailErr);
             ActionOtpStore.clear(req.user.id);
             return res.status(500).json({ success: false, message: 'Could not send the verification email. Please try again later.' });
         }
@@ -667,11 +673,11 @@ const exportAuditLogs = async (req, res, next) => {
  * returns the same generic success message whether or not the email is
  * actually registered, so this can't be used to check which emails exist
  * in the system. If the email IS registered, a 6-digit code is emailed
- * to it, valid for 10 minutes. Only a bcrypt HASH of the code is ever
+ * to it, valid for 15 minutes. Only a bcrypt HASH of the code is ever
  * stored -- never the plain code itself.
  */
 const GENERIC_OTP_MESSAGE = 'If that email is registered, a reset code has been sent to it.';
-const OTP_EXPIRY_MINUTES  = 10;
+const OTP_EXPIRY_MINUTES  = 15; // matches the EmailJS template's own wording ("valid for 15 minutes")
 const MAX_OTP_ATTEMPTS    = 5;
 
 const forgotPassword = async (req, res, next) => {
@@ -704,7 +710,13 @@ const forgotPassword = async (req, res, next) => {
             // return the same generic message", since silently failing
             // here would just leave someone waiting forever for a code
             // that was never going to arrive.
-            console.error('[forgotPassword] Failed to send OTP email:', mailErr.message);
+            //
+            // EmailJS's SDK rejects with a plain {status, text} object, not
+            // a standard Error -- mailErr.message is always undefined for
+            // it, which is why this used to log nothing useful. .text is
+            // where the actual reason (bad template variable, invalid
+            // keys, etc.) actually lives.
+            console.error('[forgotPassword] Failed to send OTP email:', mailErr?.text || mailErr?.message || mailErr);
             return res.status(500).json({ success: false, message: 'Could not send the reset email. Please try again later.' });
         }
 
