@@ -47,19 +47,42 @@ const API = {
             const res  = await fetch(`${CONFIG.API_BASE}${endpoint}`, config);
             clearTimeout(timeoutId);
 
-            if (!res.ok) {
-                if (res.status === 401) {
-                    // Token expired or invalid — force logout
-                    Auth.logout();
-                    return null;
-                }
-                throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+            // Parsed regardless of status -- a 400/403/409/etc. still has
+            // a real {success:false, message:'...'} body the caller needs
+            // to read (e.g. "Current password is incorrect", "Email
+            // already in use"). Previously only a 200 OK ever got its body
+            // read; every other status threw and lost that message to the
+            // generic "Connection error" catch below -- which is exactly
+            // why a validation failure kept looking identical to an actual
+            // dead server. Falls back to null only if the body genuinely
+            // isn't JSON.
+            let data = null;
+            try { data = await res.json(); } catch (e) { /* not JSON -- data stays null */ }
+
+            if (res.status === 401) {
+                // Token expired/invalid/deactivated -- see
+                // authMiddleware.js's verifyToken for exactly which. The
+                // server's own message is passed through to the login page
+                // rather than silently redirecting with no explanation.
+                Auth.logout(data?.message || 'Your session expired. Please log in again.');
+                return null;
             }
 
-            const data = await res.json();
+            if (!res.ok) {
+                // A real HTTP error, but WITH a parsed body -- return it as-
+                // is so the caller can read result.message, instead of
+                // throwing and losing it to the generic toast below.
+                return data || { success: false, message: `HTTP ${res.status}: ${res.statusText}` };
+            }
+
             return data;
 
         } catch (err) {
+            // A GENUINE network-level failure -- fetch() itself rejected
+            // (dropped connection, DNS failure, CORS) or the abort timeout
+            // above fired. This is the actual "server unreachable" case,
+            // distinct from the clean-but-unsuccessful HTTP responses
+            // handled above.
             if (err.name === 'AbortError') {
                 console.error(`[API Timeout] ${endpoint}: Request took too long`);
                 Toast.show('Server not responding. Check your connection.', 'error');
@@ -121,9 +144,14 @@ const Auth = {
         return merged;
     },
 
-    logout() {
+    logout(reason) {
         localStorage.removeItem(CONFIG.TOKEN_KEY);
         localStorage.removeItem(CONFIG.USER_KEY);
+        // sessionStorage (not a URL param) since this needs to survive
+        // exactly one navigation and then be gone -- login.html reads and
+        // immediately clears it on load, so it never lingers or reappears
+        // on a later, unrelated visit to the login page.
+        if (reason) sessionStorage.setItem('pharmatrack_logout_reason', reason);
         window.location.href = '../pages/login.html';
     },
 
@@ -767,6 +795,23 @@ const EditProfileModal = {
                         <input type="text" id="edit-profile-name" class="form-control" ${isCashier ? 'disabled' : ''}>
                         ${isCashier ? '<div style="font-size:0.72rem;color:var(--secondary);margin-top:4px">Only an admin or owner can change your name.</div>' : ''}
                     </div>
+
+                    <hr style="margin:18px 0;border:none;border-top:1px solid var(--gray-200)">
+
+                    <div style="font-size:0.85rem;font-weight:600;margin-bottom:10px">Change Password</div>
+                    <div class="form-group">
+                        <label class="form-label">Current Password</label>
+                        <input type="password" id="edit-profile-current-pw" class="form-control" autocomplete="current-password">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">New Password</label>
+                        <input type="password" id="edit-profile-new-pw" class="form-control" autocomplete="new-password" placeholder="Min. 8 characters">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Confirm New Password</label>
+                        <input type="password" id="edit-profile-confirm-pw" class="form-control" autocomplete="new-password">
+                    </div>
+
                     <p class="error-msg" id="edit-profile-error" aria-live="polite" style="min-height:20px"></p>
                 </div>
                 <div class="modal-footer">
@@ -808,21 +853,77 @@ const EditProfileModal = {
             }
             if (this.pendingAvatar) body.avatar = this.pendingAvatar;
 
+            // Password change goes through a SEPARATE OTP-gated flow (see
+            // ChangePasswordOtpModal below), not this same PUT -- only
+            // validated here, never sent as part of `body`.
+            const currentPw = document.getElementById('edit-profile-current-pw')?.value;
+            const newPw     = document.getElementById('edit-profile-new-pw')?.value;
+            const confirmPw = document.getElementById('edit-profile-confirm-pw')?.value;
+            const wantsPasswordChange = !!(currentPw || newPw || confirmPw);
+
+            if (wantsPasswordChange) {
+                if (!currentPw) { errEl.textContent = 'Enter your current password to set a new one.'; return; }
+                if (!newPw || newPw.length < 8) { errEl.textContent = 'New password must be at least 8 characters.'; return; }
+                if (newPw !== confirmPw) { errEl.textContent = 'New passwords do not match.'; return; }
+            }
+
             btn.disabled = true;
             btn.textContent = 'Saving…';
-            const result = await API.put('/auth/profile', body);
+
+            // Name/avatar (if anything actually changed) save immediately,
+            // same as before -- skipped entirely if the ONLY thing touched
+            // was the password.
+            let profileResult = { success: true };
+            if (Object.keys(body).length) {
+                profileResult = await API.put('/auth/profile', body);
+            }
+
             btn.disabled = false;
             btn.textContent = 'Save Changes';
 
-            if (result?.success) {
-                Auth.updateStoredUser(result.user);
+            if (!profileResult?.success) {
+                errEl.textContent = profileResult?.message || 'Could not update profile.';
+                return;
+            }
+
+            if (profileResult.user) {
+                Auth.updateStoredUser(profileResult.user);
                 Nav.buildUserInfo(); // re-render header/avatar immediately, no re-login needed
+            }
+
+            // Cleared regardless of what happens next -- plaintext
+            // shouldn't linger in the DOM, and a retry (e.g. wrong current
+            // password) should require deliberately retyping, not silently
+            // resubmitting a leftover value.
+            const currentPwEl = document.getElementById('edit-profile-current-pw');
+            const newPwEl     = document.getElementById('edit-profile-new-pw');
+            const confirmPwEl = document.getElementById('edit-profile-confirm-pw');
+            if (currentPwEl) currentPwEl.value = '';
+            if (newPwEl)     newPwEl.value     = '';
+            if (confirmPwEl) confirmPwEl.value = '';
+
+            if (wantsPasswordChange) {
+                // Request the code BEFORE closing this modal or touching the
+                // OTP one at all -- if it fails (wrong current password,
+                // etc.), the error shows right here, and Edit Profile never
+                // closes in the first place. Only on success does the OTP
+                // modal take over.
+                const otpResult = await ChangePasswordOtpModal.open(currentPw, newPw);
+                if (!otpResult.success) {
+                    errEl.textContent = otpResult.message;
+                    return;
+                }
+                // Other fields (if any) are already saved at this point --
+                // only the password itself is still pending, gated behind a
+                // code sent to YOUR OWN email (the now-open OTP modal).
+                Modal.close('edit-profile-modal');
+                if (Object.keys(body).length) Toast.show('Other changes saved. Verify your password change to finish.', 'info');
+            } else {
                 Toast.show('Profile updated.', 'success');
                 Modal.close('edit-profile-modal');
-                this.pendingAvatar = null;
-            } else {
-                errEl.textContent = result?.message || 'Could not update profile.';
             }
+
+            this.pendingAvatar = null;
         });
     },
 
@@ -876,7 +977,177 @@ const EditProfileModal = {
         if (nameInput) nameInput.value = user?.name || '';
         this.setPreview(user?.avatar || '');
 
+        // Same reasoning as pendingAvatar above -- don't carry over
+        // whatever was typed (or left blank) from a previous cancelled visit.
+        const currentPwEl = document.getElementById('edit-profile-current-pw');
+        const newPwEl     = document.getElementById('edit-profile-new-pw');
+        const confirmPwEl = document.getElementById('edit-profile-confirm-pw');
+        if (currentPwEl) currentPwEl.value = '';
+        if (newPwEl)     newPwEl.value     = '';
+        if (confirmPwEl) confirmPwEl.value = '';
+        const errEl = document.getElementById('edit-profile-error');
+        if (errEl) errEl.textContent = '';
+
         Modal.open('edit-profile-modal');
+    }
+};
+
+// ── Change Password Verification (OTP) ──────
+// Second step of EditProfileModal's password-change flow above. A
+// deliberately SEPARATE modal/id from users.html's own #action-otp-modal
+// (used there for Add User/Change Password-for-others/Delete) -- that one
+// only exists on the User Management page, while this one needs to work
+// from EVERY page, since Edit Profile is available everywhere. Keeping
+// them fully separate (different id, different JS state) avoids any
+// collision between the two on users.html, where both would otherwise be
+// present at once.
+const ChangePasswordOtpModal = {
+    pendingCurrentPassword: null,
+    pendingNewPassword:     null,
+    resendCooldown:         null,
+
+    ensureModal() {
+        if (document.getElementById('change-password-otp-modal')) return;
+
+        const overlay = document.createElement('div');
+        overlay.className = 'modal-overlay';
+        overlay.id = 'change-password-otp-modal';
+        overlay.innerHTML = `
+            <div class="modal" style="max-width:380px">
+                <div class="modal-header">
+                    <h3>🔒 Verify Password Change</h3>
+                    <button class="btn-close" id="btn-close-change-pw-otp">✕</button>
+                </div>
+                <div class="modal-body">
+                    <p id="change-pw-otp-status" style="font-size:0.85rem;color:var(--secondary);margin-bottom:16px">Sending verification code…</p>
+                    <div class="form-group">
+                        <label class="form-label">6-Digit Code *</label>
+                        <input type="text" id="change-pw-otp-code" class="form-control" inputmode="numeric" maxlength="6"
+                               placeholder="000000" autocomplete="one-time-code" style="letter-spacing:6px;text-align:center;font-size:1.2rem">
+                    </div>
+                    <p style="font-size:0.78rem;color:var(--secondary);margin-top:10px">
+                        Didn't get a code? <button type="button" id="btn-resend-change-pw-otp" style="background:none;border:none;color:var(--primary);cursor:pointer;padding:0;font-size:0.78rem;text-decoration:underline">Resend code</button>
+                    </p>
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-light" id="btn-close-change-pw-otp-2">Cancel</button>
+                    <button class="btn btn-primary" id="btn-confirm-change-pw-otp">Confirm</button>
+                </div>
+            </div>`;
+        document.body.appendChild(overlay);
+
+        document.getElementById('btn-close-change-pw-otp')?.addEventListener('click', () => this.close());
+        document.getElementById('btn-close-change-pw-otp-2')?.addEventListener('click', () => this.close());
+
+        document.getElementById('btn-resend-change-pw-otp')?.addEventListener('click', async () => {
+            if (!this.pendingCurrentPassword || !this.pendingNewPassword) return;
+            const result = await API.post('/auth/change-password-otp/request', {
+                currentPassword: this.pendingCurrentPassword,
+                newPassword:     this.pendingNewPassword
+            });
+            if (result?.success) {
+                this.setStatus(result.message || 'A new code has been sent.');
+                this.startResendCooldown();
+            } else {
+                this.setStatus(result?.message || 'Could not resend code.', true);
+            }
+        });
+
+        document.getElementById('btn-confirm-change-pw-otp')?.addEventListener('click', () => this.confirm());
+        document.getElementById('change-pw-otp-code')?.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') this.confirm();
+        });
+    },
+
+    setStatus(message, isError = false) {
+        const el = document.getElementById('change-pw-otp-status');
+        if (!el) return;
+        el.textContent = message;
+        el.style.color = isError ? 'var(--danger)' : 'var(--secondary)';
+    },
+
+    startResendCooldown() {
+        const btn = document.getElementById('btn-resend-change-pw-otp');
+        if (!btn) return;
+        let seconds = 30;
+        btn.disabled    = true;
+        btn.textContent = `Resend code (${seconds}s)`;
+        if (this.resendCooldown) clearInterval(this.resendCooldown);
+        this.resendCooldown = setInterval(() => {
+            seconds--;
+            if (seconds <= 0) {
+                clearInterval(this.resendCooldown);
+                btn.disabled    = false;
+                btn.textContent = 'Resend code';
+            } else {
+                btn.textContent = `Resend code (${seconds}s)`;
+            }
+        }, 1000);
+    },
+
+    async open(currentPassword, newPassword) {
+        this.ensureModal();
+
+        // Sends the request FIRST, before the modal ever opens -- if the
+        // current password is wrong (or anything else the server checks
+        // fails), the person sees that error back where they typed it,
+        // never a code-entry screen for a code that was never actually
+        // sent. Returns a plain {success, message} so the caller
+        // (EditProfileModal) can decide what to do on failure -- this
+        // modal only ever becomes visible once a code has genuinely gone
+        // out.
+        const result = await API.post('/auth/change-password-otp/request', { currentPassword, newPassword });
+
+        if (!result?.success) {
+            return { success: false, message: result?.message || 'Could not send the verification email.' };
+        }
+
+        this.pendingCurrentPassword = currentPassword;
+        this.pendingNewPassword     = newPassword;
+
+        const codeInput = document.getElementById('change-pw-otp-code');
+        if (codeInput) codeInput.value = '';
+        Modal.open('change-password-otp-modal');
+        this.setStatus(result.message || 'A verification code has been sent.');
+        this.startResendCooldown();
+        codeInput?.focus();
+
+        return { success: true };
+    },
+
+    // Closing without confirming just abandons the pending change entirely
+    // -- the password itself was never written to the database, only
+    // verified (see requestChangePasswordOtp).
+    close() {
+        Modal.close('change-password-otp-modal');
+        if (this.resendCooldown) clearInterval(this.resendCooldown);
+        this.pendingCurrentPassword = null;
+        this.pendingNewPassword     = null;
+    },
+
+    async confirm() {
+        const otp = document.getElementById('change-pw-otp-code')?.value.trim();
+        if (!/^\d{6}$/.test(otp)) {
+            this.setStatus('Enter the 6-digit code.', true);
+            return;
+        }
+
+        const btn = document.getElementById('btn-confirm-change-pw-otp');
+        btn.disabled    = true;
+        btn.textContent = 'Verifying…';
+        const result = await API.post('/auth/change-password-otp/confirm', { otp });
+        btn.disabled    = false;
+        btn.textContent = 'Confirm';
+
+        if (result?.success) {
+            if (this.resendCooldown) clearInterval(this.resendCooldown);
+            this.pendingCurrentPassword = null;
+            this.pendingNewPassword     = null;
+            Modal.close('change-password-otp-modal');
+            Toast.show(result.message || 'Password updated.', 'success');
+        } else {
+            this.setStatus(result?.message || 'Incorrect code.', true);
+        }
     }
 };
 
@@ -894,7 +1165,20 @@ async function downloadAuthenticatedFile(url, fallbackFilename) {
     const token = Auth.getToken();
     try {
         const res = await fetch(url, { headers: token ? { 'Authorization': `Bearer ${token}` } : {} });
-        if (!res.ok) throw new Error('Download failed.');
+
+        if (!res.ok) {
+            // A real endpoint failure sends a JSON error body (same
+            // {success:false, message:'...'} shape as everything else) --
+            // read it instead of a generic message, same fix as
+            // API.request() above.
+            let message = 'Download failed.';
+            try {
+                const errBody = await res.json();
+                if (errBody?.message) message = errBody.message;
+            } catch (e) { /* not JSON -- keep the generic message */ }
+            Toast.show(message, 'error');
+            return false;
+        }
 
         const disposition = res.headers.get('Content-Disposition') || '';
         const match = disposition.match(/filename="?([^"]+)"?/);
@@ -911,6 +1195,8 @@ async function downloadAuthenticatedFile(url, fallbackFilename) {
         URL.revokeObjectURL(objectUrl);
         return true;
     } catch (err) {
+        // Genuine network-level failure (fetch() itself rejected) --
+        // distinct from the clean-but-unsuccessful response handled above.
         Toast.show('Download failed. Check your connection.', 'error');
         return false;
     }

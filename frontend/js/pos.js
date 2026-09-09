@@ -39,6 +39,31 @@ document.addEventListener('DOMContentLoaded', () => {
             else { renderCart(); saveCartToStorage(); }
         },
 
+        // Directly setting a quantity (typed into the cart's own quantity
+        // field, same idea as "Type Barcode") rather than only being able
+        // to step it one unit at a time via +/-. Same stock-cap and
+        // remove-on-zero rules as updateQty above.
+        setQty(productId, newQty) {
+            const item = this.items.find(i => i.product.id === productId);
+            if (!item) return;
+
+            newQty = parseInt(newQty);
+
+            if (isNaN(newQty) || newQty < 1) {
+                this.removeItem(productId);
+                return;
+            }
+
+            if (newQty > item.product.stock_quantity) {
+                Toast.show(`Only ${item.product.stock_quantity} units of ${item.product.name} available.`, 'warning');
+                newQty = item.product.stock_quantity;
+            }
+
+            item.quantity = newQty;
+            renderCart();
+            saveCartToStorage();
+        },
+
         get subtotal()  { return this.items.reduce((s, i) => s + (i.product.price * i.quantity), 0); },
         get discount()  { return this.discountEnabled ? Math.round(this.subtotal * 0.20 * 100) / 100 : 0; },
         get total()     { return Math.max(0, this.subtotal - this.discount); },
@@ -696,7 +721,8 @@ document.addEventListener('DOMContentLoaded', () => {
                     </div>
                     <div class="cart-item-controls">
                         <button class="qty-btn" data-action="dec" data-id="${item.product.id}">−</button>
-                        <span class="qty-display">${item.quantity}</span>
+                        <input type="number" class="qty-input" data-id="${item.product.id}"
+                               value="${item.quantity}" min="1" max="${item.product.stock_quantity}">
                         <button class="qty-btn" data-action="inc" data-id="${item.product.id}">+</button>
                     </div>
                     <span class="cart-item-total">${Fmt.currency(item.product.price * item.quantity)}</span>
@@ -710,6 +736,26 @@ document.addEventListener('DOMContentLoaded', () => {
                     const id = parseInt(btn.dataset.id);
                     cart.updateQty(id, btn.dataset.action === 'inc' ? 1 : -1);
                 });
+            });
+
+            // Direct quantity entry -- same idea as "Type Barcode": type a
+            // number instead of only being able to step one at a time.
+            // `change` (fires on blur/Enter), not `input`, since renderCart()
+            // replaces this exact element with a new one every time setQty
+            // runs -- reacting on every keystroke would yank focus away
+            // mid-typing.
+            cartItemsEl.querySelectorAll('.qty-input').forEach(input => {
+                input.addEventListener('change', () => {
+                    const id = parseInt(input.dataset.id);
+                    cart.setQty(id, input.value);
+                });
+                input.addEventListener('keydown', (e) => {
+                    if (e.key === 'Enter') input.blur(); // commits via the change handler above
+                });
+                // Selecting the existing value on focus means typing
+                // immediately replaces it, rather than needing to manually
+                // clear the field first.
+                input.addEventListener('focus', () => input.select());
             });
 
             // Remove buttons
@@ -1359,7 +1405,7 @@ document.addEventListener('DOMContentLoaded', () => {
             </div>
             <div style="margin-bottom:8px;font-size:0.82rem">
                 <strong>OR #:</strong> ${receipt.order_number}<br>
-                <strong>Pharmacy Assistant:</strong> ${receipt.cashier_name}
+                <strong>Processed By:</strong> ${receipt.cashier_name}
             </div>
             <div class="table-container" style="margin-bottom:12px">
                 <table class="table" style="white-space:normal">

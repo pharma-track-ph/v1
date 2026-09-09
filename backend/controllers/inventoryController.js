@@ -394,9 +394,10 @@ const importCSV = async (req, res, next) => {
 
 /**
  * GET /api/inventory/import/template  [Admin+]
- * Downloadable .xlsx with the exact column headers importCSV expects,
- * plus one filled-in example row -- so a fresh import always starts from
- * the current, correct format instead of guessing column names.
+ * Downloadable .xlsx with the exact column headers importCSV expects --
+ * header row only, no example data, so it's a genuinely clean starting
+ * point to fill in rather than something that needs a placeholder row
+ * deleted first.
  */
 const getImportTemplate = async (req, res, next) => {
     try {
@@ -409,11 +410,6 @@ const getImportTemplate = async (req, res, next) => {
             cell.font = { bold: true, color: { argb: 'FFFFFFFF' } };
             cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF0D6EFD' } };
         });
-
-        sheet.addRow([
-            'Paracetamol 500mg', 'Paracetamol', 'Analgesic', 'Unilab Inc.',
-            6.50, 3.00, 20, 'Optional notes', 100, '2027-12-31'
-        ]);
 
         res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
         res.setHeader('Content-Disposition', 'attachment; filename="PharmaTrack_Inventory_Import_Template.xlsx"');

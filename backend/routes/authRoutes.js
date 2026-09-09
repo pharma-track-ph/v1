@@ -4,7 +4,8 @@ const {
     login, getMe, getAllUsers, createUser, updateUser, deleteUser, getAuditLogs, exportAuditLogs,
     forgotPassword, verifyOtp, resetPassword, updateProfile,
     requestEmailChangeOtp, confirmEmailChangeOtp,
-    requestActionOtp, confirmActionOtp
+    requestActionOtp, confirmActionOtp,
+    requestChangePasswordOtp, confirmChangePasswordOtp
 } = require('../controllers/authController');
 const { verifyToken, requireRole } = require('../middleware/authMiddleware');
 
@@ -14,6 +15,13 @@ router.get('/me',     verifyToken, getMe);
 // Self-service profile update (name + avatar) -- any logged-in role,
 // unlike /users/:id below which is admin/owner only.
 router.put('/profile', verifyToken, updateProfile);
+
+// Self-service password change (OTP) -- any logged-in role, since this
+// only ever touches the requester's OWN account. Deliberately separate
+// from the /action-otp routes below, which stay super_admin-only since
+// THOSE act on other people's accounts.
+router.post('/change-password-otp/request', verifyToken, requestChangePasswordOtp);
+router.post('/change-password-otp/confirm', verifyToken, confirmChangePasswordOtp);
 
 // Forgot Password (OTP via email) -- public, no login required. These
 // share the same authLimiter as /login (applied once in server.js on the

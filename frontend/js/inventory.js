@@ -52,8 +52,7 @@ document.addEventListener('DOMContentLoaded', () => {
     importInput?.addEventListener('change', handleCSVImport);
     submitBtn?.addEventListener('click', handleFormSubmit);
 
-    document.getElementById('btn-download-template')?.addEventListener('click', async (e) => {
-        e.preventDefault();
+    document.getElementById('btn-download-template')?.addEventListener('click', async () => {
         const config = typeof getRuntimeConfig === 'function' ? getRuntimeConfig() : CONFIG;
         const ok = await downloadAuthenticatedFile(
             `${config.API_BASE}/inventory/import/template`,
@@ -87,8 +86,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const EXPORT_FILE_INFO = {
         excel: { path: 'excel', filename: 'PharmaTrack_Inventory_Report.xlsx' },
         pdf:   { path: 'pdf',   filename: 'PharmaTrack_Inventory_Report.pdf'  },
-        word:  { path: 'word',  filename: 'PharmaTrack_Inventory_Report.docx' },
-        csv:   { path: 'csv',   filename: 'PharmaTrack_Inventory_Report.csv'  }
+        word:  { path: 'word',  filename: 'PharmaTrack_Inventory_Report.docx' }
     };
 
     // Uses fetch (not a plain <a href>) since the endpoint needs the
@@ -111,7 +109,19 @@ document.addEventListener('DOMContentLoaded', () => {
             const res = await fetch(`${config.API_BASE}/inventory/export/${info.path}`, {
                 headers: token ? { 'Authorization': `Bearer ${token}` } : {}
             });
-            if (!res.ok) throw new Error('Export failed.');
+
+            if (!res.ok) {
+                // A real endpoint failure sends a JSON error body -- read
+                // it instead of a generic message, same fix as
+                // main.js's shared API.request().
+                let message = 'Export failed.';
+                try {
+                    const errBody = await res.json();
+                    if (errBody?.message) message = errBody.message;
+                } catch (e) { /* not JSON -- keep the generic message */ }
+                Toast.show(message, 'error');
+                return;
+            }
 
             const blob = await res.blob();
             const url  = URL.createObjectURL(blob);
@@ -123,6 +133,8 @@ document.addEventListener('DOMContentLoaded', () => {
             a.remove();
             URL.revokeObjectURL(url);
         } catch (err) {
+            // Genuine network-level failure (fetch() itself rejected) --
+            // distinct from the clean-but-unsuccessful response above.
             Toast.show('Export failed. Check your connection.', 'error');
         }
     }

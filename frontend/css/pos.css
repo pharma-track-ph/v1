@@ -519,11 +519,41 @@ body.pos-page .main-wrapper {
 
 .qty-btn:hover { background: var(--primary); color: #fff; border-color: var(--primary); }
 
-.qty-display {
-    width:      24px;
-    text-align: center;
-    font-size:  0.8rem;
-    font-weight:700;
+/* Directly editable now (was a plain non-interactive <span> before) --
+   styled to look like a small input rather than a bare number, with a
+   visible border/focus state as the affordance that it's actually
+   clickable/typeable, same visual language as the barcode-scan quantity
+   stepper's input elsewhere on this page. Native spin buttons are hidden
+   for the same reason as the barcode/camera qty steppers above -- the
+   dedicated +/- buttons already cover that, so the browser's own tiny
+   arrows would just be redundant clutter here too. */
+.qty-input {
+    width:         30px;
+    height:        22px;
+    text-align:    center;
+    font-size:     0.8rem;
+    font-weight:   700;
+    font-family:   var(--font-family);
+    color:         var(--dark);
+    border:        1px solid var(--gray-300);
+    border-radius: 6px;
+    background:    var(--white);
+    padding:       0 2px;
+}
+
+.qty-input:focus {
+    outline:      none;
+    border-color: var(--primary);
+}
+
+.qty-input::-webkit-outer-spin-button,
+.qty-input::-webkit-inner-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+}
+
+.qty-input[type=number] {
+    -moz-appearance: textfield;
 }
 
 .cart-item-total {

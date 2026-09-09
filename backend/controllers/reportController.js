@@ -98,7 +98,7 @@ const getSalesReport = async (req, res, next) => {
 const SALES_COLUMNS = [
     { label: 'Order #',            excelWidth: 20, pdfWidth: 100 },
     { label: 'Date/Time',          excelWidth: 20, pdfWidth: 95  },
-    { label: 'Pharmacy Assistant', excelWidth: 22, pdfWidth: 95  },
+    { label: 'Processed By',       excelWidth: 22, pdfWidth: 95  },
     { label: 'Subtotal',           excelWidth: 12, pdfWidth: 60  },
     { label: 'Purchase Cost',      excelWidth: 14, pdfWidth: 65  },
     { label: 'Discount',           excelWidth: 12, pdfWidth: 55  },
@@ -400,7 +400,7 @@ const getVoidReport = async (req, res, next) => {
 const VOID_COLUMNS = [
     { label: 'Order #',            excelWidth: 20, pdfWidth: 90  },
     { label: 'Date/Time',           excelWidth: 20, pdfWidth: 85  },
-    { label: 'Pharmacy Assistant',  excelWidth: 22, pdfWidth: 95  },
+    { label: 'Processed By',        excelWidth: 22, pdfWidth: 95  },
     { label: 'Voided By',           excelWidth: 18, pdfWidth: 90  },
     { label: 'Voided At',           excelWidth: 20, pdfWidth: 90  },
     { label: 'Total',               excelWidth: 12, pdfWidth: 60  }
@@ -480,7 +480,7 @@ const getRegisterReport = async (req, res, next) => {
 };
 
 const REGISTER_COLUMNS = [
-    { label: 'Pharmacy Assistant', excelWidth: 22, pdfWidth: 90  },
+    { label: 'Processed By',       excelWidth: 22, pdfWidth: 90  },
     { label: 'Opened At',           excelWidth: 20, pdfWidth: 85  },
     { label: 'Opening Cash',        excelWidth: 14, pdfWidth: 60  },
     { label: 'Opened Approved By',  excelWidth: 20, pdfWidth: 90  },

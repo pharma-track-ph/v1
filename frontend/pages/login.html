@@ -193,6 +193,18 @@
             window.location.href = user.role === 'cashier' ? 'pos.html' : 'dashboard.html';
         }
 
+        // Shows WHY someone landed back here if they were just auto-logged-
+        // out (session expired, account deactivated, etc.) instead of the
+        // previous silent redirect with no explanation -- see main.js's
+        // Auth.logout(reason) and API.request's 401 handling. Read once and
+        // immediately cleared, so it never lingers or reappears on a later,
+        // unrelated visit to this page.
+        const logoutReason = sessionStorage.getItem('pharmatrack_logout_reason');
+        if (logoutReason) {
+            sessionStorage.removeItem('pharmatrack_logout_reason');
+            Toast.show(logoutReason, 'info');
+        }
+
         // ── Login Form ────────────────────────────────────────────
         document.getElementById('login-form').addEventListener('submit', async (e) => {
             e.preventDefault();

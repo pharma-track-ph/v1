@@ -324,9 +324,9 @@ function getRequestUrl(endpoint) {
     return `${getRuntimeConfig().API_BASE}${endpoint}`;
 }
 
-function handleAuthFailure() {
+function handleAuthFailure(reason) {
     if (typeof Auth !== 'undefined' && typeof Auth.logout === 'function') {
-        Auth.logout();
+        Auth.logout(reason);
     }
 }
 
@@ -555,7 +555,7 @@ const OfflineAPI = {
                 const data = await parseJsonSafely(response);
 
                 if (response.status === 401) {
-                    handleAuthFailure();
+                    handleAuthFailure(data?.message);
                     return null;
                 }
 
@@ -618,7 +618,7 @@ const OfflineAPI = {
                 const data = await parseJsonSafely(response);
 
                 if (response.status === 401) {
-                    handleAuthFailure();
+                    handleAuthFailure(data?.message);
                     return null;
                 }
 
@@ -692,7 +692,7 @@ const OfflineAPI = {
                 const data = await parseJsonSafely(response);
 
                 if (response.status === 401) {
-                    handleAuthFailure();
+                    handleAuthFailure(data?.message);
                     return null;
                 }
 
@@ -756,7 +756,7 @@ const OfflineAPI = {
                 const data = await parseJsonSafely(response);
 
                 if (response.status === 401) {
-                    handleAuthFailure();
+                    handleAuthFailure(data?.message);
                     return null;
                 }
 

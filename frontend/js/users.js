@@ -51,7 +51,13 @@ document.addEventListener('DOMContentLoaded', () => {
         return allUsers.filter(u => {
             const matchText   = !term   || u.name.toLowerCase().includes(term) || u.email.toLowerCase().includes(term);
             const matchRole   = !role   || u.role === role;
-            const matchStatus = status === '' || String(u.is_active) === status;
+            // Deactivated accounts are hidden by default -- "deleting" a
+            // user should make them disappear from the normal view, even
+            // though the record itself is preserved (soft delete, see
+            // User.softDelete). Explicitly selecting "Inactive" from the
+            // Status filter still shows them, since that's the only way
+            // to find and reactivate one later via Edit.
+            const matchStatus = status === '' ? u.is_active == 1 : String(u.is_active) === status;
             return matchText && matchRole && matchStatus;
         });
     }
@@ -63,7 +69,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
         allUsers = data.data;
         renderStats();
-        renderTable(allUsers);
+        // Default view -- see filterUsers()'s comment for why this isn't
+        // just renderTable(allUsers) (inactive accounts hidden by default).
+        renderTable(filterUsers());
     }
 
     function renderStats() {
@@ -98,7 +106,13 @@ document.addEventListener('DOMContentLoaded', () => {
             // openEditModal for what stays locked even then: role/status).
             const isOtherOwner = u.role === 'super_admin' && !isSelf;
             const canEdit   = !isOtherOwner && (isSuperAdmin || u.role === 'cashier');
-            const canDelete = !isOtherOwner && isSuperAdmin && !isSelf;
+            // Self-delete is now allowed for a super_admin (see
+            // authController.js's requestActionOtp/deleteUser -- the
+            // backend blocks it if they're the only ACTIVE owner left, so
+            // the button showing here isn't a guarantee it'll succeed, just
+            // that it's worth letting them try and see the real reason if
+            // not).
+            const canDelete = !isOtherOwner && isSuperAdmin;
 
             return `
             <tr class="${isSelf ? 'self-row' : ''}">
@@ -240,10 +254,18 @@ document.addEventListener('DOMContentLoaded', () => {
         // startActionOtp below; the account is created server-side only
         // inside confirmActionOtp. ──
         if (!editingId) {
-            Modal.close('user-modal');
             const roleLabels = { super_admin: 'Owner', admin: 'Admin', cashier: 'Pharmacy Assistant' };
-            startActionOtp('create_user', { name, email, role, password },
+            submitBtn.disabled    = true;
+            submitBtn.textContent = 'Sending code…';
+            const otpResult = await startActionOtp('create_user', { name, email, role, password },
                 `create a new ${roleLabels[role] || role} account for ${name}`);
+            submitBtn.disabled    = false;
+            submitBtn.textContent = 'Add User';
+            if (!otpResult.success) {
+                Toast.show(otpResult.message, 'error');
+                return;
+            }
+            Modal.close('user-modal');
             return;
         }
 
@@ -292,12 +314,16 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // ── Delete / Deactivate ───────────────────────────────────
-    function confirmDelete(id, name) {
+    async function confirmDelete(id, name) {
         if (!confirm(`Deactivate "${name}"?\n\nThey will no longer be able to log in. This action can be reversed by editing the account.`)) return;
-        // OTP-gated now -- see startActionOtp below. Nothing is
-        // deactivated until the code sent to you (the owner) is
-        // confirmed; doDelete() is gone, this call replaces it.
-        startActionOtp('delete_user', { targetId: id }, `deactivate ${name}'s account`);
+        // OTP-gated -- nothing is deactivated until the code sent to you
+        // (the owner) is confirmed. If it can't even be sent (e.g. "At
+        // least one Owner must remain"), that shows as a toast and nothing
+        // else happens -- doDelete() is gone, this call replaces it.
+        const otpResult = await startActionOtp('delete_user', { targetId: id }, `deactivate ${name}'s account`);
+        if (!otpResult.success) {
+            Toast.show(otpResult.message, 'error');
+        }
     }
 
     // ── Password Change Modal ─────────────────────────────────
@@ -324,11 +350,22 @@ document.addEventListener('DOMContentLoaded', () => {
         const u = allUsers.find(x => x.id === pwTargetId);
         if (!u) return;
 
-        // OTP-gated now -- nothing is changed until the code sent to you
-        // (the owner) is confirmed. See startActionOtp below.
-        Modal.close('pw-modal');
-        startActionOtp('update_password', { targetId: pwTargetId, newPassword: newPw },
+        // OTP-gated -- nothing is changed until the code sent to you (the
+        // owner) is confirmed. Modal stays open until the code has
+        // actually been sent -- see startActionOtp above.
+        const btn = document.getElementById('btn-save-pw');
+        btn.disabled    = true;
+        btn.textContent = 'Sending code…';
+        const otpResult = await startActionOtp('update_password', { targetId: pwTargetId, newPassword: newPw },
             `change the password for ${u.name}'s account`);
+        btn.disabled    = false;
+        btn.textContent = 'Update Password';
+
+        if (!otpResult.success) {
+            Toast.show(otpResult.message, 'error');
+            return;
+        }
+        Modal.close('pw-modal');
     });
 
     // ── Email Change Verification (OTP) ───────────────
@@ -343,24 +380,30 @@ document.addEventListener('DOMContentLoaded', () => {
     let emailOtpResendCooldown = null;
 
     async function startEmailChangeOtp(targetId, targetName, newEmail) {
+        // Request the code FIRST -- if the email is already in use (or some
+        // other server-side check fails), that error is shown, and the
+        // Email Change modal never opens for a code that was never sent.
+        // The ORIGINAL Save (handleSubmit above) already committed
+        // name/role/status/password before calling this, so those stay
+        // saved regardless -- only the email itself is still pending.
+        const result = await API.post(`/auth/users/${targetId}/email-otp/request`, { newEmail });
+
+        if (!result?.success) {
+            Toast.show(result?.message || 'Could not send the verification email.', 'error');
+            loadUsers(); // reflect the already-saved fields even though the email change itself didn't proceed
+            return;
+        }
+
         pendingEmailOtp = { targetId, targetName, newEmail };
 
         document.getElementById('email-otp-target-name').textContent = targetName;
         document.getElementById('email-otp-new-email').textContent   = newEmail;
         const codeInput = document.getElementById('email-otp-code');
         if (codeInput) codeInput.value = '';
-        setEmailOtpStatus('Sending verification code…');
         Modal.open('email-otp-modal');
-
-        const result = await API.post(`/auth/users/${targetId}/email-otp/request`, { newEmail });
-
-        if (result?.success) {
-            setEmailOtpStatus(result.message || 'A verification code has been sent.');
-            startEmailOtpResendCooldown();
-            codeInput?.focus();
-        } else {
-            setEmailOtpStatus(result?.message || 'Could not send the verification email.', true);
-        }
+        setEmailOtpStatus(result.message || 'A verification code has been sent.');
+        startEmailOtpResendCooldown();
+        codeInput?.focus();
     }
 
     function setEmailOtpStatus(message, isError = false) {
@@ -458,28 +501,35 @@ document.addEventListener('DOMContentLoaded', () => {
     let actionOtpResendCooldown = null;
 
     async function startActionOtp(action, payload, descriptionText) {
+        // Request the code FIRST -- if a server-side check fails (e.g.
+        // "Email already in use", "At least one Owner must remain"), the
+        // caller shows that error in place and the OTP modal never opens
+        // at all, rather than briefly showing a code-entry screen for a
+        // code that was never sent.
+        const result = await API.post('/auth/action-otp/request', { action, payload });
+
+        if (!result?.success) {
+            return { success: false, message: result?.message || 'Could not send the verification email.' };
+        }
+
         pendingAction = { action, payload };
 
-        // textContent, not innerHTML -- descriptionText is built from a
-        // user-entered name (see handleSubmit/confirmDelete/btn-save-pw
-        // above), so this must never be interpreted as HTML.
+        // For Add User specifically, the backend only knows AFTER checking
+        // whether this will actually be a reactivation (email matches a
+        // deactivated account) rather than a fresh account -- the caller's
+        // descriptionText was a generic guess made before this response
+        // came back; prefer the backend's real answer when it's given one.
         const descEl = document.getElementById('action-otp-description');
-        if (descEl) descEl.textContent = descriptionText;
+        if (descEl) descEl.textContent = result.data?.description || descriptionText;
 
         const codeInput = document.getElementById('action-otp-code');
         if (codeInput) codeInput.value = '';
-        setActionOtpStatus('Sending verification code…');
         Modal.open('action-otp-modal');
+        setActionOtpStatus(result.message || 'A verification code has been sent.');
+        startActionOtpResendCooldown();
+        codeInput?.focus();
 
-        const result = await API.post('/auth/action-otp/request', { action, payload });
-
-        if (result?.success) {
-            setActionOtpStatus(result.message || 'A verification code has been sent.');
-            startActionOtpResendCooldown();
-            codeInput?.focus();
-        } else {
-            setActionOtpStatus(result?.message || 'Could not send the verification email.', true);
-        }
+        return { success: true };
     }
 
     function setActionOtpStatus(message, isError = false) {
@@ -525,6 +575,8 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!pendingAction) return;
         const result = await API.post('/auth/action-otp/request', pendingAction);
         if (result?.success) {
+            const descEl = document.getElementById('action-otp-description');
+            if (descEl && result.data?.description) descEl.textContent = result.data.description;
             setActionOtpStatus(result.message || 'A new code has been sent.');
             startActionOtpResendCooldown();
         } else {
