@@ -130,16 +130,16 @@
 
             <!-- Audit Table -->
             <div class="card" style="padding:0">
-                <div class="table-container">
-                    <table class="table">
+                <div class="table-container table-container-tall">
+                    <table class="table" id="audit-table">
                         <thead>
                             <tr>
                                 <th style="width:30px"></th>
-                                <th>Date / Time</th>
-                                <th>User</th>
-                                <th>Action</th>
-                                <th>Entity</th>
-                                <th>Entity ID</th>
+                                <th class="col-text sticky-col sortable-col" data-sort-key="created_at">Date / Time</th>
+                                <th class="col-text sortable-col" data-sort-key="user_name">User</th>
+                                <th class="col-text sortable-col" data-sort-key="action">Action</th>
+                                <th class="col-text sortable-col" data-sort-key="entity">Entity</th>
+                                <th class="col-text sortable-col" data-sort-key="entity_id">Entity ID</th>
                             </tr>
                         </thead>
                         <tbody id="audit-tbody">

@@ -469,7 +469,7 @@
 .pg-info { font-size: 0.82rem; color: var(--secondary); font-weight: 600; }
 
 /* ── Comparison Modal ────────────────────────────────────── */
-.modal-overlay {
+#comparison-modal.modal-overlay {
     position: fixed;
     inset: 0;
     background: rgba(0,0,0,0.5);
@@ -478,7 +478,21 @@
     justify-content: center;
     z-index: 1000;
     padding: 20px;
-    /* This page's own .modal-overlay is a SEPARATE rule from global.css's
+    /* Scoped to #comparison-modal specifically -- this used to be a bare
+       .modal-overlay selector, which meant it ALSO applied to every OTHER
+       .modal-overlay on this page, including the shared modals main.js
+       injects everywhere (Edit Profile, its Change Password OTP step,
+       Manager Approval). Since those all rely on global.css's .active
+       class to toggle opacity/visibility, and this rule hardcoded
+       opacity:1; visibility:visible UNCONDITIONALLY, every one of THOSE
+       modals was forced permanently visible the moment it was first
+       created on this page -- opening looked normal (display:flex was
+       already true), but clicking Close (which only removes .active) did
+       nothing, since this page's own override kept winning the cascade
+       regardless. Scoping to the ID this was actually written for fixes
+       that without touching the comparison modal's own behavior at all.
+
+       This page's own .modal-overlay is a SEPARATE rule from global.css's
        .active-toggled opacity/visibility version -- explicitly reset here
        since global.css's base .modal-overlay defaults to opacity:0;
        visibility:hidden and only reveals via an .active class this page's

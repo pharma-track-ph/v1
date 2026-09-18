@@ -11,6 +11,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // ── State ────────────────────────────────────────────────
     let allUsers  = [];
+    let usersSort  = null; // set once the table's sortable headers are wired up (see loadUsers)
     let editingId = null;
     let pwTargetId = null;
 
@@ -69,8 +70,41 @@ document.addEventListener('DOMContentLoaded', () => {
 
         allUsers = data.data;
         renderStats();
+
+        // Sorting operates on allUsers ITSELF (not the filtered view
+        // rendered below) -- Array.filter() preserves source order, so
+        // sorting the underlying array once means every subsequent
+        // search/role/status filter change automatically inherits
+        // whatever order is currently active, with no need to re-sort the
+        // filtered subset separately. getData (not a plain array) keeps
+        // this correct even though `allUsers` gets REASSIGNED on every
+        // reload above -- see TableSort's own comment for why a plain
+        // array reference would go stale here.
+        if (!usersSort) {
+            const roleLabels = { super_admin: 'Admin', admin: 'Owner', cashier: 'Pharmacy Assistant' };
+            usersSort = TableSort.attach(document.querySelector('#users-table thead'), {
+                getData: () => allUsers,
+                getValue: (row, key) => {
+                    if (key === 'role') return (roleLabels[row.role] || row.role).toLowerCase();
+                    if (key === 'is_active') return row.is_active ? 1 : 0;
+                    if (key === 'created_at') return new Date(row.created_at).getTime();
+                    return (row[key] || '').toString().toLowerCase();
+                },
+                // Sorting doesn't change WHICH users are visible, just their
+                // order -- still need to re-derive the filtered view to
+                // actually render it.
+                onSorted: () => renderTable(filterUsers())
+            });
+        } else {
+            usersSort.resort();
+        }
         // Default view -- see filterUsers()'s comment for why this isn't
         // just renderTable(allUsers) (inactive accounts hidden by default).
+        // Harmless to call again even right after resort() above already
+        // rendered once (e.g. on a reload, resort() already re-rendered) --
+        // filterUsers()'s result is identical either way, this just
+        // guarantees a render happened on the very first load too, when
+        // usersSort didn't exist yet and resort() was never taken.
         renderTable(filterUsers());
     }
 
@@ -90,9 +124,15 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
 
+        const activeKey = usersSort?.getCurrentSort().key;
+        const tint = (key) => key === activeKey ? ' sort-col-tint' : '';
+
         tbody.innerHTML = users.map(u => {
             const isSelf    = u.id === currentUser?.id;
-            const roleLabel = { super_admin: 'Owner', admin: 'Admin', cashier: 'Pharmacy Assistant' }[u.role] || u.role;
+            // Owner/Admin label swap: super_admin now displays as "Admin",
+            // admin now displays as "Owner" -- DB values and every
+            // permission check are unchanged, only this display mapping.
+            const roleLabel = { super_admin: 'Admin', admin: 'Owner', cashier: 'Pharmacy Assistant' }[u.role] || u.role;
             const roleClass = u.role;
             const activeLabel = u.is_active
                 ? '<span class="status-dot active"></span>Active'
@@ -116,15 +156,15 @@ document.addEventListener('DOMContentLoaded', () => {
 
             return `
             <tr class="${isSelf ? 'self-row' : ''}">
-                <td>
+                <td class="col-text sticky-col${tint('name')}">
                     <div class="fw-600">${escHtml(u.name)}${isSelf ? '<span class="self-badge">You</span>' : ''}</div>
                 </td>
-                <td style="color:var(--secondary);font-size:0.85rem">${escHtml(u.email)}</td>
-                <td><span class="role-badge ${roleClass}">${roleLabel}</span></td>
-                <td style="font-size:0.83rem">${activeLabel}</td>
-                <td style="font-size:0.83rem;color:var(--secondary)">${Fmt.date(u.created_at)}</td>
+                <td class="col-text${tint('email')}" style="color:var(--secondary);font-size:0.85rem">${escHtml(u.email)}</td>
+                <td class="col-text${tint('role')}"><span class="role-badge ${roleClass}">${roleLabel}</span></td>
+                <td class="col-text${tint('is_active')}" style="font-size:0.83rem">${activeLabel}</td>
+                <td class="col-text${tint('created_at')}" style="font-size:0.83rem;color:var(--secondary)">${Fmt.date(u.created_at)}</td>
                 <td class="action-cell">
-                    <div class="d-flex gap-8">
+                    <div class="d-flex gap-8 row-actions">
                         ${canEdit ? `
                             <button class="btn btn-light btn-sm btn-edit" data-id="${u.id}" title="Edit">Edit</button>
                             <button class="btn btn-light btn-sm btn-pw" data-id="${u.id}" data-name="${escHtml(u.name)}" title="Change Password">Password</button>
@@ -132,9 +172,10 @@ document.addEventListener('DOMContentLoaded', () => {
                         ${canDelete ? `
                             <button class="btn btn-danger btn-sm btn-delete" data-id="${u.id}" data-name="${escHtml(u.name)}" title="Deactivate">Delete</button>
                         ` : ''}
-                        ${isOtherOwner ? `<span class="text-muted" style="font-size:0.78rem" title="Owner accounts can only be managed by the account holder.">Protected</span>` : ''}
+                        ${isOtherOwner ? `<span class="text-muted" style="font-size:0.78rem" title="Admin accounts can only be managed by the account holder.">Protected</span>` : ''}
                         ${!canEdit && !canDelete && !isOtherOwner ? `<span class="text-muted" style="font-size:0.78rem">—</span>` : ''}
                     </div>
+                    ${(canEdit || canDelete) ? `<button class="kebab-trigger" data-id="${u.id}" title="More actions" aria-label="More actions">⋮</button>` : ''}
                 </td>
             </tr>`;
         }).join('');
@@ -148,6 +189,31 @@ document.addEventListener('DOMContentLoaded', () => {
 
         tbody.querySelectorAll('.btn-delete').forEach(btn =>
             btn.addEventListener('click', () => confirmDelete(parseInt(btn.dataset.id), btn.dataset.name)));
+
+        // Touch-device equivalent of the buttons above -- see
+        // .kebab-trigger in global.css, only ever visible where hover isn't
+        // available. Re-derives the same canEdit/canDelete conditions used
+        // above (rather than stashing them as extra data attributes) since
+        // the source user record is already right here in allUsers.
+        tbody.querySelectorAll('.kebab-trigger').forEach(btn => {
+            const id = parseInt(btn.dataset.id);
+            const u  = allUsers.find(x => x.id === id);
+            if (!u) return;
+            const isSelf    = u.id === currentUser?.id;
+            const isOtherOwner = u.role === 'super_admin' && !isSelf;
+            const canEdit   = !isOtherOwner && (isSuperAdmin || u.role === 'cashier');
+            const canDelete = !isOtherOwner && isSuperAdmin;
+
+            const actions = [];
+            if (canEdit) {
+                actions.push({ label: 'Edit', onClick: () => openEditModal(id) });
+                actions.push({ label: 'Change Password', onClick: () => openPwModal(id, u.name) });
+            }
+            if (canDelete) {
+                actions.push({ label: 'Deactivate', danger: true, onClick: () => confirmDelete(id, u.name) });
+            }
+            attachKebabMenu(btn, actions);
+        });
     }
 
     // ── Add Modal ─────────────────────────────────────────────
@@ -245,7 +311,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         // Admin role restriction check
         if (!isSuperAdmin && role !== 'cashier') {
-            Toast.show('Admins can only create Pharmacy Assistant accounts.', 'error');
+            Toast.show('Owners can only create Pharmacy Assistant accounts.', 'error');
             return;
         }
 
@@ -254,7 +320,7 @@ document.addEventListener('DOMContentLoaded', () => {
         // startActionOtp below; the account is created server-side only
         // inside confirmActionOtp. ──
         if (!editingId) {
-            const roleLabels = { super_admin: 'Owner', admin: 'Admin', cashier: 'Pharmacy Assistant' };
+            const roleLabels = { super_admin: 'Admin', admin: 'Owner', cashier: 'Pharmacy Assistant' };
             submitBtn.disabled    = true;
             submitBtn.textContent = 'Sending code…';
             const otpResult = await startActionOtp('create_user', { name, email, role, password },

@@ -69,13 +69,13 @@
                 </div>
                 <div class="user-stat-card">
                     <div>
-                        <div class="user-stat-label">Owners</div>
+                        <div class="user-stat-label">Admins</div>
                         <div class="user-stat-value" id="stat-owners">—</div>
                     </div>
                 </div>
                 <div class="user-stat-card">
                     <div>
-                        <div class="user-stat-label">Admins</div>
+                        <div class="user-stat-label">Owners</div>
                         <div class="user-stat-value" id="stat-admins">—</div>
                     </div>
                 </div>
@@ -96,8 +96,8 @@
                 </div>
                 <select id="filter-role" class="form-control" style="width:auto">
                     <option value="">All Roles</option>
-                    <option value="super_admin">Owner</option>
-                    <option value="admin">Admin</option>
+                    <option value="super_admin">Admin</option>
+                    <option value="admin">Owner</option>
                     <option value="cashier">Pharmacy Assistant</option>
                 </select>
                 <select id="filter-status" class="form-control" style="width:auto">
@@ -115,15 +115,15 @@
 
             <!-- Users Table -->
             <div class="card" style="padding:0">
-                <div class="table-container">
-                    <table class="table">
+                <div class="table-container table-container-tall">
+                    <table class="table" id="users-table">
                         <thead>
                             <tr>
-                                <th>Name</th>
-                                <th>Email</th>
-                                <th>Role</th>
-                                <th>Status</th>
-                                <th>Created</th>
+                                <th class="col-text sticky-col sortable-col" data-sort-key="name">Name</th>
+                                <th class="col-text sortable-col" data-sort-key="email">Email</th>
+                                <th class="col-text sortable-col" data-sort-key="role">Role</th>
+                                <th class="col-text sortable-col" data-sort-key="is_active">Status</th>
+                                <th class="col-text sortable-col" data-sort-key="created_at">Created</th>
                                 <th class="action-cell">Actions</th>
                             </tr>
                         </thead>
@@ -163,11 +163,11 @@
                     <select id="field-role" name="role" class="form-control" required>
                         <option value="">— Select role —</option>
                         <option value="cashier">Pharmacy Assistant</option>
-                        <option value="admin">Admin</option>
-                        <option value="super_admin" id="opt-super-admin">Owner</option>
+                        <option value="admin">Owner</option>
+                        <option value="super_admin" id="opt-super-admin">Admin</option>
                     </select>
                     <div style="font-size:0.72rem;color:var(--secondary);margin-top:4px" id="role-hint">
-                        Pharmacy Assistants can only use POS. Admins manage inventory & reports. Owners have full access.
+                        Pharmacy Assistants can only use POS. Owners manage inventory & reports. Admins have full access.
                     </div>
                 </div>
 

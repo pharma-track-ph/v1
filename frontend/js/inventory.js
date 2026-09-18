@@ -14,6 +14,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // ── State ────────────────────────────────────────────────
     let products     = [];   // grouped brand summaries (main table)
+    let invSort       = null; // set once the table's sortable headers are wired up (see loadProducts)
     let editingId     = null; // representative row id of the brand being edited
     let currentItems  = [];   // Item No. entries for the brand currently open in the modal
 
@@ -161,8 +162,34 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         products = data.data;
-        renderTable(products);
         if (totalCount) totalCount.textContent = products.length;
+
+        // Sort wiring is done ONCE -- re-attaching on every load (search/
+        // filter changes all re-fetch from the server) would double up
+        // click listeners on the same header cells. getData (not a plain
+        // array) means this stays correct even though `products` gets
+        // REASSIGNED to a new array on every load above -- see TableSort's
+        // own comment for why a plain array reference would go stale here.
+        if (!invSort) {
+            invSort = TableSort.attach(document.querySelector('.inventory-table thead'), {
+                getData: () => products,
+                getValue: (row, key) => {
+                    if (key === 'stock_quantity' || key === 'price') return parseFloat(row[key] || 0);
+                    if (key === 'earliest_expiry_days_left') {
+                        // No expiry left to compare (every item already
+                        // expired) sorts to the end regardless of
+                        // direction -- null is handled that way by
+                        // TableSort itself already.
+                        return row.earliest_expiry ? parseInt(row.earliest_expiry_days_left) : null;
+                    }
+                    return (row[key] || '').toString().toLowerCase();
+                },
+                onSorted: () => renderTable(products)
+            });
+            renderTable(products); // first load -- attach() only auto-renders when a defaultKey is given, which this doesn't use
+        } else {
+            invSort.resort(); // re-applies whatever sort was active; already re-renders via onSorted above
+        }
     }
 
     // ─────────────────────────────────────────────────────────
@@ -177,31 +204,35 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
 
+        const activeKey = invSort?.getCurrentSort().key;
+        const tint = (key) => key === activeKey ? ' sort-col-tint' : '';
+
         tbody.innerHTML = data.map(p => {
             const statusBadge = getStatusBadge(p);
             const expiryCell  = getEarliestExpiryCell(p);
             const rowClass    = getRowClass(p);
             return `
             <tr class="${rowClass}" data-id="${p.id}">
-                <td title="${escHtml(p.name)}">
+                <td class="col-text sticky-col${tint('name')}" title="${escHtml(p.name)}">
                     <div class="fw-600">${escHtml(p.name)}</div>
                     ${p.generic_name ? `<div class="text-muted" style="font-size:0.73rem">${escHtml(p.generic_name)}</div>` : ''}
                 </td>
-                <td title="${escHtml(p.category)}">${escHtml(p.category)}</td>
-                <td>
+                <td class="col-text${tint('category')}" title="${escHtml(p.category)}">${escHtml(p.category)}</td>
+                <td class="col-num${tint('stock_quantity')}">
                     <span class="${p.stock_quantity <= p.low_stock_threshold ? 'text-danger fw-600' : ''}">
                         ${p.stock_quantity}
                     </span>
                     <div class="text-muted" style="font-size:0.7rem">${p.item_count} item${p.item_count === 1 ? '' : 's'}</div>
                 </td>
-                <td>${Fmt.currency(p.price)}</td>
-                <td>${expiryCell}</td>
-                <td>${statusBadge}</td>
+                <td class="col-num${tint('price')}">${Fmt.currency(p.price)}</td>
+                <td class="col-num${tint('earliest_expiry_days_left')}">${expiryCell}</td>
+                <td class="col-text${tint('effective_status')}">${statusBadge}</td>
                 <td>
-                    <div class="d-flex gap-8">
+                    <div class="d-flex gap-8 row-actions">
                         <button class="btn btn-light btn-sm btn-edit"    data-id="${p.id}" title="Edit">Edit</button>
                         <button class="btn btn-danger btn-sm btn-delete" data-id="${p.id}" title="Delete">Delete</button>
                     </div>
+                    <button class="kebab-trigger" data-id="${p.id}" data-name="${escHtml(p.name)}" title="More actions" aria-label="More actions">⋮</button>
                 </td>
             </tr>`;
         }).join('');
@@ -211,6 +242,16 @@ document.addEventListener('DOMContentLoaded', () => {
         });
         tbody.querySelectorAll('.btn-delete').forEach(btn => {
             btn.addEventListener('click', () => confirmDelete(parseInt(btn.dataset.id)));
+        });
+        // Touch-device equivalent of the two buttons above -- see
+        // .kebab-trigger in global.css, only ever visible where hover isn't
+        // available.
+        tbody.querySelectorAll('.kebab-trigger').forEach(btn => {
+            const id = parseInt(btn.dataset.id);
+            attachKebabMenu(btn, [
+                { label: 'Edit', onClick: () => openEditModal(id) },
+                { label: 'Delete', danger: true, onClick: () => confirmDelete(id) }
+            ]);
         });
     }
 

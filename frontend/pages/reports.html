@@ -102,10 +102,20 @@
                 </div>
 
                 <div class="card" style="padding:0">
-                    <div class="table-container">
+                    <div class="table-container table-container-tall">
                         <table class="table">
                             <thead>
-                                <tr><th style="width:30px"></th><th>Order #</th><th>Date/Time</th><th>Processed By</th><th>Subtotal</th><th>Purchase Cost</th><th>Discount</th><th>Total</th><th>Profit</th></tr>
+                                <tr>
+                                    <th style="width:30px"></th>
+                                    <th class="col-text sticky-col sortable-col" data-sort-key="order_number">Order #</th>
+                                    <th class="col-text sortable-col" data-sort-key="created_at">Date/Time</th>
+                                    <th class="col-text sortable-col" data-sort-key="cashier_name">Processed By</th>
+                                    <th class="col-num sortable-col" data-sort-key="subtotal">Subtotal</th>
+                                    <th class="col-num sortable-col" data-sort-key="purchase_cost">Purchase Cost</th>
+                                    <th class="col-num sortable-col" data-sort-key="discount">Discount</th>
+                                    <th class="col-num sortable-col" data-sort-key="total">Total</th>
+                                    <th class="col-num sortable-col" data-sort-key="profit">Profit</th>
+                                </tr>
                             </thead>
                             <tbody id="sales-tbody">
                                 <tr><td colspan="9" class="text-center" style="padding:24px"><div class="spinner" style="margin:0 auto"></div></td></tr>
@@ -183,10 +193,18 @@
                     </div>
                 </div>
                 <div class="card" style="padding:0">
-                    <div class="table-container">
+                    <div class="table-container table-container-tall">
                         <table class="table">
                             <thead>
-                                <tr><th style="width:30px"></th><th>Order #</th><th>Date/Time</th><th>Processed By</th><th>Voided By</th><th>Voided At</th><th>Total</th></tr>
+                                <tr>
+                                    <th style="width:30px"></th>
+                                    <th class="col-text sticky-col sortable-col" data-sort-key="order_number">Order #</th>
+                                    <th class="col-text sortable-col" data-sort-key="created_at">Date/Time</th>
+                                    <th class="col-text sortable-col" data-sort-key="cashier_name">Processed By</th>
+                                    <th class="col-text sortable-col" data-sort-key="voided_by_name">Voided By</th>
+                                    <th class="col-text sortable-col" data-sort-key="voided_at">Voided At</th>
+                                    <th class="col-num sortable-col" data-sort-key="total">Total</th>
+                                </tr>
                             </thead>
                             <tbody id="void-tbody">
                                 <tr><td colspan="7" class="text-center" style="padding:24px"><div class="spinner" style="margin:0 auto"></div></td></tr>
@@ -231,18 +249,18 @@
                 </div>
 
                 <div class="card" style="padding:0">
-                    <div class="table-container">
+                    <div class="table-container table-container-tall">
                         <table class="table">
                             <thead>
                                 <tr>
-                                    <th>Processed By</th>
-                                    <th>Opened At</th>
-                                    <th>Opening Cash</th>
-                                    <th>Opened Approved By</th>
-                                    <th>Status</th>
-                                    <th>Closed At</th>
-                                    <th>Variance</th>
-                                    <th>Closed Approved By</th>
+                                    <th class="col-text sticky-col sortable-col" data-sort-key="cashier_name">Processed By</th>
+                                    <th class="col-text sortable-col" data-sort-key="opened_at">Opened At</th>
+                                    <th class="col-num sortable-col" data-sort-key="opening_cash">Opening Cash</th>
+                                    <th class="col-text sortable-col" data-sort-key="opened_approved_by_name">Opened Approved By</th>
+                                    <th class="col-text sortable-col" data-sort-key="status">Status</th>
+                                    <th class="col-text sortable-col" data-sort-key="closed_at">Closed At</th>
+                                    <th class="col-num sortable-col" data-sort-key="variance">Variance</th>
+                                    <th class="col-text sortable-col" data-sort-key="closed_approved_by_name">Closed Approved By</th>
                                 </tr>
                             </thead>
                             <tbody id="register-tbody">
@@ -263,6 +281,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (!Auth.requireAuth(['admin', 'super_admin'])) return;
 
     let salesData = [];
+    let salesSort  = null; // set once the table's sortable headers are wired up (see loadSalesReport)
     const startInput  = document.getElementById('report-start');
     const endInput    = document.getElementById('report-end');
     const customDates = document.getElementById('custom-dates');
@@ -392,6 +411,37 @@ document.addEventListener('DOMContentLoaded', () => {
         document.getElementById('chip-discount').textContent    = Fmt.currency(s.total_discount || 0);
         document.getElementById('sales-summary-chips').style.display = 'flex';
 
+        // Sort wiring is done ONCE (guarded by salesSort's existing value) --
+        // re-attaching on every load would double up click listeners on the
+        // same header cells. renderSalesTable (called by TableSort's
+        // onSorted, and once here directly for the initial unsorted view)
+        // owns turning salesData into markup either way.
+        if (!salesSort) {
+            salesSort = TableSort.attach(document.querySelector('#tab-sales thead'), {
+                getData: () => salesData,
+                getValue: (row, key) => {
+                    if (key === 'created_at') return new Date(row.created_at).getTime();
+                    if (['subtotal', 'purchase_cost', 'discount', 'total', 'profit'].includes(key)) {
+                        return parseFloat(row[key] || 0);
+                    }
+                    return (row[key] || '').toString().toLowerCase();
+                },
+                onSorted: renderSalesTable
+            });
+            renderSalesTable(); // first load -- attach() only auto-renders when a defaultKey is given, which this doesn't use
+        } else {
+            salesSort.resort(); // re-applies whatever sort was active; already re-renders via onSorted above
+        }
+    }
+
+    // Pulled out of loadSalesReport so TableSort's onSorted can re-render
+    // without re-fetching -- sorting is purely a client-side reorder of
+    // the data already sitting in salesData.
+    function renderSalesTable() {
+        const tbody = document.getElementById('sales-tbody');
+        const activeKey = salesSort?.getCurrentSort().key;
+        const tint = (key) => key === activeKey ? ' sort-col-tint' : '';
+
         if (!salesData.length) {
             tbody.innerHTML = '<tr><td colspan="9" class="text-center text-muted" style="padding:24px">No transactions found for this period.</td></tr>';
             return;
@@ -399,28 +449,28 @@ document.addEventListener('DOMContentLoaded', () => {
         tbody.innerHTML = salesData.map((o, idx) => `
             <tr>
                 <td><button class="btn-expand" data-index="${idx}" title="View items sold">▶</button></td>
-                <td class="fw-600">${o.order_number}</td>
-                <td>${Fmt.datetime(o.created_at)}</td>
-                <td>${o.cashier_name}</td>
-                <td>${Fmt.currency(o.subtotal)}</td>
-                <td>${Fmt.currency(o.purchase_cost)}</td>
-                <td>${Fmt.currency(o.discount)}</td>
-                <td class="fw-600" style="color:var(--primary)">${Fmt.currency(o.total)}</td>
-                <td class="fw-600" style="color:${parseFloat(o.profit || 0) >= 0 ? 'var(--success)' : 'var(--danger)'}">${Fmt.currency(o.profit)}</td>
+                <td class="fw-600 col-text sticky-col${tint('order_number')}">${o.order_number}</td>
+                <td class="col-text${tint('created_at')}">${Fmt.datetime(o.created_at)}</td>
+                <td class="col-text${tint('cashier_name')}">${o.cashier_name}</td>
+                <td class="col-num${tint('subtotal')}">${Fmt.currency(o.subtotal)}</td>
+                <td class="col-num${tint('purchase_cost')}">${Fmt.currency(o.purchase_cost)}</td>
+                <td class="col-num${tint('discount')}">${Fmt.currency(o.discount)}</td>
+                <td class="fw-600 col-num${tint('total')}" style="color:var(--primary)">${Fmt.currency(o.total)}</td>
+                <td class="fw-600 col-num${tint('profit')}" style="color:${parseFloat(o.profit || 0) >= 0 ? 'var(--success)' : 'var(--danger)'}">${Fmt.currency(o.profit)}</td>
             </tr>
             <tr class="detail-row hidden" id="order-detail-${idx}">
                 <td colspan="9">
                     <strong style="font-size:0.82rem">Items Sold:</strong>
                     <div class="table-container" style="margin-top:8px">
                         <table class="table" style="white-space:normal">
-                            <thead><tr><th>Product</th><th>Qty</th><th>Unit Price</th><th>Line Total</th></tr></thead>
+                            <thead><tr><th>Product</th><th class="col-num">Qty</th><th class="col-num">Unit Price</th><th class="col-num">Line Total</th></tr></thead>
                             <tbody>
                                 ${(o.items || []).map(item => `
                                 <tr>
                                     <td>${escHtml(item.product_name)}</td>
-                                    <td>${item.quantity}</td>
-                                    <td>${Fmt.currency(item.unit_price)}</td>
-                                    <td class="fw-600">${Fmt.currency(item.subtotal)}</td>
+                                    <td class="col-num">${item.quantity}</td>
+                                    <td class="col-num">${Fmt.currency(item.unit_price)}</td>
+                                    <td class="fw-600 col-num">${Fmt.currency(item.subtotal)}</td>
                                 </tr>`).join('') || '<tr><td colspan="4" class="text-center text-muted">No item details recorded.</td></tr>'}
                             </tbody>
                         </table>
@@ -542,6 +592,8 @@ document.addEventListener('DOMContentLoaded', () => {
     const voidStartInput  = document.getElementById('void-start');
     const voidEndInput    = document.getElementById('void-end');
     const voidCustomDates = document.getElementById('void-custom-dates');
+    let voidData = [];
+    let voidSort = null;
 
     document.querySelectorAll('[data-void-period]').forEach(btn => {
         btn.addEventListener('click', () => {
@@ -592,7 +644,31 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
 
-        const voidData = data.data || [];
+        voidData = data.data || [];
+
+        if (!voidSort) {
+            voidSort = TableSort.attach(document.querySelector('#tab-void thead'), {
+                getData: () => voidData,
+                getValue: (row, key) => {
+                    if (key === 'created_at' || key === 'voided_at') {
+                        return row[key] ? new Date(row[key]).getTime() : null;
+                    }
+                    if (key === 'total') return parseFloat(row.total || 0);
+                    return (row[key] || '').toString().toLowerCase();
+                },
+                onSorted: renderVoidTable
+            });
+            renderVoidTable();
+        } else {
+            voidSort.resort();
+        }
+    }
+
+    function renderVoidTable() {
+        const tbody = document.getElementById('void-tbody');
+        const activeKey = voidSort?.getCurrentSort().key;
+        const tint = (key) => key === activeKey ? ' sort-col-tint' : '';
+
         if (!voidData.length) {
             tbody.innerHTML = '<tr><td colspan="7" class="text-center text-muted" style="padding:24px">No voided transactions for this period.</td></tr>';
             return;
@@ -601,26 +677,26 @@ document.addEventListener('DOMContentLoaded', () => {
         tbody.innerHTML = voidData.map((o, idx) => `
             <tr>
                 <td><button class="btn-expand" data-index="void-${idx}" title="View items sold">▶</button></td>
-                <td class="fw-600">${o.order_number}</td>
-                <td>${Fmt.datetime(o.created_at)}</td>
-                <td>${o.cashier_name}</td>
-                <td>${o.voided_by_name || '—'}</td>
-                <td>${o.voided_at ? Fmt.datetime(o.voided_at) : '—'}</td>
-                <td class="fw-600" style="color:var(--danger)">${Fmt.currency(o.total)}</td>
+                <td class="fw-600 col-text sticky-col${tint('order_number')}">${o.order_number}</td>
+                <td class="col-text${tint('created_at')}">${Fmt.datetime(o.created_at)}</td>
+                <td class="col-text${tint('cashier_name')}">${o.cashier_name}</td>
+                <td class="col-text${tint('voided_by_name')}">${o.voided_by_name || '—'}</td>
+                <td class="col-text${tint('voided_at')}">${o.voided_at ? Fmt.datetime(o.voided_at) : '—'}</td>
+                <td class="fw-600 col-num${tint('total')}" style="color:var(--danger)">${Fmt.currency(o.total)}</td>
             </tr>
             <tr class="detail-row hidden" id="order-detail-void-${idx}">
                 <td colspan="7">
                     <strong style="font-size:0.82rem">Items Sold (before void):</strong>
                     <div class="table-container" style="margin-top:8px">
                         <table class="table" style="white-space:normal">
-                            <thead><tr><th>Product</th><th>Qty</th><th>Unit Price</th><th>Line Total</th></tr></thead>
+                            <thead><tr><th>Product</th><th class="col-num">Qty</th><th class="col-num">Unit Price</th><th class="col-num">Line Total</th></tr></thead>
                             <tbody>
                                 ${(o.items || []).map(item => `
                                 <tr>
                                     <td>${escHtml(item.product_name)}</td>
-                                    <td>${item.quantity}</td>
-                                    <td>${Fmt.currency(item.unit_price)}</td>
-                                    <td class="fw-600">${Fmt.currency(item.subtotal)}</td>
+                                    <td class="col-num">${item.quantity}</td>
+                                    <td class="col-num">${Fmt.currency(item.unit_price)}</td>
+                                    <td class="fw-600 col-num">${Fmt.currency(item.subtotal)}</td>
                                 </tr>`).join('') || '<tr><td colspan="4" class="text-center text-muted">No item details recorded.</td></tr>'}
                             </tbody>
                         </table>
@@ -644,6 +720,8 @@ document.addEventListener('DOMContentLoaded', () => {
     const registerStartInput  = document.getElementById('register-start');
     const registerEndInput    = document.getElementById('register-end');
     const registerCustomDates = document.getElementById('register-custom-dates');
+    let registerData = [];
+    let registerSort = null;
 
     document.querySelectorAll('[data-register-period]').forEach(btn => {
         btn.addEventListener('click', () => {
@@ -695,7 +773,7 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
 
-        const sessions = data.data || [];
+        registerData = data.data || [];
         const s = data.summary || {};
         document.getElementById('chip-register-count').textContent    = s.total_sessions || 0;
         document.getElementById('chip-register-open').textContent     = s.open_count || 0;
@@ -703,12 +781,37 @@ document.addEventListener('DOMContentLoaded', () => {
         document.getElementById('chip-register-variance').textContent = Fmt.currency(s.total_variance || 0);
         document.getElementById('register-summary-chips').style.display = 'flex';
 
-        if (!sessions.length) {
+        if (!registerSort) {
+            registerSort = TableSort.attach(document.querySelector('#tab-register thead'), {
+                getData: () => registerData,
+                getValue: (row, key) => {
+                    if (key === 'opened_at' || key === 'closed_at') {
+                        return row[key] ? new Date(row[key]).getTime() : null;
+                    }
+                    if (key === 'opening_cash' || key === 'variance') {
+                        return row[key] == null ? null : parseFloat(row[key]);
+                    }
+                    return (row[key] || '').toString().toLowerCase();
+                },
+                onSorted: renderRegisterTable
+            });
+            renderRegisterTable();
+        } else {
+            registerSort.resort();
+        }
+    }
+
+    function renderRegisterTable() {
+        const tbody = document.getElementById('register-tbody');
+        const activeKey = registerSort?.getCurrentSort().key;
+        const tint = (key) => key === activeKey ? ' sort-col-tint' : '';
+
+        if (!registerData.length) {
             tbody.innerHTML = '<tr><td colspan="8" class="text-center text-muted" style="padding:24px">No register sessions found for this period.</td></tr>';
             return;
         }
 
-        tbody.innerHTML = sessions.map(s => {
+        tbody.innerHTML = registerData.map(s => {
             const isOpen = s.status === 'OPEN';
             const varianceVal = parseFloat(s.variance);
             const varianceText = s.status === 'CLOSED' && !isNaN(varianceVal)
@@ -718,14 +821,14 @@ document.addEventListener('DOMContentLoaded', () => {
 
             return `
             <tr>
-                <td class="fw-600">${escHtml(s.cashier_name)}</td>
-                <td>${Fmt.datetime(s.opened_at)}</td>
-                <td>${Fmt.currency(s.opening_cash)}</td>
-                <td>${s.opened_approved_by_name ? escHtml(s.opened_approved_by_name) : '<span class="text-muted">—</span>'}</td>
-                <td><span class="badge ${isOpen ? 'badge-success' : 'badge-secondary'}">${isOpen ? 'Open' : 'Closed'}</span></td>
-                <td>${s.closed_at ? Fmt.datetime(s.closed_at) : '<span class="text-muted">—</span>'}</td>
-                <td style="font-weight:600;color:${varianceColor}">${varianceText}</td>
-                <td>${s.closed_approved_by_name ? escHtml(s.closed_approved_by_name) : '<span class="text-muted">—</span>'}</td>
+                <td class="fw-600 col-text sticky-col${tint('cashier_name')}">${escHtml(s.cashier_name)}</td>
+                <td class="col-text${tint('opened_at')}">${Fmt.datetime(s.opened_at)}</td>
+                <td class="col-num${tint('opening_cash')}">${Fmt.currency(s.opening_cash)}</td>
+                <td class="col-text${tint('opened_approved_by_name')}">${s.opened_approved_by_name ? escHtml(s.opened_approved_by_name) : '<span class="text-muted">—</span>'}</td>
+                <td class="col-text${tint('status')}"><span class="badge ${isOpen ? 'badge-success' : 'badge-secondary'}">${isOpen ? 'Open' : 'Closed'}</span></td>
+                <td class="col-text${tint('closed_at')}">${s.closed_at ? Fmt.datetime(s.closed_at) : '<span class="text-muted">—</span>'}</td>
+                <td class="col-num${tint('variance')}" style="font-weight:600;color:${varianceColor}">${varianceText}</td>
+                <td class="col-text${tint('closed_approved_by_name')}">${s.closed_approved_by_name ? escHtml(s.closed_approved_by_name) : '<span class="text-muted">—</span>'}</td>
             </tr>`;
         }).join('');
     }

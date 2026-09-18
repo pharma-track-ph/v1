@@ -730,7 +730,6 @@ select.form-control { appearance: none; background-image: url("data:image/svg+xm
 .toast.warning { border-color: var(--warning); }
 .toast.info    { border-color: var(--info);    }
 
-.toast-icon { font-size: 1.1rem; flex-shrink: 0; margin-top: 1px; }
 .toast-title { font-weight: 600; margin-bottom: 2px; }
 .toast-message { color: var(--secondary); font-size: 0.83rem; }
 
@@ -743,6 +742,210 @@ select.form-control { appearance: none; background-image: url("data:image/svg+xm
     from { opacity: 1; }
     to   { opacity: 0; transform: translateX(30px); }
 }
+
+/* ============================================================
+   Data Table Enhancements: Alignment, Sticky, Sort, Row Actions
+   ============================================================
+   Shared, reusable utility classes for the "advanced data table"
+   pattern -- applied per-table by adding these classes to the specific
+   <th>/<td> elements that need them. Nothing here assumes any
+   particular table's column layout, so the same system works across
+   Reports, Inventory, User Management, Audit Logs, etc. */
+
+/* ── Alignment ─────────────────────────────────────────────
+   Numeric columns right-align with tabular (fixed-width) numerals so
+   digits stack cleanly for at-a-glance comparison down a column; text
+   columns stay left-aligned. Header alignment always matches its
+   column's body alignment -- apply the SAME class to both <th> and <td>
+   in a numeric/text column, never center either as a compromise. */
+.col-num {
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+}
+
+.col-text {
+    text-align: left;
+}
+
+/* ── Sticky identity column ──────────────────────────────────
+   Pins one column (customer name, invoice/order #, etc.) to the left
+   edge during horizontal scroll, so identifying context is never lost
+   mid-scroll. Must be applied to EVERY cell in that column (header +
+   body) individually -- CSS sticky has no <col>-level equivalent. The
+   solid background is required, not decorative: without it, scrolled
+   content visibly shows through underneath as it passes behind the
+   pinned column. thead's version sits at a higher z-index so the
+   top-left corner (where the sticky column and sticky header overlap)
+   renders correctly above both scrolling axes. */
+.sticky-col {
+    position:   sticky;
+    left:       0;
+    z-index:    5;
+    background: var(--white);
+}
+
+thead .sticky-col {
+    z-index:    15;
+    background: var(--light-blue);
+}
+
+/* Trailing-edge separator -- keeps the boundary between the pinned
+   column and scrolling content visually distinct rather than blending
+   together as content passes underneath. */
+.sticky-col::after {
+    content:    '';
+    position:   absolute;
+    top:        0;
+    right:      0;
+    bottom:     0;
+    width:      1px;
+    box-shadow: 2px 0 4px rgba(0,0,0,0.06);
+}
+
+/* ── Sticky header row ────────────────────────────────────────
+   Opt-in variant of .table-container for tables long enough to need
+   their OWN internal vertical scroll (rather than the whole page
+   scrolling) -- position:sticky on the header only has something to
+   stick WITHIN if its container actually scrolls. */
+.table-container-tall {
+    max-height: 520px;
+    overflow-y: auto;
+}
+
+.table-container-tall thead th {
+    position:   sticky;
+    top:        0;
+    z-index:    10;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.06); /* trailing-edge separator under the pinned header */
+}
+
+/* ── Sortable columns ─────────────────────────────────────────
+   A column header opts in with .sortable-col and a data-sort-key
+   attribute (read by main.js's TableSort helper). The arrow stays
+   invisible until the column is either hovered/focused (a faint hint
+   that sorting is available) or is the ACTIVE sort column (fully
+   visible, direction-specific). */
+.sortable-col {
+    cursor:        pointer;
+    user-select:   none;
+    position:      relative;
+    padding-right: 22px !important;
+}
+
+.sortable-col .sort-arrow {
+    position:   absolute;
+    right:      6px;
+    top:        50%;
+    transform:  translateY(-50%);
+    font-size:  0.7rem;
+    opacity:    0;
+    transition: opacity 0.15s ease;
+}
+
+.sortable-col:hover .sort-arrow,
+.sortable-col:focus-visible .sort-arrow {
+    opacity: 0.35;
+}
+
+.sortable-col.sort-active .sort-arrow {
+    opacity: 1;
+}
+
+/* Persistent tint across the WHOLE active-sort column (header + every
+   body cell) so it stays identifiable even after scrolling away from
+   the header itself. !important wins over row-hover and the expiry/
+   stock row-tint rules elsewhere, which would otherwise mask this on a
+   hovered or status-tinted row. */
+.sort-col-tint {
+    background: var(--light-blue) !important;
+}
+
+thead .sort-col-tint {
+    background: var(--gray-100) !important;
+}
+
+/* ── Row actions: hidden by default, revealed on hover/focus ──
+   Hover alone would exclude touch and keyboard-only users -- :focus-
+   within covers Tab-ing to a button inside .row-actions even while it's
+   still visually hidden (opacity doesn't block keyboard focus, only
+   pointer-events does, which is why that's set separately below). */
+.row-actions {
+    opacity:        0;
+    pointer-events: none;
+    transition:     opacity 0.12s ease;
+}
+
+tr:hover .row-actions,
+tr:focus-within .row-actions,
+.row-actions:focus-within {
+    opacity:        1;
+    pointer-events: auto;
+}
+
+/* Touch devices (hover:none) get a single kebab trigger instead of the
+   full row-actions group -- a coarse pointer can't hover, and a row of
+   small icons is genuinely hard to tap precisely. Targets touch
+   specifically rather than guessing from screen width, so a touch
+   laptop or mouse-equipped tablet isn't forced into either pattern
+   based on size alone. */
+.kebab-trigger { display: none; }
+
+@media (hover: none) {
+    .row-actions   { display: none; }
+    .kebab-trigger { display: inline-flex; opacity: 1; pointer-events: auto; }
+}
+
+/* 48x48 minimum touch target on the kebab trigger and every action
+   inside its menu (WCAG/Material guidance) -- achieved by padding the
+   CLICKABLE area, never by enlarging the visible icon/text itself. */
+.kebab-wrap { position: relative; display: inline-block; }
+
+.kebab-trigger {
+    align-items:     center;
+    justify-content: center;
+    width:           48px;
+    height:          48px;
+    background:      none;
+    border:          none;
+    font-size:       1.2rem;
+    color:           var(--gray-700);
+    border-radius:   50%;
+    cursor:          pointer;
+}
+
+.kebab-trigger:hover, .kebab-trigger:focus-visible { background: var(--gray-100); }
+
+.kebab-menu {
+    position:      absolute;
+    right:         0;
+    top:           calc(100% + 4px);
+    background:    var(--white);
+    border:        1px solid var(--gray-200);
+    border-radius: var(--border-radius);
+    box-shadow:    var(--shadow-lg);
+    z-index:       50;
+    min-width:     160px;
+    padding:       6px;
+}
+
+.kebab-menu-item {
+    display:         flex;
+    align-items:     center;
+    width:           100%;
+    min-height:      48px;
+    padding:         0 14px;
+    background:      none;
+    border:          none;
+    border-radius:   6px;
+    font-size:       0.88rem;
+    font-family:     var(--font-family);
+    text-align:      left;
+    color:           var(--dark);
+    cursor:          pointer;
+}
+
+.kebab-menu-item:hover { background: var(--gray-100); }
+.kebab-menu-item.danger { color: var(--danger); }
 
 /* ── Alert Banners ─────────────────────────────────────────── */
 .alert {

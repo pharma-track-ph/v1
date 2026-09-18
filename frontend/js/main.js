@@ -218,13 +218,11 @@ const Toast = {
     show(message, type = 'info', title = '') {
         if (!this.container) this.init();
 
-        const icons = { success: '✅', error: '❌', warning: '⚠️', info: 'ℹ️' };
         const defaultTitles = { success: 'Success', error: 'Error', warning: 'Warning', info: 'Notice' };
 
         const toast = document.createElement('div');
         toast.className = `toast ${type}`;
         toast.innerHTML = `
-            <span class="toast-icon">${icons[type] || icons.info}</span>
             <div>
                 <div class="toast-title">${title || defaultTitles[type]}</div>
                 <div class="toast-message">${message}</div>
@@ -304,7 +302,9 @@ const Nav = {
         // Display-only label — the underlying role value stays 'super_admin'/
         // 'cashier' everywhere in code/DB/JWT; this only changes what's shown
         // on screen, same as AUDIT_ROLE_LABELS/ROLE_LABELS elsewhere in the app.
-        const roleLabel = user.role === 'super_admin' ? 'Owner'
+        // Owner/Admin label swap: super_admin now displays as "Admin" (was
+        // "Owner") -- the DB value and every permission check are unchanged.
+        const roleLabel = user.role === 'super_admin' ? 'Admin'
             : user.role === 'cashier' ? 'Pharmacy Assistant'
             : user.role.replace('_', ' ');
 
@@ -1332,6 +1332,157 @@ const SearchSuggest = {
         });
     }
 };
+
+// ── Escape helper shared by the table utilities below ───────────
+// Several pages already define their own local escHtml -- this global
+// fallback exists purely so TableSort/attachKebabMenu below don't force
+// every page to define one just to use them.
+function escHtmlGlobal(str) {
+    return String(str ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+// ── Generic Column Sort ─────────────────────────────
+// Attaches click-to-sort to a table's .sortable-col <th> elements
+// (data-sort-key identifies which field each one sorts by). Sorting
+// happens entirely CLIENT-SIDE against the already-loaded data array --
+// every table that uses this already loads its full result set into
+// memory up front (reports/inventory/users/audit all do), so there's no
+// extra network round-trip per sort. Handles both the visual state (the
+// arrow, .sort-active, .sort-col-tint on the header) and the actual
+// re-sort + re-render via the caller's onSorted callback -- the CALLER
+// still owns rendering, since only it knows how to turn a row of data
+// into <tr> markup, and how to tag the matching BODY cell in the active
+// column with .sort-col-tint (this helper only reaches the header).
+const TableSort = {
+    attach(theadEl, { getData, data, getValue, onSorted, defaultKey = null, defaultDir = 'asc' }) {
+        if (!theadEl) return null;
+        // getData() (a function) is preferred over a plain `data` array --
+        // pages that REASSIGN their array variable on every reload (e.g.
+        // `salesData = data.data` when switching date ranges) would
+        // otherwise leave this closure holding a stale reference to
+        // whatever array existed at attach-time, silently sorting an array
+        // nobody renders anymore after the first reload. `data` is still
+        // accepted directly for a table that truly never replaces its
+        // array (only ever mutates it in place), but getData is the safer
+        // default for new call sites.
+        const resolveData = getData || (() => data);
+        let currentKey = defaultKey;
+        let currentDir = defaultDir;
+
+        const cols = theadEl.querySelectorAll('.sortable-col');
+        cols.forEach(th => {
+            if (!th.querySelector('.sort-arrow')) {
+                const arrow = document.createElement('span');
+                arrow.className = 'sort-arrow';
+                arrow.textContent = '▲';
+                th.appendChild(arrow);
+            }
+            th.setAttribute('tabindex', '0'); // keyboard-focusable, so :focus-visible's hint arrow (see global.css) actually reaches it
+
+            const activate = () => {
+                const key = th.dataset.sortKey;
+                if (currentKey === key) {
+                    currentDir = currentDir === 'asc' ? 'desc' : 'asc';
+                } else {
+                    currentKey = key;
+                    currentDir = 'asc';
+                }
+                sortAndRender();
+            };
+            th.addEventListener('click', activate);
+            th.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); activate(); }
+            });
+        });
+
+        function sortAndRender() {
+            const currentData = resolveData() || [];
+            if (currentKey) {
+                currentData.sort((a, b) => {
+                    const va = getValue(a, currentKey);
+                    const vb = getValue(b, currentKey);
+                    if (va == null && vb == null) return 0;
+                    if (va == null) return 1;
+                    if (vb == null) return -1;
+                    if (typeof va === 'number' && typeof vb === 'number') {
+                        return currentDir === 'asc' ? va - vb : vb - va;
+                    }
+                    return currentDir === 'asc'
+                        ? String(va).localeCompare(String(vb))
+                        : String(vb).localeCompare(String(va));
+                });
+            }
+
+            cols.forEach(h => {
+                h.classList.remove('sort-active', 'sort-col-tint');
+                const a = h.querySelector('.sort-arrow');
+                if (a) a.textContent = '▲';
+            });
+            if (currentKey) {
+                const activeTh = theadEl.querySelector(`.sortable-col[data-sort-key="${currentKey}"]`);
+                if (activeTh) {
+                    activeTh.classList.add('sort-active', 'sort-col-tint');
+                    const arrow = activeTh.querySelector('.sort-arrow');
+                    if (arrow) arrow.textContent = currentDir === 'asc' ? '▲' : '▼';
+                }
+            }
+
+            onSorted(currentKey, currentDir);
+        }
+
+        if (defaultKey) sortAndRender();
+
+        // Exposed so a render function can re-tag the active column's BODY
+        // cells with .sort-col-tint after rebuilding the table's rows (the
+        // header's own tint is already handled above, but the header and
+        // body are separate DOM subtrees -- this helper can't reach into
+        // markup the caller hasn't built yet). resort() lets a page
+        // re-apply the CURRENT sort after a fresh data load (e.g. changing
+        // a date range) without waiting for the user to click a header
+        // again -- sorts whatever resolveData() returns NOW.
+        return {
+            getCurrentSort: () => ({ key: currentKey, dir: currentDir }),
+            resort: () => sortAndRender()
+        };
+    }
+};
+
+// ── Kebab Row-Action Menu (touch devices) ────────────────
+// Reusable trigger+dropdown for a row's actions on touch devices, where
+// hover-to-reveal (see .row-actions in global.css) doesn't work. Call
+// once per row when rendering: attachKebabMenu(triggerEl, [{label,
+// onClick, danger}]). Builds the dropdown lazily on open and wires
+// outside-click-to-close; only one menu is ever open at a time.
+function attachKebabMenu(triggerEl, actions) {
+    if (!triggerEl) return;
+    triggerEl.addEventListener('click', (e) => {
+        e.stopPropagation();
+        document.querySelectorAll('.kebab-menu').forEach(m => m.remove());
+
+        const menu = document.createElement('div');
+        menu.className = 'kebab-menu';
+        menu.innerHTML = actions.map((a, i) =>
+            `<button type="button" class="kebab-menu-item ${a.danger ? 'danger' : ''}" data-i="${i}">${escHtmlGlobal(a.label)}</button>`
+        ).join('');
+        triggerEl.parentElement.appendChild(menu);
+
+        menu.querySelectorAll('.kebab-menu-item').forEach(btn => {
+            btn.addEventListener('click', (ev) => {
+                ev.stopPropagation();
+                menu.remove();
+                actions[parseInt(btn.dataset.i)].onClick();
+            });
+        });
+
+        const closeOnOutside = (ev) => {
+            if (!menu.contains(ev.target) && ev.target !== triggerEl) {
+                menu.remove();
+                document.removeEventListener('click', closeOnOutside);
+            }
+        };
+        setTimeout(() => document.addEventListener('click', closeOnOutside), 0);
+    });
+}
 
 // ── DOM Ready: Initialise everything ──────────────────────────
 document.addEventListener('DOMContentLoaded', () => {

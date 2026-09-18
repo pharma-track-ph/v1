@@ -10,6 +10,7 @@ document.addEventListener('DOMContentLoaded', () => {
     let allLogs      = [];
     let filteredLogs = [];
     let currentPage  = 1;
+    let auditSort    = null; // set once the table's sortable headers are wired up (see loadAuditLogs)
     const PAGE_SIZE  = 25;
 
     // ── DOM ──────────────────────────────────────────────────
@@ -103,6 +104,28 @@ document.addEventListener('DOMContentLoaded', () => {
 
         allLogs = data.data || [];
         renderStats();
+
+        // Sorting operates on allLogs ITSELF (not the paginated/filtered
+        // view rendered below) -- Array.filter() preserves source order,
+        // so sorting the underlying array once means every subsequent
+        // search/action/entity/date filter change automatically inherits
+        // whatever order is currently active. getData (not a plain array)
+        // keeps this correct even though `allLogs` gets REASSIGNED on
+        // every reload above -- see TableSort's own comment for why a
+        // plain array reference would go stale here.
+        if (!auditSort) {
+            auditSort = TableSort.attach(document.querySelector('#audit-table thead'), {
+                getData: () => allLogs,
+                getValue: (row, key) => {
+                    if (key === 'created_at') return new Date(row.created_at).getTime();
+                    if (key === 'entity_id')  return row.entity_id != null ? String(row.entity_id) : null;
+                    return (row[key] || '').toString().toLowerCase();
+                },
+                onSorted: applyFilters // already re-derives filteredLogs, resets to page 1, and re-renders
+            });
+        } else {
+            auditSort.resort();
+        }
         applyFilters();
     }
 
@@ -160,8 +183,10 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // Display-only maps — underlying values in the database/logic (role,
-    // entity) never change, only what's shown on screen here.
-    const ROLE_LABELS = { super_admin: 'Owner', admin: 'Admin', cashier: 'Pharmacy Assistant' };
+    // entity) never change, only what's shown on screen here. Owner/Admin
+    // label swap: super_admin now displays as "Admin", admin now displays
+    // as "Owner" -- this is the only line that needed to change for that.
+    const ROLE_LABELS = { super_admin: 'Admin', admin: 'Owner', cashier: 'Pharmacy Assistant' };
 
     function roleLabel(role) {
         if (!role) return '';

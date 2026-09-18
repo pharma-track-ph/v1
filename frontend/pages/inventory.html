@@ -100,7 +100,7 @@
             </div>
 
             <div class="card" style="padding:0">
-                <div class="table-container">
+                <div class="table-container table-container-tall">
                     <table class="table inventory-table">
                         <colgroup>
                             <col style="width:21%">
@@ -113,12 +113,12 @@
                         </colgroup>
                         <thead>
                             <tr>
-                                <th>Brand Name</th>
-                                <th>Category</th>
-                                <th>Stock</th>
-                                <th>Price</th>
-                                <th>Earliest Expiry</th>
-                                <th>Status</th>
+                                <th class="col-text sticky-col sortable-col" data-sort-key="name">Brand Name</th>
+                                <th class="col-text sortable-col" data-sort-key="category">Category</th>
+                                <th class="col-num sortable-col" data-sort-key="stock_quantity">Stock</th>
+                                <th class="col-num sortable-col" data-sort-key="price">Price</th>
+                                <th class="col-num sortable-col" data-sort-key="earliest_expiry_days_left">Earliest Expiry</th>
+                                <th class="col-text sortable-col" data-sort-key="effective_status">Status</th>
                                 <th>Actions</th>
                             </tr>
                         </thead>

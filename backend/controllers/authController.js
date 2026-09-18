@@ -103,7 +103,7 @@ const createUser = async (req, res, next) => {
         }
 
         if (req.user.role === 'admin' && role !== 'cashier') {
-            return res.status(403).json({ success: false, message: 'Admins can only create Pharmacy Assistant accounts.' });
+            return res.status(403).json({ success: false, message: 'Owners can only create Pharmacy Assistant accounts.' });
         }
 
         const existing = await User.findByEmail(email.toLowerCase().trim());
@@ -154,9 +154,13 @@ const updateUser = async (req, res, next) => {
             }
         } else {
             // Owner (super_admin) accounts can only be managed by the account
-            // holder themselves, never by another owner.
+            // holder themselves, never by another owner. NOTE: as of the
+            // Owner/Admin label swap, the super_admin DB value now displays
+            // as "Admin" -- this message's WORDING was updated to match,
+            // even though the underlying check (role === 'super_admin')
+            // and who it applies to are completely unchanged.
             if (target.role === 'super_admin') {
-                return res.status(403).json({ success: false, message: 'Owner accounts can only be managed by the account holder.' });
+                return res.status(403).json({ success: false, message: 'Admin accounts can only be managed by the account holder.' });
             }
         }
 
@@ -211,9 +215,11 @@ const requestEmailChangeOtp = async (req, res, next) => {
             return res.status(404).json({ success: false, message: 'User not found.' });
         }
 
-        // Same owner-protection rule as updateUser above.
+        // Same owner-protection rule as updateUser above. Wording updated
+        // to "Admin accounts" to match the super_admin DB value's new label
+        // -- see the Owner/Admin label swap note in updateUser above.
         if (parseInt(id) !== req.user.id && target.role === 'super_admin') {
-            return res.status(403).json({ success: false, message: 'Owner accounts can only be managed by the account holder.' });
+            return res.status(403).json({ success: false, message: 'Admin accounts can only be managed by the account holder.' });
         }
 
         if (normalizedEmail === target.email.toLowerCase()) {
@@ -344,7 +350,12 @@ const requestActionOtp = async (req, res, next) => {
         }
 
         let actionDescription;
-        const roleLabels = { super_admin: 'Owner', admin: 'Admin', cashier: 'Pharmacy Assistant' };
+        // Owner/Admin label swap: super_admin now displays as "Admin", admin
+        // now displays as "Owner" -- the DB values and every permission
+        // check throughout this file are completely unchanged, only this
+        // display mapping (and the handful of messages below that name one
+        // specific role) reflect the new labels.
+        const roleLabels = { super_admin: 'Admin', admin: 'Owner', cashier: 'Pharmacy Assistant' };
 
         if (action === 'create_user') {
             const { name, email, password, role } = payload;
@@ -379,14 +390,14 @@ const requestActionOtp = async (req, res, next) => {
                 // the role that will actually be back in effect -- not the
                 // form's now-irrelevant role field.
                 if (req.user.role === 'admin' && existingAny.role !== 'cashier') {
-                    return res.status(403).json({ success: false, message: 'Admins can only reactivate Pharmacy Assistant accounts.' });
+                    return res.status(403).json({ success: false, message: 'Owners can only reactivate Pharmacy Assistant accounts.' });
                 }
                 payload.reactivateUserId = existingAny.id;
                 const oldRoleLabel = roleLabels[existingAny.role] || existingAny.role;
                 actionDescription = `reactivate the deactivated ${oldRoleLabel} account for ${existingAny.name}, restoring their previous role and access`;
             } else {
                 if (req.user.role === 'admin' && role !== 'cashier') {
-                    return res.status(403).json({ success: false, message: 'Admins can only create Pharmacy Assistant accounts.' });
+                    return res.status(403).json({ success: false, message: 'Owners can only create Pharmacy Assistant accounts.' });
                 }
                 actionDescription = `create a new ${roleLabels[role] || role} account for ${name}`;
             }
@@ -404,8 +415,10 @@ const requestActionOtp = async (req, res, next) => {
                 return res.status(404).json({ success: false, message: 'User not found.' });
             }
             // Same owner-protection rule as updateUser/deleteUser above.
+            // Wording updated to "Admin accounts" -- see the Owner/Admin
+            // label swap note in updateUser above.
             if (parseInt(targetId) !== req.user.id && target.role === 'super_admin') {
-                return res.status(403).json({ success: false, message: 'Owner accounts can only be managed by the account holder.' });
+                return res.status(403).json({ success: false, message: 'Admin accounts can only be managed by the account holder.' });
             }
             actionDescription = `change the password for ${target.name}'s account`;
 
@@ -430,7 +443,7 @@ const requestActionOtp = async (req, res, next) => {
                 const allUsersForCount = await User.findAll();
                 const activeOwnerCount = allUsersForCount.filter(u => u.role === 'super_admin' && u.is_active).length;
                 if (activeOwnerCount < 2) {
-                    return res.status(400).json({ success: false, message: 'At least one Owner must remain in the system. You cannot delete your own account while you are the only active Owner.' });
+                    return res.status(400).json({ success: false, message: 'At least one Admin must remain in the system. You cannot delete your own account while you are the only active Admin.' });
                 }
                 actionDescription = 'deactivate your own account';
             } else {
@@ -439,7 +452,7 @@ const requestActionOtp = async (req, res, next) => {
                     return res.status(404).json({ success: false, message: 'User not found.' });
                 }
                 if (target.role === 'super_admin') {
-                    return res.status(403).json({ success: false, message: 'Owner accounts can only be managed by the account holder.' });
+                    return res.status(403).json({ success: false, message: 'Admin accounts can only be managed by the account holder.' });
                 }
                 actionDescription = `deactivate ${target.name}'s account`;
             }
@@ -591,7 +604,7 @@ const confirmActionOtp = async (req, res, next) => {
                 const activeOwnerCount = allUsersForCount.filter(u => u.role === 'super_admin' && u.is_active).length;
                 if (activeOwnerCount < 2) {
                     ActionOtpStore.clear(req.user.id);
-                    return res.status(400).json({ success: false, message: 'At least one Owner must remain in the system. You cannot delete your own account while you are the only active Owner.' });
+                    return res.status(400).json({ success: false, message: 'At least one Admin must remain in the system. You cannot delete your own account while you are the only active Admin.' });
                 }
             }
             await User.softDelete(targetId);
@@ -624,7 +637,7 @@ const deleteUser = async (req, res, next) => {
             const allUsersForCount = await User.findAll();
             const activeOwnerCount = allUsersForCount.filter(u => u.role === 'super_admin' && u.is_active).length;
             if (activeOwnerCount < 2) {
-                return res.status(400).json({ success: false, message: 'At least one Owner must remain in the system. You cannot delete your own account while you are the only active Owner.' });
+                return res.status(400).json({ success: false, message: 'At least one Admin must remain in the system. You cannot delete your own account while you are the only active Admin.' });
             }
         } else {
             // Same owner-protection rule as updateUser above.
@@ -633,7 +646,7 @@ const deleteUser = async (req, res, next) => {
                 return res.status(404).json({ success: false, message: 'User not found.' });
             }
             if (target.role === 'super_admin') {
-                return res.status(403).json({ success: false, message: 'Owner accounts can only be managed by the account holder.' });
+                return res.status(403).json({ success: false, message: 'Admin accounts can only be managed by the account holder.' });
             }
         }
 
@@ -709,7 +722,13 @@ const AUDIT_COLUMNS = [
     { label: 'Entity ID',   excelWidth: 10, pdfWidth: 50  }
 ];
 
-const AUDIT_ROLE_LABELS   = { super_admin: 'Owner', admin: 'Admin', cashier: 'Pharmacy Assistant' };
+// Owner/Admin label swap: super_admin now displays as "Admin", admin now
+// displays as "Owner" throughout this app -- see requestActionOtp's
+// roleLabels for the full explanation. Audit Logs show whatever role the
+// user held AT THE TIME of each action (from the users table's CURRENT
+// role, not a historical snapshot), so a past log entry now reads with
+// today's labels, not whatever was displayed when it was originally logged.
+const AUDIT_ROLE_LABELS   = { super_admin: 'Admin', admin: 'Owner', cashier: 'Pharmacy Assistant' };
 const AUDIT_ENTITY_LABELS = {
     products: 'Product', users: 'User', orders: 'Order', order_items: 'Order Item',
     cash_sessions: 'Cash Session', cash_movements: 'Cash Movement', audit_logs: 'Audit Log',
