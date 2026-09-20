@@ -784,8 +784,24 @@ select.form-control { appearance: none; background-image: url("data:image/svg+xm
     background: var(--white);
 }
 
-thead .sticky-col {
-    z-index:    15;
+/* Element+class form (thead th.sticky-col), not a plain descendant class
+   selector (thead .sticky-col) -- and duplicated with the
+   .table-container-tall prefix for a belt-and-suspenders specificity win
+   -- because a bare "thead .sticky-col { z-index:15 }" here used to tie
+   or lose against .table-container-tall thead th's z-index:10 below for
+   THIS specific cell (the one matching both selectors), collapsing it to
+   the same stacking level as every other header cell. That was the
+   reported bug: the sticky column's own header (e.g. "Brand Name")
+   sliding underneath the other headers ("Category", "Stock", etc.)
+   during horizontal scroll instead of staying pinned on top of them.
+   z-index:20 here is deliberately higher than .table-container-tall
+   thead th's 10, so the top-left corner cell -- where the sticky column
+   and sticky header intersect -- always wins regardless of which rule
+   happens to be declared later in this file. */
+thead th.sticky-col,
+.table-container-tall thead th.sticky-col,
+.confined-scroll-area thead th.sticky-col {
+    z-index:    20;
     background: var(--light-blue);
 }
 
@@ -818,6 +834,150 @@ thead .sticky-col {
     z-index:    10;
     box-shadow: 0 2px 4px rgba(0,0,0,0.06); /* trailing-edge separator under the pinned header */
 }
+
+/* Generic page confinement -- reusable version of the "confine the
+   page, scroll only what needs to scroll" pattern already proven on
+   the POS page (see the Responsive CSS Standard doc): a fixed-height
+   ancestor chain, min-height:0 on every flex link, overflow:hidden
+   everywhere except the ONE region that should actually scroll.
+   Supersedes .table-container-tall's fixed 520px max-height on any page
+   that opts in with body.confined-page -- that max-height approach
+   capped the table at an arbitrary number regardless of how much (or
+   little) room the viewport actually had; this version gives the table
+   exactly whatever's left after the page's own toolbar/stat-cards/
+   filters take their natural height, right up to filling the screen,
+   and never taller than that (so it can never push the PAGE itself
+   into needing to scroll).
+
+   Scoped to body.confined-page rather than applied unconditionally, so
+   it never affects a page that genuinely wants normal document scroll
+   and hasn't opted in. Usage: add confined-page to <body>, leave the
+   page's title/toolbar/stat-cards/filters as plain normal-flow children
+   of .page-content (no extra class needed -- they just take their
+   natural height), and add .confined-scroll-area to the ONE wrapper
+   that directly holds the scrollable table content (usually the
+   .table-container itself, or a tab panel's own wrapper on a page with
+   multiple tabs like Reports). */
+body.confined-page {
+    height:   100dvh;
+    overflow: hidden;
+}
+
+body.confined-page .app-container {
+    height:   100dvh;
+    overflow: hidden;
+}
+
+body.confined-page .main-wrapper {
+    height:     100dvh;
+    min-height: 0;
+    overflow:   hidden;
+}
+
+body.confined-page .page-content {
+    /* NOT height:100dvh -- .main-wrapper reserves padding-top for the
+       fixed header (see its own comment), so its actual AVAILABLE
+       content box is already less than 100dvh. An explicit 100dvh here
+       would ignore that reservation and overflow past it by exactly the
+       header's height. flex:1 (already true from the base .page-content
+       rule above, repeated here for clarity) lets this correctly size to
+       whatever .main-wrapper actually has left instead. */
+    min-height:     0;
+    overflow:       hidden;
+    display:        flex;
+    flex-direction: column;
+}
+
+/* The one region that actually scrolls. flex:1 lets it claim whatever
+   space the toolbar/stat-cards/filters above it don't need; min-height:0
+   overrides flex's default "never shrink below my content's natural
+   size" behavior, which is what would otherwise silently defeat the
+   overflow-y below (see Pattern 2 in the Responsive CSS Standard --
+   this is the single most common cause of "I set overflow but it's
+   being ignored" bugs in this codebase). */
+.confined-scroll-area {
+    flex:       1;
+    min-height: 0;
+    overflow-y: auto;
+}
+
+/* Sticky header row within a confined scroll area -- this is the exact
+   thing .table-container-tall's own "thead th" rule provides, and
+   .confined-scroll-area supersedes .table-container-tall's fixed-height
+   approach in the SAME role (the ONE region that scrolls), so it needs
+   the identical treatment repeated here. Missing this entirely (which
+   happened on the first pass through this fix) meant the header
+   silently stopped sticking at all the moment a page switched from
+   .table-container-tall to .confined-scroll-area -- caught during
+   self-review, not by a live report, so worth calling out. */
+.confined-scroll-area thead th {
+    position:   sticky;
+    top:        0;
+    z-index:    10;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.06);
+}
+
+/* A .card directly wrapping a .confined-scroll-area needs to become a
+   flex column too, so it passes down whatever space .page-content has
+   left to its scrolling child -- without this, the card would just size
+   to its child's full NATURAL height (every row, unbounded), and the
+   overflow-y on the child would have nothing to actually clip against.
+   Scoped to this specific combination rather than changing .card's own
+   definition globally, since plenty of other cards on other pages
+   aren't wrapping a scroll area and shouldn't become flex containers. */
+.confined-card-wrapper {
+    display:        flex;
+    flex-direction: column;
+    flex:           1;
+    min-height:     0;
+    overflow:       hidden;
+}
+
+/* For pages with MULTIPLE swappable panels within .page-content (only
+   one visible at a time via display:none -- Reports' tabs are the only
+   current example) -- each panel needs to play the SAME "flex column
+   filling available space" role .page-content itself plays for a
+   simpler single-panel page, since .page-content's own flex:1 only
+   reaches its DIRECT children, and a tab panel sits one level deeper.
+   Apply to EVERY panel uniformly, not just the initially-active one -- a
+   display:none panel is removed from layout entirely regardless of this
+   class, so only whichever one is actually visible ever participates. */
+.confined-tab-panel {
+    flex:           1;
+    min-height:     0;
+    overflow:       hidden;
+    display:        flex;
+    flex-direction: column;
+}
+
+/* Pagination -- moved here from audit.css. Audit Logs was the first
+   table to have pagination, but the whole point of main.js's Paginate
+   helper is that every table sharing this UI needs the SAME styling,
+   not just Audit Logs, so this needed to stop being page-specific CSS. */
+.pagination {
+    display:         flex;
+    align-items:     center;
+    justify-content: center;
+    gap:             8px;
+    margin-top:      12px;
+    flex-wrap:       wrap;
+    flex-shrink:     0; /* never compressed/scrolled away -- sits below .confined-scroll-area as a normal-flow sibling, always visible */
+}
+
+.page-btn {
+    padding:       6px 14px;
+    border:        1px solid var(--gray-300);
+    background:    var(--white);
+    border-radius: 6px;
+    font-size:     0.83rem;
+    cursor:        pointer;
+    transition:    var(--transition);
+}
+
+.page-btn:hover    { background: var(--gray-100); }
+.page-btn.active   { background: var(--primary); color: #fff; border-color: var(--primary); }
+.page-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.page-info         { font-size: 0.83rem; color: var(--secondary); }
 
 /* ── Sortable columns ─────────────────────────────────────────
    A column header opts in with .sortable-col and a data-sort-key
@@ -864,22 +1024,15 @@ thead .sort-col-tint {
     background: var(--gray-100) !important;
 }
 
-/* ── Row actions: hidden by default, revealed on hover/focus ──
-   Hover alone would exclude touch and keyboard-only users -- :focus-
-   within covers Tab-ing to a button inside .row-actions even while it's
-   still visually hidden (opacity doesn't block keyboard focus, only
-   pointer-events does, which is why that's set separately below). */
+/* ── Row actions: always visible ─────────────────
+   Reverted from an earlier hover/focus-reveal pattern -- action buttons
+   now render at full visibility at all times on desktop, per explicit
+   direction. The touch-device kebab menu below is unrelated to that
+   reverted behavior (it's not a hover-hide mechanism, it's a separate,
+   device-targeted replacement for the whole button group where hovering
+   isn't possible at all) and stays exactly as it was. */
 .row-actions {
-    opacity:        0;
-    pointer-events: none;
-    transition:     opacity 0.12s ease;
-}
-
-tr:hover .row-actions,
-tr:focus-within .row-actions,
-.row-actions:focus-within {
-    opacity:        1;
-    pointer-events: auto;
+    /* intentionally no opacity/pointer-events rules here anymore */
 }
 
 /* Touch devices (hover:none) get a single kebab trigger instead of the

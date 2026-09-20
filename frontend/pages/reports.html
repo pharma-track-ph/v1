@@ -8,7 +8,7 @@
     <link rel="stylesheet" href="../css/global.css">
     <link rel="stylesheet" href="../css/reports.css">
 </head>
-<body>
+<body class="confined-page">
 <div class="app-container">
     <aside class="sidebar" id="sidebar">
         <div class="sidebar-brand">
@@ -67,7 +67,7 @@
             </div>
 
             <!-- SALES TAB -->
-            <div id="tab-sales">
+            <div id="tab-sales" class="confined-tab-panel">
                 <div class="toolbar-row">
                     <button class="period-btn active" data-period="daily">Daily</button>
                     <button class="period-btn" data-period="weekly">Weekly</button>
@@ -101,8 +101,8 @@
                     <div class="summary-chip"><div class="chip-label">Total Discount</div><div class="chip-value" id="chip-discount">₱0</div></div>
                 </div>
 
-                <div class="card" style="padding:0">
-                    <div class="table-container table-container-tall">
+                <div class="card confined-card-wrapper" style="padding:0">
+                    <div class="table-container confined-scroll-area">
                         <table class="table">
                             <thead>
                                 <tr>
@@ -123,10 +123,11 @@
                         </table>
                     </div>
                 </div>
+                <div class="pagination" id="sales-pagination"></div>
             </div>
 
             <!-- EXPIRED TAB -->
-            <div id="tab-expired" style="display:none">
+            <div id="tab-expired" class="confined-tab-panel" style="display:none">
                 <div class="toolbar-row">
                     <button class="period-btn active" data-expired-range="1">1 Month</button>
                     <button class="period-btn" data-expired-range="3">3 Months</button>
@@ -153,11 +154,20 @@
                     </div>
                 </div>
                 <div class="expired-stats" id="expired-stats"></div>
-                <div class="card" style="padding:0">
-                    <div class="table-container">
-                        <table class="table">
+                <div class="card confined-card-wrapper" style="padding:0">
+                    <div class="table-container confined-scroll-area">
+                        <table class="table" id="expired-table">
                             <thead>
-                                <tr><th>Batch No.</th><th>Product Name</th><th>Category</th><th>Qty</th><th>Cost (₱)</th><th>Expiry Date</th><th>Days Expired</th><th>Value Lost</th></tr>
+                                <tr>
+                                    <th class="col-text sticky-col sortable-col" data-sort-key="batch_number">Batch No.</th>
+                                    <th class="col-text sortable-col" data-sort-key="name">Product Name</th>
+                                    <th class="col-text sortable-col" data-sort-key="category">Category</th>
+                                    <th class="col-num sortable-col" data-sort-key="stock_quantity">Qty</th>
+                                    <th class="col-num sortable-col" data-sort-key="cost">Cost (₱)</th>
+                                    <th class="col-num sortable-col" data-sort-key="expiry_date">Expiry Date</th>
+                                    <th class="col-num sortable-col" data-sort-key="days_expired">Days Expired</th>
+                                    <th class="col-num sortable-col" data-sort-key="value_lost">Value Lost</th>
+                                </tr>
                             </thead>
                             <tbody id="expired-tbody">
                                 <tr><td colspan="8" class="text-center" style="padding:24px"><div class="spinner" style="margin:0 auto"></div></td></tr>
@@ -165,9 +175,10 @@
                         </table>
                     </div>
                 </div>
+                <div class="pagination" id="expired-pagination"></div>
             </div>
             <!-- VOID TAB -->
-            <div id="tab-void" style="display:none">
+            <div id="tab-void" class="confined-tab-panel" style="display:none">
                 <div class="toolbar-row">
                     <button class="period-btn active" data-void-period="daily">Daily</button>
                     <button class="period-btn" data-void-period="weekly">Weekly</button>
@@ -192,8 +203,8 @@
                         </div>
                     </div>
                 </div>
-                <div class="card" style="padding:0">
-                    <div class="table-container table-container-tall">
+                <div class="card confined-card-wrapper" style="padding:0">
+                    <div class="table-container confined-scroll-area">
                         <table class="table">
                             <thead>
                                 <tr>
@@ -212,10 +223,11 @@
                         </table>
                     </div>
                 </div>
+                <div class="pagination" id="void-pagination"></div>
             </div>
 
             <!-- REGISTER TAB -->
-            <div id="tab-register" style="display:none">
+            <div id="tab-register" class="confined-tab-panel" style="display:none">
                 <div class="toolbar-row">
                     <button class="period-btn active" data-register-period="daily">Daily</button>
                     <button class="period-btn" data-register-period="weekly">Weekly</button>
@@ -248,8 +260,8 @@
                     <div class="summary-chip"><div class="chip-label">Total Variance</div><div class="chip-value" id="chip-register-variance">₱0</div></div>
                 </div>
 
-                <div class="card" style="padding:0">
-                    <div class="table-container table-container-tall">
+                <div class="card confined-card-wrapper" style="padding:0">
+                    <div class="table-container confined-scroll-area">
                         <table class="table">
                             <thead>
                                 <tr>
@@ -269,6 +281,7 @@
                         </table>
                     </div>
                 </div>
+                <div class="pagination" id="register-pagination"></div>
             </div>
         </main>
     </div>
@@ -282,6 +295,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     let salesData = [];
     let salesSort  = null; // set once the table's sortable headers are wired up (see loadSalesReport)
+    let salesPaginate = null; // set once, alongside salesSort (see loadSalesReport)
     const startInput  = document.getElementById('report-start');
     const endInput    = document.getElementById('report-end');
     const customDates = document.getElementById('custom-dates');
@@ -413,9 +427,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
         // Sort wiring is done ONCE (guarded by salesSort's existing value) --
         // re-attaching on every load would double up click listeners on the
-        // same header cells. renderSalesTable (called by TableSort's
-        // onSorted, and once here directly for the initial unsorted view)
-        // owns turning salesData into markup either way.
+        // same header cells. renderSalesTable (called by Paginate's
+        // onRender) owns turning a page of salesData into markup either way.
         if (!salesSort) {
             salesSort = TableSort.attach(document.querySelector('#tab-sales thead'), {
                 getData: () => salesData,
@@ -426,18 +439,33 @@ document.addEventListener('DOMContentLoaded', () => {
                     }
                     return (row[key] || '').toString().toLowerCase();
                 },
-                onSorted: renderSalesTable
+                // Goes through Paginate now -- sorting changes ORDER, and
+                // pagination needs to reslice against that new order.
+                onSorted: () => salesPaginate.resetToFirstPage()
             });
-            renderSalesTable(); // first load -- attach() only auto-renders when a defaultKey is given, which this doesn't use
-        } else {
-            salesSort.resort(); // re-applies whatever sort was active; already re-renders via onSorted above
         }
+
+        // Same one-time-attach guard as salesSort above.
+        if (!salesPaginate) {
+            salesPaginate = Paginate.attach(document.getElementById('sales-pagination'), {
+                getData:  () => salesData,
+                onRender: (pageItems) => renderSalesTable(pageItems),
+                pageSize: 25
+            });
+        }
+
+        // Always -- see inventory.js's identical comment on this same
+        // pattern for why (TableSort's resort() unconditionally triggers
+        // onSorted regardless of whether a sort is active, which is what
+        // produces both the very first render AND every later reload's
+        // reset-to-page-1 against the freshly-loaded data).
+        salesSort.resort();
     }
 
-    // Pulled out of loadSalesReport so TableSort's onSorted can re-render
-    // without re-fetching -- sorting is purely a client-side reorder of
-    // the data already sitting in salesData.
-    function renderSalesTable() {
+    // Pulled out of loadSalesReport so Paginate's onRender can re-render
+    // without re-fetching -- sorting/paging are purely client-side
+    // reorders/reslices of the data already sitting in salesData.
+    function renderSalesTable(pageItems) {
         const tbody = document.getElementById('sales-tbody');
         const activeKey = salesSort?.getCurrentSort().key;
         const tint = (key) => key === activeKey ? ' sort-col-tint' : '';
@@ -446,9 +474,9 @@ document.addEventListener('DOMContentLoaded', () => {
             tbody.innerHTML = '<tr><td colspan="9" class="text-center text-muted" style="padding:24px">No transactions found for this period.</td></tr>';
             return;
         }
-        tbody.innerHTML = salesData.map((o, idx) => `
+        tbody.innerHTML = pageItems.map((o) => `
             <tr>
-                <td><button class="btn-expand" data-index="${idx}" title="View items sold">▶</button></td>
+                <td><button class="btn-expand" data-key="${o.order_number}" title="View items sold">▶</button></td>
                 <td class="fw-600 col-text sticky-col${tint('order_number')}">${o.order_number}</td>
                 <td class="col-text${tint('created_at')}">${Fmt.datetime(o.created_at)}</td>
                 <td class="col-text${tint('cashier_name')}">${o.cashier_name}</td>
@@ -458,7 +486,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 <td class="fw-600 col-num${tint('total')}" style="color:var(--primary)">${Fmt.currency(o.total)}</td>
                 <td class="fw-600 col-num${tint('profit')}" style="color:${parseFloat(o.profit || 0) >= 0 ? 'var(--success)' : 'var(--danger)'}">${Fmt.currency(o.profit)}</td>
             </tr>
-            <tr class="detail-row hidden" id="order-detail-${idx}">
+            <tr class="detail-row hidden" id="order-detail-${o.order_number}">
                 <td colspan="9">
                     <strong style="font-size:0.82rem">Items Sold:</strong>
                     <div class="table-container" style="margin-top:8px">
@@ -478,11 +506,13 @@ document.addEventListener('DOMContentLoaded', () => {
                 </td>
             </tr>`).join('');
 
-        // Wire expand buttons
+        // Wire expand buttons -- keyed by the order's own number now
+        // (stable regardless of sort order or which page it's on), not a
+        // page-relative index the way this used to work.
         tbody.querySelectorAll('.btn-expand').forEach(btn => {
             btn.addEventListener('click', () => {
-                const idx = btn.dataset.index;
-                const detailRow = document.getElementById(`order-detail-${idx}`);
+                const key = btn.dataset.key;
+                const detailRow = document.getElementById(`order-detail-${key}`);
                 if (!detailRow) return;
                 const isHidden = detailRow.classList.contains('hidden');
                 detailRow.classList.toggle('hidden', !isHidden);
@@ -522,6 +552,9 @@ document.addEventListener('DOMContentLoaded', () => {
     const expiredEndInput    = document.getElementById('expired-end');
     const expiredCustomDates = document.getElementById('expired-custom-dates');
     let expiredCurrentRange  = { months: '1' }; // tracks whatever's currently applied, for export to mirror
+    let expiredData      = [];
+    let expiredSort       = null; // set once the table's sortable headers are wired up (see loadExpiredReport)
+    let expiredPaginate   = null; // set once, alongside expiredSort (see loadExpiredReport)
 
     document.querySelectorAll('[data-expired-range]').forEach(btn => {
         btn.addEventListener('click', () => {
@@ -568,24 +601,64 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         const { data: expired, summary } = data;
+        expiredData = expired || [];
         document.getElementById('expired-stats').innerHTML = `
             <div class="expired-stat-card"><div class="stat-label">Expired Products</div><div class="stat-value">${summary.total_products}</div></div>
             <div class="expired-stat-card"><div class="stat-label">Total Value Lost</div><div class="stat-value">${Fmt.currency(summary.total_value_lost)}</div></div>`;
 
-        if (!expired.length) {
+        if (!expiredSort) {
+            expiredSort = TableSort.attach(document.querySelector('#expired-table thead'), {
+                getData: () => expiredData,
+                getValue: (row, key) => {
+                    if (key === 'expiry_date') return row.expiry_date ? new Date(row.expiry_date).getTime() : null;
+                    if (['stock_quantity', 'cost', 'days_expired', 'value_lost'].includes(key)) {
+                        return parseFloat(row[key] || 0);
+                    }
+                    return (row[key] || '').toString().toLowerCase();
+                },
+                onSorted: () => expiredPaginate.resetToFirstPage()
+            });
+        }
+
+        if (!expiredPaginate) {
+            expiredPaginate = Paginate.attach(document.getElementById('expired-pagination'), {
+                getData:  () => expiredData,
+                onRender: (pageItems) => renderExpiredTable(pageItems),
+                pageSize: 25
+            });
+        }
+
+        expiredSort.resort();
+    }
+
+    // Pulled out of loadExpiredReport so Paginate's onRender can
+    // re-render without re-fetching, same pattern as the other three tabs.
+    // Note: every row here carries the shared .row-expired tint (a global,
+    // !important background on ALL its cells) -- this happens to have
+    // higher CSS specificity than .sort-col-tint's own !important, so the
+    // active-sort-column highlight won't visibly show on THIS particular
+    // table (it's already entirely red-tinted for a more important reason
+    // -- being expired -- so this is an acceptable, minor cosmetic
+    // limitation rather than something worth a wider CSS rework for).
+    function renderExpiredTable(pageItems) {
+        const tbody = document.getElementById('expired-tbody');
+        const activeKey = expiredSort?.getCurrentSort().key;
+        const tint = (key) => key === activeKey ? ' sort-col-tint' : '';
+
+        if (!expiredData.length) {
             tbody.innerHTML = '<tr><td colspan="8" class="text-center text-muted" style="padding:24px">No expired products for this period.</td></tr>';
             return;
         }
-        tbody.innerHTML = expired.map(p => `
+        tbody.innerHTML = pageItems.map(p => `
             <tr class="row-expired">
-                <td>${p.batch_number}</td>
-                <td class="fw-600">${p.name}</td>
-                <td>${p.category}</td>
-                <td>${p.stock_quantity}</td>
-                <td>${Fmt.currency(p.cost)}</td>
-                <td style="color:var(--danger)">${Fmt.date(p.expiry_date)}</td>
-                <td style="color:var(--danger);font-weight:600">${p.days_expired}d ago</td>
-                <td style="color:var(--danger);font-weight:700">${Fmt.currency(p.value_lost)}</td>
+                <td class="col-text sticky-col${tint('batch_number')}">${p.batch_number}</td>
+                <td class="fw-600 col-text${tint('name')}">${p.name}</td>
+                <td class="col-text${tint('category')}">${p.category}</td>
+                <td class="col-num${tint('stock_quantity')}">${p.stock_quantity}</td>
+                <td class="col-num${tint('cost')}">${Fmt.currency(p.cost)}</td>
+                <td class="col-num${tint('expiry_date')}" style="color:var(--danger)">${Fmt.date(p.expiry_date)}</td>
+                <td class="col-num${tint('days_expired')}" style="color:var(--danger);font-weight:600">${p.days_expired}d ago</td>
+                <td class="col-num${tint('value_lost')}" style="color:var(--danger);font-weight:700">${Fmt.currency(p.value_lost)}</td>
             </tr>`).join('');
     }
 
@@ -594,6 +667,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const voidCustomDates = document.getElementById('void-custom-dates');
     let voidData = [];
     let voidSort = null;
+    let voidPaginate = null; // set once, alongside voidSort (see loadVoidReport)
 
     document.querySelectorAll('[data-void-period]').forEach(btn => {
         btn.addEventListener('click', () => {
@@ -656,15 +730,22 @@ document.addEventListener('DOMContentLoaded', () => {
                     if (key === 'total') return parseFloat(row.total || 0);
                     return (row[key] || '').toString().toLowerCase();
                 },
-                onSorted: renderVoidTable
+                onSorted: () => voidPaginate.resetToFirstPage()
             });
-            renderVoidTable();
-        } else {
-            voidSort.resort();
         }
+
+        if (!voidPaginate) {
+            voidPaginate = Paginate.attach(document.getElementById('void-pagination'), {
+                getData:  () => voidData,
+                onRender: (pageItems) => renderVoidTable(pageItems),
+                pageSize: 25
+            });
+        }
+
+        voidSort.resort();
     }
 
-    function renderVoidTable() {
+    function renderVoidTable(pageItems) {
         const tbody = document.getElementById('void-tbody');
         const activeKey = voidSort?.getCurrentSort().key;
         const tint = (key) => key === activeKey ? ' sort-col-tint' : '';
@@ -674,9 +755,9 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
 
-        tbody.innerHTML = voidData.map((o, idx) => `
+        tbody.innerHTML = pageItems.map((o) => `
             <tr>
-                <td><button class="btn-expand" data-index="void-${idx}" title="View items sold">▶</button></td>
+                <td><button class="btn-expand" data-key="${o.order_number}" title="View items sold">▶</button></td>
                 <td class="fw-600 col-text sticky-col${tint('order_number')}">${o.order_number}</td>
                 <td class="col-text${tint('created_at')}">${Fmt.datetime(o.created_at)}</td>
                 <td class="col-text${tint('cashier_name')}">${o.cashier_name}</td>
@@ -684,7 +765,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 <td class="col-text${tint('voided_at')}">${o.voided_at ? Fmt.datetime(o.voided_at) : '—'}</td>
                 <td class="fw-600 col-num${tint('total')}" style="color:var(--danger)">${Fmt.currency(o.total)}</td>
             </tr>
-            <tr class="detail-row hidden" id="order-detail-void-${idx}">
+            <tr class="detail-row hidden" id="order-detail-void-${o.order_number}">
                 <td colspan="7">
                     <strong style="font-size:0.82rem">Items Sold (before void):</strong>
                     <div class="table-container" style="margin-top:8px">
@@ -706,8 +787,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
         tbody.querySelectorAll('.btn-expand').forEach(btn => {
             btn.addEventListener('click', () => {
-                const idx = btn.dataset.index;
-                const detailRow = document.getElementById(`order-detail-${idx}`);
+                const key = btn.dataset.key;
+                const detailRow = document.getElementById(`order-detail-void-${key}`);
                 if (!detailRow) return;
                 const isHidden = detailRow.classList.contains('hidden');
                 detailRow.classList.toggle('hidden', !isHidden);
@@ -722,6 +803,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const registerCustomDates = document.getElementById('register-custom-dates');
     let registerData = [];
     let registerSort = null;
+    let registerPaginate = null; // set once, alongside registerSort (see loadRegisterReport)
 
     document.querySelectorAll('[data-register-period]').forEach(btn => {
         btn.addEventListener('click', () => {
@@ -793,15 +875,22 @@ document.addEventListener('DOMContentLoaded', () => {
                     }
                     return (row[key] || '').toString().toLowerCase();
                 },
-                onSorted: renderRegisterTable
+                onSorted: () => registerPaginate.resetToFirstPage()
             });
-            renderRegisterTable();
-        } else {
-            registerSort.resort();
         }
+
+        if (!registerPaginate) {
+            registerPaginate = Paginate.attach(document.getElementById('register-pagination'), {
+                getData:  () => registerData,
+                onRender: (pageItems) => renderRegisterTable(pageItems),
+                pageSize: 25
+            });
+        }
+
+        registerSort.resort();
     }
 
-    function renderRegisterTable() {
+    function renderRegisterTable(pageItems) {
         const tbody = document.getElementById('register-tbody');
         const activeKey = registerSort?.getCurrentSort().key;
         const tint = (key) => key === activeKey ? ' sort-col-tint' : '';
@@ -811,7 +900,7 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
 
-        tbody.innerHTML = registerData.map(s => {
+        tbody.innerHTML = pageItems.map(s => {
             const isOpen = s.status === 'OPEN';
             const varianceVal = parseFloat(s.variance);
             const varianceText = s.status === 'CLOSED' && !isNaN(varianceVal)

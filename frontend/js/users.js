@@ -12,6 +12,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // ── State ────────────────────────────────────────────────
     let allUsers  = [];
     let usersSort  = null; // set once the table's sortable headers are wired up (see loadUsers)
+    let usersPaginate = null; // set once, alongside usersSort (see loadUsers)
     let editingId = null;
     let pwTargetId = null;
 
@@ -42,7 +43,12 @@ document.addEventListener('DOMContentLoaded', () => {
         getSubLabel: u => u.email
     });
 
-    function debounceFilter() { renderTable(filterUsers()); }
+    function debounceFilter() {
+        // A NEW filter/search value has no obvious meaning for whatever
+        // page you were previously on -- resetToFirstPage() re-derives
+        // filterUsers()'s result and renders from page 1 against it.
+        usersPaginate.resetToFirstPage();
+    }
 
     function filterUsers() {
         const term   = searchInput?.value.toLowerCase().trim() || '';
@@ -90,22 +96,36 @@ document.addEventListener('DOMContentLoaded', () => {
                     if (key === 'created_at') return new Date(row.created_at).getTime();
                     return (row[key] || '').toString().toLowerCase();
                 },
-                // Sorting doesn't change WHICH users are visible, just their
-                // order -- still need to re-derive the filtered view to
-                // actually render it.
-                onSorted: () => renderTable(filterUsers())
+                // Goes through Paginate now, not straight to renderTable --
+                // sorting changes ORDER, and pagination needs to reslice
+                // against that new order, not just redraw whatever page
+                // was already showing against the OLD order.
+                onSorted: () => usersPaginate.resetToFirstPage()
             });
-        } else {
-            usersSort.resort();
         }
-        // Default view -- see filterUsers()'s comment for why this isn't
-        // just renderTable(allUsers) (inactive accounts hidden by default).
-        // Harmless to call again even right after resort() above already
-        // rendered once (e.g. on a reload, resort() already re-rendered) --
-        // filterUsers()'s result is identical either way, this just
-        // guarantees a render happened on the very first load too, when
-        // usersSort didn't exist yet and resort() was never taken.
-        renderTable(filterUsers());
+
+        // Same one-time-attach guard as usersSort above. getData calls
+        // filterUsers() itself -- a fresh function call every time
+        // Paginate needs the current data, so it always reflects whatever
+        // the search/role/status inputs currently are, not a stale
+        // snapshot from whenever Paginate was first attached.
+        if (!usersPaginate) {
+            usersPaginate = Paginate.attach(document.getElementById('users-pagination'), {
+                getData:  () => filterUsers(),
+                onRender: (pageItems) => renderTable(pageItems),
+                pageSize: 25
+            });
+        }
+
+        // Always -- TableSort's resort() unconditionally triggers onSorted
+        // at the end regardless of whether a sort is currently active,
+        // which is exactly what's needed here either way: on the very
+        // first load, this produces the FIRST render at all (attach()
+        // alone doesn't render without a defaultKey, which this doesn't
+        // use); on every later load (Refresh, or after an action
+        // completes), this re-sorts the new data (a no-op if nothing's
+        // sorted) and resets to page 1 against it.
+        usersSort.resort();
     }
 
     function renderStats() {

@@ -9,9 +9,8 @@ document.addEventListener('DOMContentLoaded', () => {
     // ── State ────────────────────────────────────────────────
     let allLogs      = [];
     let filteredLogs = [];
-    let currentPage  = 1;
-    let auditSort    = null; // set once the table's sortable headers are wired up (see loadAuditLogs)
-    const PAGE_SIZE  = 25;
+    let auditSort     = null; // set once the table's sortable headers are wired up (see loadAuditLogs)
+    let auditPaginate = null; // set once, right alongside auditSort (see loadAuditLogs)
 
     // ── DOM ──────────────────────────────────────────────────
     const tbody        = document.getElementById('audit-tbody');
@@ -126,6 +125,18 @@ document.addEventListener('DOMContentLoaded', () => {
         } else {
             auditSort.resort();
         }
+
+        // Paginate operates on filteredLogs (the current search/filter
+        // view), NOT allLogs -- attached once, same guard as auditSort
+        // above, since re-attaching on every load would double up the
+        // Prev/Next/page-number click listeners on the same controls.
+        if (!auditPaginate) {
+            auditPaginate = Paginate.attach(pagination, {
+                getData:  () => filteredLogs,
+                onRender: (pageItems) => renderTable(pageItems),
+                pageSize: 25
+            });
+        }
         applyFilters();
     }
 
@@ -169,9 +180,10 @@ document.addEventListener('DOMContentLoaded', () => {
             return matchText && matchAction && matchEntity && matchDate;
         });
 
-        currentPage = 1;
-        renderTable();
-        renderPagination();
+        // resetToFirstPage() re-slices filteredLogs for page 1 and calls
+        // renderTable via Paginate's onRender -- a new filter value has no
+        // obvious meaning for whatever page you were previously on.
+        auditPaginate.resetToFirstPage();
     }
 
     function clearFilters() {
@@ -209,11 +221,8 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // ── Render table ──────────────────────────────────────────
-    function renderTable() {
+    function renderTable(pageItems) {
         if (!tbody) return;
-
-        const start = (currentPage - 1) * PAGE_SIZE;
-        const page  = filteredLogs.slice(start, start + PAGE_SIZE);
 
         if (!filteredLogs.length) {
             tbody.innerHTML = `
@@ -225,25 +234,27 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
 
-        tbody.innerHTML = page.map((log, i) => {
-            const globalIdx = start + i;
+        const activeKey = auditSort?.getCurrentSort().key;
+        const tint = (key) => key === activeKey ? ' sort-col-tint' : '';
+
+        tbody.innerHTML = pageItems.map((log) => {
             const badgeHtml = getActionBadge(log.action);
             const roleLabelText = log.user_role ? `<span style="font-size:0.68rem;color:var(--secondary);margin-left:4px">(${roleLabel(log.user_role)})</span>` : '';
 
             return `
             <tr>
                 <td>
-                    <button class="btn-expand" data-index="${globalIdx}" title="View details">▶</button>
+                    <button class="btn-expand" data-id="${log.id}" title="View details">▶</button>
                 </td>
-                <td style="white-space:nowrap;font-size:0.83rem">${Fmt.datetime(log.created_at)}</td>
-                <td>
+                <td class="col-text sticky-col${tint('created_at')}" style="white-space:nowrap;font-size:0.83rem">${Fmt.datetime(log.created_at)}</td>
+                <td class="col-text${tint('user_name')}">
                     <span class="fw-600">${escHtml(log.user_name || '—')}</span>${roleLabelText}
                 </td>
-                <td>${badgeHtml}</td>
-                <td style="font-size:0.83rem">${entityLabel(log.entity)}</td>
-                <td style="font-size:0.83rem;color:var(--secondary)">${log.entity_id || '—'}</td>
+                <td class="col-text${tint('action')}">${badgeHtml}</td>
+                <td class="col-text${tint('entity')}" style="font-size:0.83rem">${entityLabel(log.entity)}</td>
+                <td class="col-text${tint('entity_id')}" style="font-size:0.83rem;color:var(--secondary)">${log.entity_id || '—'}</td>
             </tr>
-            <tr class="detail-row hidden" id="detail-${globalIdx}">
+            <tr class="detail-row hidden" id="detail-${log.id}">
                 <td colspan="6">
                     <strong style="font-size:0.82rem">Details:</strong>
                     ${formatDetails(log)}
@@ -251,11 +262,13 @@ document.addEventListener('DOMContentLoaded', () => {
             </tr>`;
         }).join('');
 
-        // Wire expand buttons
+        // Wire expand buttons -- keyed by the log's own id now (stable
+        // regardless of sort order or which page it's on), not a computed
+        // page-relative index the way this used to work.
         tbody.querySelectorAll('.btn-expand').forEach(btn => {
             btn.addEventListener('click', () => {
-                const idx      = btn.dataset.index;
-                const detailRow = document.getElementById(`detail-${idx}`);
+                const id        = btn.dataset.id;
+                const detailRow = document.getElementById(`detail-${id}`);
                 if (!detailRow) return;
 
                 const isHidden = detailRow.classList.contains('hidden');
@@ -384,49 +397,9 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // ── Pagination ────────────────────────────────────────────
-    function renderPagination() {
-        if (!pagination) return;
-
-        const totalPages = Math.ceil(filteredLogs.length / PAGE_SIZE);
-
-        if (totalPages <= 1) {
-            pagination.innerHTML = '';
-            return;
-        }
-
-        const start = (currentPage - 1) * PAGE_SIZE + 1;
-        const end   = Math.min(currentPage * PAGE_SIZE, filteredLogs.length);
-
-        let html = `
-            <button class="page-btn" id="pg-prev" ${currentPage === 1 ? 'disabled' : ''}>← Prev</button>`;
-
-        // Show up to 5 page buttons around current page
-        const range = 2;
-        for (let p = 1; p <= totalPages; p++) {
-            if (p === 1 || p === totalPages || (p >= currentPage - range && p <= currentPage + range)) {
-                html += `<button class="page-btn ${p === currentPage ? 'active' : ''}" data-page="${p}">${p}</button>`;
-            } else if (p === currentPage - range - 1 || p === currentPage + range + 1) {
-                html += `<span class="page-info">…</span>`;
-            }
-        }
-
-        html += `
-            <button class="page-btn" id="pg-next" ${currentPage === totalPages ? 'disabled' : ''}>Next →</button>
-            <span class="page-info">Showing ${start}–${end} of ${filteredLogs.length}</span>`;
-
-        pagination.innerHTML = html;
-
-        pagination.querySelector('#pg-prev')?.addEventListener('click', () => { currentPage--; renderTable(); renderPagination(); });
-        pagination.querySelector('#pg-next')?.addEventListener('click', () => { currentPage++; renderTable(); renderPagination(); });
-
-        pagination.querySelectorAll('[data-page]').forEach(btn => {
-            btn.addEventListener('click', () => {
-                currentPage = parseInt(btn.dataset.page);
-                renderTable();
-                renderPagination();
-            });
-        });
-    }
+    // Pagination is now handled entirely by main.js's shared Paginate
+    // helper (see loadAuditLogs, where it's attached) -- this page-
+    // specific version is gone.
 
 });
 

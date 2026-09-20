@@ -128,30 +128,8 @@
 .detail-row-item .detail-label { color: var(--secondary); font-weight: 500; }
 .detail-row-item .detail-value { color: var(--dark); font-weight: 600; text-align: right; }
 
-/* Pagination */
-.pagination {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 8px;
-    margin-top: 20px;
-    flex-wrap: wrap;
-}
-
-.page-btn {
-    padding: 6px 14px;
-    border: 1px solid var(--gray-300);
-    background: var(--white);
-    border-radius: 6px;
-    font-size: 0.83rem;
-    cursor: pointer;
-    transition: var(--transition);
-}
-
-.page-btn:hover          { background: var(--gray-100); }
-.page-btn.active         { background: var(--primary); color: #fff; border-color: var(--primary); }
-.page-btn:disabled       { opacity: 0.4; cursor: not-allowed; }
-.page-info               { font-size: 0.83rem; color: var(--secondary); }
+/* Pagination -- moved to global.css (shared across every table with
+   pagination now, not just this page). */
 
 /* Empty state */
 .empty-audit {

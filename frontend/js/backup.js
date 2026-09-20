@@ -16,6 +16,11 @@ document.addEventListener('DOMContentLoaded', () => {
     const periodSelect     = document.getElementById('backup-schedule-period');
     const saveScheduleBtn  = document.getElementById('btn-save-schedule');
 
+    // ── State (sort + pagination) ─────────────────────
+    let allBackups     = [];
+    let backupSort      = null; // set once the table's sortable headers are wired up (see loadBackups)
+    let backupPaginate  = null; // set once, alongside backupSort (see loadBackups)
+
     populateTimeSelects();
     loadBackups();
     loadSchedule();
@@ -107,8 +112,39 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
 
-        renderTable(data.data);
-        renderSummary(data.data);
+        allBackups = data.data || [];
+        renderSummary(allBackups);
+
+        // Sort operates on allBackups itself; getData (not a plain array)
+        // keeps this correct even though allBackups gets REASSIGNED on
+        // every reload above -- see TableSort's own comment for why a
+        // plain array reference would go stale here.
+        if (!backupSort) {
+            backupSort = TableSort.attach(document.querySelector('#backup-table thead'), {
+                getData: () => allBackups,
+                getValue: (row, key) => {
+                    if (key === 'created_at') return new Date(row.created_at).getTime();
+                    if (key === 'size') return parseFloat(row.size || 0);
+                    return (row[key] || '').toString().toLowerCase();
+                },
+                onSorted: () => backupPaginate.resetToFirstPage()
+            });
+        }
+
+        if (!backupPaginate) {
+            backupPaginate = Paginate.attach(document.getElementById('backup-pagination'), {
+                getData:  () => allBackups,
+                onRender: (pageItems) => renderTable(pageItems),
+                pageSize: 25
+            });
+        }
+
+        // Always -- TableSort's resort() unconditionally triggers onSorted
+        // regardless of whether a sort is active, which produces both the
+        // very first render and every later reload's reset-to-page-1
+        // against the freshly-loaded data (same pattern used throughout
+        // inventory.js/users.js/reports.html for this).
+        backupSort.resort();
     }
 
     function renderSummary(list) {
@@ -122,23 +158,27 @@ document.addEventListener('DOMContentLoaded', () => {
     function renderTable(list) {
         if (!tbody) return;
 
-        if (!list.length) {
+        if (!allBackups.length) {
             tbody.innerHTML = `<tr><td colspan="4" class="text-center text-muted" style="padding:40px">
                 No backups yet. Click "Backup Now" to create the first one.</td></tr>`;
             return;
         }
 
+        const activeKey = backupSort?.getCurrentSort().key;
+        const tint = (key) => key === activeKey ? ' sort-col-tint' : '';
+
         tbody.innerHTML = list.map(b => `
             <tr>
-                <td>${Fmt.datetime(b.created_at)}</td>
-                <td>${formatBytes(b.size)}</td>
-                <td>${typeBadge(b.triggered_by)}</td>
+                <td class="col-text sticky-col${tint('created_at')}">${Fmt.datetime(b.created_at)}</td>
+                <td class="col-num${tint('size')}">${formatBytes(b.size)}</td>
+                <td class="col-text${tint('triggered_by')}">${typeBadge(b.triggered_by)}</td>
                 <td class="action-cell">
-                    <div class="d-flex gap-8">
+                    <div class="d-flex gap-8 row-actions">
                         <button class="btn btn-light btn-sm backup-action-btn btn-download" data-filename="${b.filename}" title="Download this backup file">Download</button>
                         <button class="btn btn-light btn-sm backup-action-btn btn-restore"  data-filename="${b.filename}" title="Replace the current database with this backup">Restore</button>
                         <button class="btn btn-danger btn-sm backup-action-btn btn-delete"  data-filename="${b.filename}" title="Permanently delete this backup file">Delete</button>
                     </div>
+                    <button class="kebab-trigger" data-filename="${b.filename}" title="More actions" aria-label="More actions">⋮</button>
                 </td>
             </tr>
         `).join('');
@@ -149,6 +189,17 @@ document.addEventListener('DOMContentLoaded', () => {
             btn.addEventListener('click', () => confirmRestore(btn.dataset.filename)));
         tbody.querySelectorAll('.btn-delete').forEach(btn =>
             btn.addEventListener('click', () => confirmDelete(btn.dataset.filename)));
+        // Touch-device equivalent of the three buttons above -- see
+        // .kebab-trigger in global.css, only ever visible where hover isn't
+        // available.
+        tbody.querySelectorAll('.kebab-trigger').forEach(btn => {
+            const filename = btn.dataset.filename;
+            attachKebabMenu(btn, [
+                { label: 'Download', onClick: () => downloadBackup(filename) },
+                { label: 'Restore',  onClick: () => confirmRestore(filename) },
+                { label: 'Delete', danger: true, onClick: () => confirmDelete(filename) }
+            ]);
+        });
     }
 
     function typeBadge(triggeredBy) {

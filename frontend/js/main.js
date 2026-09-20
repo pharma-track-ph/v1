@@ -1484,6 +1484,101 @@ function attachKebabMenu(triggerEl, actions) {
     });
 }
 
+// ── Generic Pagination ────────────────────────────
+// Client-side pagination controls + slicing, generalized from Audit
+// Logs' original implementation so every table sharing this now (Reports,
+// Inventory, User Management, Backup & Restore) gets identical controls
+// and behavior, not a per-page reimplementation. Purely a SLICING helper
+// -- the dataset is already fully loaded in memory by the time this runs
+// (same assumption TableSort makes), so changing pages never triggers a
+// network request. Same UI as Audit Logs always had: Prev/Next, up to 5
+// numbered page buttons with an ellipsis for the rest, and a "Showing
+// X-Y of Z" label -- and, per explicit direction, NO pagination controls
+// at all when the full dataset already fits on one page.
+const Paginate = {
+    /**
+     * @param {HTMLElement} containerEl - where the controls render (usually a <div class="pagination">)
+     * @param {object} opts
+     * @param {() => any[]} opts.getData - returns the CURRENT full (already filtered/sorted) dataset -- a function, not a plain array, for the same staleness reason TableSort's getData is -- see that comment above.
+     * @param {(pageItems: any[], pageNumber: number) => void} opts.onRender - called with just the current page's slice of rows; the caller still owns turning that into <tr> markup.
+     * @param {number} [opts.pageSize=25]
+     */
+    attach(containerEl, { getData, onRender, pageSize = 25 }) {
+        let currentPage = 1;
+
+        function render() {
+            const data = getData() || [];
+            const totalPages = Math.max(1, Math.ceil(data.length / pageSize));
+            // Clamp -- a filter/search change can shrink the dataset out
+            // from under whatever page was previously showing (e.g. you
+            // were on page 4 of a search result, then typed something
+            // that narrows it to 2 pages).
+            if (currentPage > totalPages) currentPage = totalPages;
+
+            const start     = (currentPage - 1) * pageSize;
+            const pageItems = data.slice(start, start + pageSize);
+            onRender(pageItems, currentPage);
+            renderControls(data.length, totalPages);
+        }
+
+        function renderControls(totalItems, totalPages) {
+            if (!containerEl) return;
+
+            // No pagination UI at all when everything already fits on one
+            // page -- Prev/Next/"page 1 of 1" controls for a 12-row table
+            // would just be clutter with nothing to actually navigate.
+            if (totalPages <= 1) {
+                containerEl.innerHTML = '';
+                return;
+            }
+
+            const start = (currentPage - 1) * pageSize + 1;
+            const end   = Math.min(currentPage * pageSize, totalItems);
+
+            let html = `<button class="page-btn" id="pg-prev" ${currentPage === 1 ? 'disabled' : ''}>← Prev</button>`;
+
+            // Up to 5 page buttons around the current page, same as Audit
+            // Logs' original: always show page 1 and the last page, plus 2
+            // on either side of wherever you currently are, with an
+            // ellipsis filling any gap.
+            const range = 2;
+            for (let p = 1; p <= totalPages; p++) {
+                if (p === 1 || p === totalPages || (p >= currentPage - range && p <= currentPage + range)) {
+                    html += `<button class="page-btn ${p === currentPage ? 'active' : ''}" data-page="${p}">${p}</button>`;
+                } else if (p === currentPage - range - 1 || p === currentPage + range + 1) {
+                    html += `<span class="page-info">…</span>`;
+                }
+            }
+
+            html += `
+                <button class="page-btn" id="pg-next" ${currentPage === totalPages ? 'disabled' : ''}>Next →</button>
+                <span class="page-info">Showing ${start}–${end} of ${totalItems}</span>`;
+
+            containerEl.innerHTML = html;
+
+            containerEl.querySelector('#pg-prev')?.addEventListener('click', () => { currentPage--; render(); });
+            containerEl.querySelector('#pg-next')?.addEventListener('click', () => { currentPage++; render(); });
+            containerEl.querySelectorAll('[data-page]').forEach(btn => {
+                btn.addEventListener('click', () => { currentPage = parseInt(btn.dataset.page); render(); });
+            });
+        }
+
+        return {
+            // Call whenever the underlying data actually changes (a fresh
+            // load, a filter, a sort) -- re-slices and re-renders at
+            // whatever page is currently selected, WITHOUT resetting to
+            // page 1 by itself (see resetToFirstPage for that).
+            render,
+            // A NEW filter/search value (not just a re-sort of the same
+            // results) should generally jump back to page 1, since
+            // "page 3" of the old results has no obvious meaning against
+            // a differently-filtered set.
+            resetToFirstPage: () => { currentPage = 1; render(); },
+            getCurrentPage: () => currentPage
+        };
+    }
+};
+
 // ── DOM Ready: Initialise everything ──────────────────────────
 document.addEventListener('DOMContentLoaded', () => {
     Toast.init();

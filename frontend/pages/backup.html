@@ -8,7 +8,7 @@
     <link rel="stylesheet" href="../css/global.css">
     <link rel="stylesheet" href="../css/backup.css">
 </head>
-<body>
+<body class="confined-page">
 <div class="app-container">
 
     <aside class="sidebar" id="sidebar">
@@ -96,14 +96,14 @@
             </div>
 
             <!-- ── Existing backups ─────────────────────────── -->
-            <div class="card" style="padding:0">
-                <div class="table-container">
-                    <table class="table">
+            <div class="card confined-card-wrapper" style="padding:0">
+                <div class="table-container confined-scroll-area">
+                    <table class="table" id="backup-table">
                         <thead>
                             <tr>
-                                <th>Backup Date</th>
-                                <th>Size</th>
-                                <th>Type</th>
+                                <th class="col-text sticky-col sortable-col" data-sort-key="created_at">Backup Date</th>
+                                <th class="col-num sortable-col" data-sort-key="size">Size</th>
+                                <th class="col-text sortable-col" data-sort-key="triggered_by">Type</th>
                                 <th class="action-cell">Actions</th>
                             </tr>
                         </thead>
@@ -115,6 +115,9 @@
                     </table>
                 </div>
             </div>
+
+            <!-- Pagination -->
+            <div class="pagination" id="backup-pagination"></div>
         </main>
     </div>
 </div>

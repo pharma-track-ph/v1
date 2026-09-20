@@ -15,6 +15,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // ── State ────────────────────────────────────────────────
     let products     = [];   // grouped brand summaries (main table)
     let invSort       = null; // set once the table's sortable headers are wired up (see loadProducts)
+    let invPaginate   = null; // set once, alongside invSort (see loadProducts)
     let editingId     = null; // representative row id of the brand being edited
     let currentItems  = [];   // Item No. entries for the brand currently open in the modal
 
@@ -184,12 +185,32 @@ document.addEventListener('DOMContentLoaded', () => {
                     }
                     return (row[key] || '').toString().toLowerCase();
                 },
-                onSorted: () => renderTable(products)
+                // Goes through Paginate now, not straight to renderTable --
+                // sorting changes ORDER, and pagination needs to reslice
+                // against that new order, not just redraw whatever page
+                // was already showing against the OLD order.
+                onSorted: () => invPaginate.resetToFirstPage()
             });
-            renderTable(products); // first load -- attach() only auto-renders when a defaultKey is given, which this doesn't use
-        } else {
-            invSort.resort(); // re-applies whatever sort was active; already re-renders via onSorted above
         }
+
+        // Same one-time-attach guard as invSort above.
+        if (!invPaginate) {
+            invPaginate = Paginate.attach(document.getElementById('inv-pagination'), {
+                getData:  () => products,
+                onRender: (pageItems) => renderTable(pageItems),
+                pageSize: 25
+            });
+        }
+
+        // Always -- TableSort's resort() unconditionally triggers onSorted
+        // at the end regardless of whether a sort is currently active (see
+        // that function's own implementation), which is exactly what's
+        // needed here either way: on the very first load, this is what
+        // produces the FIRST render at all (attach() alone doesn't render
+        // without a defaultKey, which this doesn't use); on every later
+        // load (a fresh search/filter/Refresh), this re-sorts the new data
+        // (a no-op if nothing's sorted) and resets to page 1 against it.
+        invSort.resort();
     }
 
     // ─────────────────────────────────────────────────────────
