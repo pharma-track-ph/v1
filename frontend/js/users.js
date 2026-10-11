@@ -58,13 +58,10 @@ document.addEventListener('DOMContentLoaded', () => {
         return allUsers.filter(u => {
             const matchText   = !term   || u.name.toLowerCase().includes(term) || u.email.toLowerCase().includes(term);
             const matchRole   = !role   || u.role === role;
-            // Deactivated accounts are hidden by default -- "deleting" a
-            // user should make them disappear from the normal view, even
-            // though the record itself is preserved (soft delete, see
-            // User.softDelete). Explicitly selecting "Inactive" from the
-            // Status filter still shows them, since that's the only way
-            // to find and reactivate one later via Edit.
-            const matchStatus = status === '' ? u.is_active == 1 : String(u.is_active) === status;
+            // "All Status" shows EVERY account, active and inactive. Inactive
+            // ones are labelled and muted in the table (see renderTable) so
+            // they can be found and set back to Active via Edit.
+            const matchStatus = status === '' || String(u.is_active) === status;
             return matchText && matchRole && matchStatus;
         });
     }
@@ -166,16 +163,14 @@ document.addEventListener('DOMContentLoaded', () => {
             // openEditModal for what stays locked even then: role/status).
             const isOtherOwner = u.role === 'super_admin' && !isSelf;
             const canEdit   = !isOtherOwner && (isSuperAdmin || u.role === 'cashier');
-            // Self-delete is now allowed for a super_admin (see
-            // authController.js's requestActionOtp/deleteUser -- the
-            // backend blocks it if they're the only ACTIVE owner left, so
-            // the button showing here isn't a guarantee it'll succeed, just
-            // that it's worth letting them try and see the real reason if
-            // not).
-            const canDelete = !isOtherOwner && isSuperAdmin;
+            // Edit (Role + Account Status) is hidden on your OWN row: both are
+            // locked there anyway, and Name/Email are no longer editable by an
+            // admin at all. Password and your own profile stay reachable via
+            // the Password button and Edit Profile.
+            const canEditFields = canEdit && !isSelf;
 
             return `
-            <tr class="${isSelf ? 'self-row' : ''}">
+            <tr class="${isSelf ? 'self-row' : ''}${u.is_active ? '' : ' row-inactive'}">
                 <td class="col-text sticky-col${tint('name')}">
                     <div class="fw-600">${escHtml(u.name)}${isSelf ? '<span class="self-badge">You</span>' : ''}</div>
                 </td>
@@ -185,17 +180,14 @@ document.addEventListener('DOMContentLoaded', () => {
                 <td class="col-text${tint('created_at')}" style="font-size:0.83rem;color:var(--secondary)">${Fmt.date(u.created_at)}</td>
                 <td class="action-cell">
                     <div class="d-flex gap-8 row-actions">
+                        ${canEditFields ? `<button class="btn btn-light btn-sm btn-edit" data-id="${u.id}" title="Edit">Edit</button>` : ''}
                         ${canEdit ? `
-                            <button class="btn btn-light btn-sm btn-edit" data-id="${u.id}" title="Edit">Edit</button>
                             <button class="btn btn-light btn-sm btn-pw" data-id="${u.id}" data-name="${escHtml(u.name)}" title="Change Password">Password</button>
                         ` : ''}
-                        ${canDelete ? `
-                            <button class="btn btn-danger btn-sm btn-delete" data-id="${u.id}" data-name="${escHtml(u.name)}" title="Deactivate">Delete</button>
-                        ` : ''}
                         ${isOtherOwner ? `<span class="text-muted" style="font-size:0.78rem" title="Admin accounts can only be managed by the account holder.">Protected</span>` : ''}
-                        ${!canEdit && !canDelete && !isOtherOwner ? `<span class="text-muted" style="font-size:0.78rem">—</span>` : ''}
+                        ${!canEdit && !isOtherOwner ? `<span class="text-muted" style="font-size:0.78rem">—</span>` : ''}
                     </div>
-                    ${(canEdit || canDelete) ? `<button class="kebab-trigger" data-id="${u.id}" title="More actions" aria-label="More actions">⋮</button>` : ''}
+                    ${canEdit ? `<button class="kebab-trigger" data-id="${u.id}" title="More actions" aria-label="More actions">⋮</button>` : ''}
                 </td>
             </tr>`;
         }).join('');
@@ -207,8 +199,6 @@ document.addEventListener('DOMContentLoaded', () => {
         tbody.querySelectorAll('.btn-pw').forEach(btn =>
             btn.addEventListener('click', () => openPwModal(parseInt(btn.dataset.id), btn.dataset.name)));
 
-        tbody.querySelectorAll('.btn-delete').forEach(btn =>
-            btn.addEventListener('click', () => confirmDelete(parseInt(btn.dataset.id), btn.dataset.name)));
 
         // Touch-device equivalent of the buttons above -- see
         // .kebab-trigger in global.css, only ever visible where hover isn't
@@ -222,15 +212,14 @@ document.addEventListener('DOMContentLoaded', () => {
             const isSelf    = u.id === currentUser?.id;
             const isOtherOwner = u.role === 'super_admin' && !isSelf;
             const canEdit   = !isOtherOwner && (isSuperAdmin || u.role === 'cashier');
-            const canDelete = !isOtherOwner && isSuperAdmin;
+            const canEditFields = canEdit && !isSelf;
 
             const actions = [];
-            if (canEdit) {
+            if (canEditFields) {
                 actions.push({ label: 'Edit', onClick: () => openEditModal(id) });
-                actions.push({ label: 'Change Password', onClick: () => openPwModal(id, u.name) });
             }
-            if (canDelete) {
-                actions.push({ label: 'Deactivate', danger: true, onClick: () => confirmDelete(id, u.name) });
+            if (canEdit) {
+                actions.push({ label: 'Change Password', onClick: () => openPwModal(id, u.name) });
             }
             attachKebabMenu(btn, actions);
         });
@@ -251,6 +240,10 @@ document.addEventListener('DOMContentLoaded', () => {
         // password for new users -- a real deadlock (required, but no
         // visible way to enter it).
         document.getElementById('pw-group')?.classList.remove('hidden');
+        // Name and Email only exist in Add mode -- Edit hides them (see
+        // openEditModal), so make sure they are visible again here.
+        document.getElementById('name-group')?.classList.remove('hidden');
+        document.getElementById('email-group')?.classList.remove('hidden');
         document.getElementById('status-group')?.classList.add('hidden');
         document.getElementById('pw-bar').style.width = '0';
         document.getElementById('pw-hint').textContent = '';
@@ -276,8 +269,11 @@ document.addEventListener('DOMContentLoaded', () => {
         const isEditingSelf = id === currentUser?.id;
 
         document.getElementById('user-modal-title').textContent = isEditingSelf ? 'Edit My Account' : `Edit: ${u.name}`;
-        document.getElementById('field-name').value      = u.name;
-        document.getElementById('field-email').value     = u.email;
+        // Admins can no longer edit a person's name or email -- Edit only
+        // manages Role and Account Status. Each person changes their own
+        // name/email from Edit Profile instead.
+        document.getElementById('name-group')?.classList.add('hidden');
+        document.getElementById('email-group')?.classList.add('hidden');
         document.getElementById('field-role').value      = u.role;
         document.getElementById('field-is_active').value = String(u.is_active);
 
@@ -319,8 +315,8 @@ document.addEventListener('DOMContentLoaded', () => {
         const is_active= document.getElementById('field-is_active')?.value;
 
         // Validation
-        if (!name)  { Toast.show('Name is required.', 'error'); return; }
-        if (!email) { Toast.show('Email is required.', 'error'); return; }
+        if (!editingId && !name)  { Toast.show('Name is required.', 'error'); return; }
+        if (!editingId && !email) { Toast.show('Email is required.', 'error'); return; }
         if (!role)  { Toast.show('Role is required.', 'error'); return; }
         if (!editingId && !password) { Toast.show('Password is required for new users.', 'error'); return; }
         if (password && password.length < 8) { Toast.show('Password must be at least 8 characters.', 'error'); return; }
@@ -360,21 +356,16 @@ document.addEventListener('DOMContentLoaded', () => {
         // ordinary profile edits (name/role/status) and Email Change stay
         // exactly as they were. ──
 
-        // Email changes on an EXISTING account go through the dedicated
-        // OTP-verified flow below (startEmailChangeOtp) instead of being
-        // applied directly here -- the backend ignores the email field on
-        // this same PUT entirely (see authController.js's updateUser), so
-        // name/role/status/password below still save normally either way.
-        const originalUser = allUsers.find(x => x.id === editingId);
-        const emailChanged = !!(originalUser && email.toLowerCase() !== originalUser.email.toLowerCase());
+        // Edit only sends Role and Account Status -- name, email and
+        // password are not editable by an admin (see authController.js's
+        // updateUser).
 
         submitBtn.disabled    = true;
         submitBtn.textContent = 'Saving…';
 
         let result;
         try {
-            const body = { name, email, role, is_active: parseInt(is_active) };
-            if (password) body.password = password;
+            const body = { role, is_active: parseInt(is_active) };
             result = await API.put(`/auth/users/${editingId}`, body);
         } finally {
             submitBtn.disabled    = false;
@@ -382,18 +373,9 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         if (result?.success) {
-            if (emailChanged) {
-                // Other fields are already saved at this point -- only the
-                // email is still pending, gated behind a code sent to the
-                // OWNER PERFORMING THE CHANGE (see startEmailChangeOtp).
-                Modal.close('user-modal');
-                Toast.show('Other changes saved. Verify the email change to finish.', 'info');
-                startEmailChangeOtp(editingId, originalUser.name, email);
-            } else {
-                Toast.show(result.message, 'success');
-                Modal.close('user-modal');
-                loadUsers();
-            }
+            Toast.show(result.message, 'success');
+            Modal.close('user-modal');
+            loadUsers();
         } else {
             Toast.show(result?.message || 'Save failed.', 'error');
         }

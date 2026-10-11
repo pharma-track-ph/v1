@@ -392,6 +392,10 @@ document.addEventListener('DOMContentLoaded', () => {
             if (el) el.value = p[f] ?? '';
         });
 
+        // Tax Exempt checkbox (not a text field, so it isn't in the list above)
+        const taxExemptEl = document.getElementById('field-is_tax_exempt');
+        if (taxExemptEl) taxExemptEl.checked = Number(p.is_tax_exempt) === 1;
+
         document.getElementById('field-first-item-row')?.classList.add('hidden');
         document.getElementById('edit-only-item-section')?.classList.remove('hidden');
         document.getElementById('field-barcode-preview')?.classList.remove('hidden');
@@ -696,6 +700,8 @@ document.addEventListener('DOMContentLoaded', () => {
             body.expiry_date    = document.getElementById('field-expiry_date')?.value              || '';
         }
 
+        body.is_tax_exempt = document.getElementById('field-is_tax_exempt')?.checked ? 1 : 0;
+
         ['generic_name', 'supplier', 'description'].forEach(k => {
             if (body[k] === '') body[k] = null;
         });
@@ -704,13 +710,15 @@ document.addEventListener('DOMContentLoaded', () => {
             ? `Brand Name: ${body.name}${body.generic_name ? ' (' + body.generic_name + ')' : ''}\n` +
               `Category: ${body.category}\n` +
               `Price: ${Fmt.currency(body.price)}   Cost: ${Fmt.currency(body.cost)}\n` +
-              `Low-stock alert at: ${body.low_stock_threshold}\n\n` +
+              `Low-stock alert at: ${body.low_stock_threshold}\n` +
+              `Tax Exempt: ${body.is_tax_exempt ? 'Yes (no VAT)' : 'No'}\n\n` +
               `This updates ALL ${currentItems.length} Item No. entr${currentItems.length === 1 ? 'y' : 'ies'} under this product ` +
               `with these shared details. Stock/expiry per item is managed separately below.`
             : `Brand Name: ${body.name}${body.generic_name ? ' (' + body.generic_name + ')' : ''}\n` +
               `Category: ${body.category}\n` +
               `Price: ${Fmt.currency(body.price)}   Cost: ${Fmt.currency(body.cost)}\n` +
               `Stock: ${body.stock_quantity} units   Low-stock alert at: ${body.low_stock_threshold}\n` +
+              `Tax Exempt: ${body.is_tax_exempt ? 'Yes (no VAT)' : 'No'}\n` +
               `Expiry: ${Fmt.date(body.expiry_date)}`;
 
         const confirmed = await ConfirmDialog.show({

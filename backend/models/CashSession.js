@@ -116,7 +116,7 @@ const CashSession = {
      * first, with human-readable names for the cashier and both approvers
      * (opening and closing) instead of raw user IDs.
      */
-    findAllForReport: async ({ startDate, endDate, limit = 500, offset = 0 } = {}) => {
+    findAllForReport: async ({ startDate, endDate, cashierId = null, limit = 500, offset = 0 } = {}) => {
         let sql = `
             SELECT cs.*,
                    cashier.name  AS cashier_name,
@@ -132,6 +132,9 @@ const CashSession = {
 
         if (startDate) { sql += ' AND DATE(cs.opened_at) >= ?'; params.push(startDate); }
         if (endDate)   { sql += ' AND DATE(cs.opened_at) <= ?'; params.push(endDate);   }
+        // Narrow to ONE person's register sessions (a Pharmacy Assistant's own,
+        // or the User filter an Admin/Owner picked)
+        if (cashierId) { sql += ' AND cs.cashier_id = ?';       params.push(cashierId); }
 
         sql += ' ORDER BY cs.opened_at DESC LIMIT ? OFFSET ?';
         params.push(parseInt(limit), parseInt(offset));

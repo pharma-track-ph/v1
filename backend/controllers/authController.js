@@ -122,7 +122,9 @@ const createUser = async (req, res, next) => {
 /**
  * PUT /api/auth/users/:id  [Admin+]
  *
- * Self-edit: allowed for Name/Email/Password, but NOT Role or Active-status
+ * Manages Role and Active-status ONLY -- name, email and password are not
+ * editable through this endpoint. Self-edit: you cannot change your own Role
+ * or Active-status
  * -- letting someone change their own role or deactivate their own account
  * risks locking themselves out with no one else able to undo it in the
  * moment. This mirrors the frontend's users.js, which disables those two
@@ -134,7 +136,21 @@ const createUser = async (req, res, next) => {
 const updateUser = async (req, res, next) => {
     try {
         const { id } = req.params;
-        const { name, role, is_active, password } = req.body;
+        const { role, is_active } = req.body;
+
+        // Name, email and password are NOT editable through this endpoint any
+        // more: an admin only manages Role and Account Status here. Passwords
+        // change only through the OTP-verified flows, and each person changes
+        // their own email from Edit Profile. Anything else sent in the body
+        // is ignored.
+        const VALID_ROLES = ['super_admin', 'admin', 'cashier'];
+        if (!VALID_ROLES.includes(role)) {
+            return res.status(400).json({ success: false, message: 'A valid role is required.' });
+        }
+        const activeFlag = parseInt(is_active);
+        if (activeFlag !== 0 && activeFlag !== 1) {
+            return res.status(400).json({ success: false, message: 'Account status must be Active or Inactive.' });
+        }
         const isSelf = parseInt(id) === req.user.id;
 
         // Always fetched -- needed below regardless of isSelf, since email
@@ -170,18 +186,30 @@ const updateUser = async (req, res, next) => {
         // to the PERSON MAKING THE CHANGE before it takes effect. Even if a
         // client sends a different email in this request body, the target's
         // existing email is kept untouched here.
-        const affected = await User.update(id, { name, email: target.email, role, is_active });
+        const roleChanged   = role !== target.role;
+        const statusChanged = activeFlag !== (target.is_active ? 1 : 0);
+
+        if (!roleChanged && !statusChanged) {
+            return res.json({ success: true, message: 'No changes to save.' });
+        }
+
+        // name and email are passed through unchanged from the existing record
+        const affected = await User.update(id, { name: target.name, email: target.email, role, is_active: activeFlag });
 
         if (!affected) {
             return res.status(404).json({ success: false, message: 'User not found.' });
         }
 
-        // Optional password change in the same request
-        if (password && password.length >= 8) {
-            await User.updatePassword(id, password);
+        // One audit entry per thing that actually changed, with before/after
+        if (roleChanged) {
+            await logAudit(req.user.id, 'CHANGE_USER_ROLE', 'users', id,
+                { user: target.name, from_role: target.role, to_role: role }, req.ip);
+        }
+        if (statusChanged) {
+            await logAudit(req.user.id, 'CHANGE_USER_STATUS', 'users', id,
+                { user: target.name, from_status: target.is_active ? 'active' : 'inactive', to_status: activeFlag ? 'active' : 'inactive' }, req.ip);
         }
 
-        await logAudit(req.user.id, 'UPDATE_USER', 'users', id, { name, role, is_active }, req.ip);
         res.json({ success: true, message: 'User updated.' });
 
     } catch (err) { next(err); }
@@ -514,7 +542,7 @@ const confirmActionOtp = async (req, res, next) => {
         }
 
         const pending = ActionOtpStore.get(req.user.id);
-        if (!pending) {
+        if (!pending || !['create_user', 'update_password', 'delete_user'].includes(pending.action)) {
             return res.status(400).json({ success: false, message: 'No pending action found. Please start again.' });
         }
 
@@ -714,7 +742,7 @@ const getAuditLogs = async (req, res, next) => {
 };
 
 const AUDIT_COLUMNS = [
-    { label: 'Date/Time',  excelWidth: 20, pdfWidth: 95  },
+    { label: 'Date/Time',  excelWidth: 26, pdfWidth: 108 },
     { label: 'User',        excelWidth: 18, pdfWidth: 85  },
     { label: 'Role',        excelWidth: 10, pdfWidth: 50  },
     { label: 'Action',      excelWidth: 16, pdfWidth: 80  },
@@ -1099,10 +1127,137 @@ const confirmChangePasswordOtp = async (req, res, next) => {
     } catch (err) { next(err); }
 };
 
+// -- Self-service email change (any authenticated role) --
+// Each person changes THEIR OWN email from Edit Profile. The 6-digit code is
+// emailed to their CURRENT address (not the new one), and nothing is written
+// to the database until it is confirmed. Reuses the in-memory ActionOtpStore
+// (one pending item per person, tagged 'self_change_email' so it can't be
+// confirmed through any other endpoint). users.email is UNIQUE across ALL
+// accounts including deactivated ones, so availability is checked without
+// the is_active filter.
+const EMAIL_FORMAT = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+/**
+ * POST /api/auth/change-email-otp/request  [Any authenticated role]
+ * Body: { newEmail }
+ */
+const requestChangeEmailOtp = async (req, res, next) => {
+    try {
+        const { newEmail } = req.body;
+        if (!newEmail || typeof newEmail !== 'string') {
+            return res.status(400).json({ success: false, message: 'New email is required.' });
+        }
+
+        const normalizedEmail = newEmail.toLowerCase().trim();
+        if (!EMAIL_FORMAT.test(normalizedEmail) || normalizedEmail.length > 150) {
+            return res.status(400).json({ success: false, message: 'Enter a valid email address.' });
+        }
+
+        const requester = await User.findById(req.user.id);
+        if (!requester) return res.status(404).json({ success: false, message: 'User not found.' });
+
+        if (normalizedEmail === requester.email.toLowerCase()) {
+            return res.status(400).json({ success: false, message: 'That is already your email address.' });
+        }
+
+        const existing = await User.findByEmailIncludingInactive(normalizedEmail);
+        if (existing && parseInt(existing.id) !== req.user.id) {
+            return res.status(409).json({ success: false, message: 'That email is already used by another account.' });
+        }
+
+        const otp       = String(crypto.randomInt(100000, 1000000));
+        const otpHash   = await bcrypt.hash(otp, 10);
+        const expiresAt = new Date(Date.now() + OTP_EXPIRY_MINUTES * 60 * 1000);
+
+        ActionOtpStore.set(req.user.id, {
+            otpHash, expiresAt, action: 'self_change_email', payload: { newEmail: normalizedEmail }
+        });
+
+        try {
+            await sendActionOtp(requester.email, otp, requester.name, 'change your own account email');
+        } catch (mailErr) {
+            console.error('[requestChangeEmailOtp] Failed to send OTP email:', mailErr?.text || mailErr?.message || mailErr);
+            ActionOtpStore.clear(req.user.id);
+            return res.status(500).json({ success: false, message: 'Could not send the verification email. Please try again later.' });
+        }
+
+        res.json({ success: true, message: `A verification code has been sent to ${requester.email}.` });
+
+    } catch (err) { next(err); }
+};
+
+/**
+ * POST /api/auth/change-email-otp/confirm  [Any authenticated role]
+ * Body: { otp }
+ */
+const confirmChangeEmailOtp = async (req, res, next) => {
+    try {
+        const { otp } = req.body;
+        if (!otp) {
+            return res.status(400).json({ success: false, message: 'Verification code is required.' });
+        }
+
+        const pending = ActionOtpStore.get(req.user.id);
+        if (!pending || pending.action !== 'self_change_email') {
+            return res.status(400).json({ success: false, message: 'No pending email change found. Please start again.' });
+        }
+
+        if (new Date(pending.expiresAt) < new Date()) {
+            ActionOtpStore.clear(req.user.id);
+            return res.status(400).json({ success: false, message: 'This code has expired. Please request a new one.' });
+        }
+
+        if (pending.attempts >= MAX_OTP_ATTEMPTS) {
+            ActionOtpStore.clear(req.user.id);
+            return res.status(429).json({ success: false, message: 'Too many incorrect attempts. Please request a new code.' });
+        }
+
+        const matches = await bcrypt.compare(otp, pending.otpHash);
+        if (!matches) {
+            ActionOtpStore.incrementAttempts(req.user.id);
+            const remaining = MAX_OTP_ATTEMPTS - (pending.attempts + 1);
+            return res.status(400).json({
+                success: false,
+                message: remaining > 0 ? `Incorrect code. ${remaining} attempt(s) left.` : 'Too many incorrect attempts. Please request a new code.'
+            });
+        }
+
+        const newEmail = pending.payload.newEmail;
+
+        // Re-check at confirm time -- someone else may have claimed this
+        // address while the code was pending.
+        const existing = await User.findByEmailIncludingInactive(newEmail);
+        if (existing && parseInt(existing.id) !== req.user.id) {
+            ActionOtpStore.clear(req.user.id);
+            return res.status(409).json({ success: false, message: 'That email was taken by another account while this code was pending. Please start again.' });
+        }
+
+        const current  = await User.findById(req.user.id);
+        const oldEmail = current?.email || null;
+
+        try {
+            await User.updateEmail(req.user.id, newEmail);
+        } catch (dbErr) {
+            if (dbErr.code === 'ER_DUP_ENTRY') {
+                ActionOtpStore.clear(req.user.id);
+                return res.status(409).json({ success: false, message: 'That email is already used by another account.' });
+            }
+            throw dbErr;
+        }
+
+        ActionOtpStore.clear(req.user.id);
+        await logAudit(req.user.id, 'CHANGE_OWN_EMAIL', 'users', req.user.id, { old_email: oldEmail, new_email: newEmail }, req.ip);
+
+        res.json({ success: true, message: 'Email updated successfully.', email: newEmail });
+
+    } catch (err) { next(err); }
+};
+
 module.exports = {
     login, getMe, getAllUsers, createUser, updateUser, deleteUser, getAuditLogs, exportAuditLogs,
     forgotPassword, verifyOtp, resetPassword, updateProfile,
     requestEmailChangeOtp, confirmEmailChangeOtp,
     requestActionOtp, confirmActionOtp,
-    requestChangePasswordOtp, confirmChangePasswordOtp
+    requestChangePasswordOtp, confirmChangePasswordOtp,
+    requestChangeEmailOtp, confirmChangeEmailOtp
 };

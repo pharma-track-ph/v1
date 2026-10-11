@@ -191,6 +191,8 @@ class OfflineSync {
                 endpoint:  item.endpoint,
                 method:    item.method,
                 body:      item.body,
+                meta:      item.meta || null,
+                retries:   item.retries || 0,
                 reason,
                 timestamp: Date.now()
             });
@@ -200,91 +202,146 @@ class OfflineSync {
         });
     }
 
-    async processSyncQueue() {
-        if (!this.isOnline || !this.db) return;
+    /**
+     * Sends ONE queued item and reports what happened. Outcomes:
+     *   synced -- the server accepted it (or answered "already recorded");
+     *             it is removed from the queue.
+     *   failed -- the server refused it (or it kept erroring); it is moved to
+     *             failed_syncs with the reason.
+     *   retry  -- could not be completed this time; it stays queued.
+     *   auth   -- the login expired. The item is KEPT (it was not refused,
+     *             just unsigned) and syncing resumes after signing in again.
+     */
+    async syncItem(item) {
+        try {
+            const queuedHeaders = { ...(item.headers || {}) };
+            delete queuedHeaders.Authorization;
+            delete queuedHeaders.authorization;
 
-        const queue = await this.getAll('sync_queue');
-        if (!queue.length) return;
+            const response = await fetch(getRequestUrl(item.endpoint), {
+                method: item.method,
+                headers: buildAuthHeaders({
+                    'Content-Type': 'application/json',
+                    ...queuedHeaders
+                }),
+                body: item.body ? JSON.stringify(item.body) : undefined
+            });
 
-        let syncedCount = 0;
-        let failedCount = 0;
-
-        for (const item of queue) {
-            try {
-                const queuedHeaders = { ...(item.headers || {}) };
-                delete queuedHeaders.Authorization;
-                delete queuedHeaders.authorization;
-
-                const response = await fetch(getRequestUrl(item.endpoint), {
-                    method: item.method,
-                    headers: buildAuthHeaders({
-                        'Content-Type': 'application/json',
-                        ...queuedHeaders
-                    }),
-                    body: item.body ? JSON.stringify(item.body) : undefined
-                });
-
-                if (response.ok) {
-                    await this.deleteFromQueue(item.id);
-                    syncedCount++;
-                    continue;
-                }
-
-                if (response.status === 401) {
-                    await this.deleteFromQueue(item.id);
-                    handleAuthFailure();
-                    return;
-                }
-
-                if (response.status >= 400 && response.status < 500) {
-                    const data = await parseJsonSafely(response);
-                    await this.recordFailedSync(item, data?.message || `Server rejected this (HTTP ${response.status}).`);
-                    await this.deleteFromQueue(item.id);
-                    failedCount++;
-                    console.warn('Discarding sync item after client error:', item, response.status);
-                    continue;
-                }
-
-                item.retries++;
-                if (item.retries < 3) {
-                    await this.put('sync_queue', item);
-                } else {
-                    await this.recordFailedSync(item, 'Server kept returning errors after 3 attempts.');
-                    await this.deleteFromQueue(item.id);
-                    failedCount++;
-                    console.warn('Sync item failed after 3 retries:', item);
-                }
-            } catch (error) {
-                console.warn('Sync failed:', error);
-                item.retries++;
-                if (item.retries < 3) {
-                    await this.put('sync_queue', item);
-                } else {
-                    await this.recordFailedSync(item, 'Could not reach the server after 3 attempts.');
-                    await this.deleteFromQueue(item.id);
-                    failedCount++;
-                }
+            if (response.ok) {
+                const data = await parseJsonSafely(response);
+                await this.deleteFromQueue(item.id);
+                return {
+                    status:      'synced',
+                    orderNumber: data?.order_number || data?.receipt?.order_number || null,
+                    duplicate:   !!data?.duplicate
+                };
             }
+
+            if (response.status === 401) {
+                handleAuthFailure();
+                return { status: 'auth', message: 'Your login expired. Sign in again to continue syncing.' };
+            }
+
+            if (response.status >= 400 && response.status < 500) {
+                const data   = await parseJsonSafely(response);
+                const reason = data?.message || `Server rejected this (HTTP ${response.status}).`;
+                await this.recordFailedSync(item, reason);
+                await this.deleteFromQueue(item.id);
+                console.warn('Sync item refused by the server:', item, response.status);
+                return { status: 'failed', message: reason };
+            }
+
+            return await this.noteRetry(item,
+                'Server kept returning errors after 3 attempts.',
+                `Server error (HTTP ${response.status}). Will retry.`);
+        } catch (error) {
+            console.warn('Sync failed:', error);
+            return await this.noteRetry(item,
+                'Could not reach the server after 3 attempts.',
+                'Could not reach the server. Will retry.');
         }
+    }
+
+    // Counts a failed attempt; after 3 the item is given up on and moved to
+    // failed_syncs (where it can be retried or dismissed by hand).
+    async noteRetry(item, finalReason, softMessage) {
+        item.retries   = (item.retries || 0) + 1;
+        item.lastError = softMessage;
+        if (item.retries < 3) {
+            await this.put('sync_queue', item);
+            return { status: 'retry', message: softMessage };
+        }
+        await this.recordFailedSync(item, finalReason);
+        await this.deleteFromQueue(item.id);
+        return { status: 'failed', message: finalReason };
+    }
+
+    /**
+     * One sync pass -- the automatic one (when the connection returns), "Sync
+     * all", and the per-sale Sync button all come through here. `onlyIds`
+     * limits it to specific queue items. Only ONE pass runs at a time: a
+     * second request while one is running is refused as "busy" rather than
+     * sending the same sale twice (the server's duplicate guard is the second
+     * line of defence behind this lock).
+     * Returns { results, skipped? } with one result per item attempted.
+     */
+    async runSync(onlyIds = null) {
+        if (!this.isOnline || !this.db) return { results: [], skipped: 'offline' };
+        if (this.syncRunning)           return { results: [], skipped: 'busy' };
+
+        this.syncRunning = true;
+        const results = [];
+
+        try {
+            const queue = (await this.getAll('sync_queue'))
+                .filter(item => !onlyIds || onlyIds.includes(item.id))
+                .sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));   // oldest first
+
+            for (const item of queue) {
+                const outcome = await this.syncItem(item);
+                results.push({
+                    id:       item.id,
+                    endpoint: item.endpoint,
+                    ref:      item.body?.client_ref || null,
+                    ...outcome
+                });
+                if (outcome.status === 'auth') break;   // everything after it would fail the same way
+            }
+        } finally {
+            this.syncRunning = false;
+        }
+
+        const syncedCount = results.filter(r => r.status === 'synced').length;
+        const failedCount = results.filter(r => r.status === 'failed').length;
 
         if (syncedCount > 0) {
             Toast.show(`${syncedCount} offline change${syncedCount === 1 ? '' : 's'} synced successfully!`, 'success');
         }
         if (failedCount > 0) {
             Toast.show(
-                `${failedCount} offline change${failedCount === 1 ? '' : 's'} could not sync. Check "Offline Sync Issues" on the POS page.`,
+                `${failedCount} offline change${failedCount === 1 ? '' : 's'} could not sync. Open the POS page to review them.`,
                 'error'
             );
         }
 
-        // Lets any page listening (see pos.js's FailedSyncPanel) refresh
-        // itself right after a sync pass -- both to show/hide the failed-
-        // sync banner, and to re-pull the server's now-authoritative stock/
-        // session numbers instead of the offline cache's approximation.
-        window.dispatchEvent(new CustomEvent('pharmatrack:sync-complete', {
-            detail: { syncedCount, failedCount }
-        }));
+        // Lets any page listening (pos.js's Pending list and FailedSyncPanel)
+        // refresh itself right after a pass -- both to update what's shown and
+        // to re-pull the server's now-authoritative stock/session numbers
+        // instead of the offline cache's approximation.
+        if (results.length) {
+            window.dispatchEvent(new CustomEvent('pharmatrack:sync-complete', {
+                detail: { syncedCount, failedCount, results }
+            }));
+        }
+
+        return { results };
     }
+
+    // The automatic pass (online event) and "Sync all"
+    processSyncQueue()  { return this.runSync(); }
+
+    // Sync a single queued sale
+    syncOne(queueId)    { return this.runSync([queueId]); }
 
     async deleteFromQueue(id) {
         return this.delete('sync_queue', id);
@@ -415,6 +472,32 @@ const OfflineAPI = {
         }
     },
 
+    // POS list refresh. The /pos/products response is the full list of brands
+    // that are sellable RIGHT NOW (stock left, not expired), so after caching
+    // it, any POS entry cached earlier that is no longer in the response is
+    // removed -- otherwise a brand that sold out (and so disappeared online)
+    // would keep showing in offline mode. Only done for the unfiltered list,
+    // never for a search or barcode result, which is just a slice of it.
+    // Entries are tagged _pos so Inventory's own cached rows are never touched.
+    async cachePosProducts(products = [], endpoint = '') {
+        const url        = new URL(endpoint, window.location.origin);
+        const isFullList = !(url.searchParams.get('q') || url.searchParams.get('barcode'));
+        const freshIds   = new Set(products.map(p => p.id));
+
+        for (const product of products) {
+            await offlineSync.put('products', normalizeCachedProduct({ ...product, _pos: true }));
+        }
+
+        if (isFullList) {
+            const cached = await offlineSync.getAll('products');
+            for (const item of cached) {
+                if (item._pos === true && !freshIds.has(item.id)) {
+                    await offlineSync.delete('products', item.id);
+                }
+            }
+        }
+    },
+
     async getCachedProducts(endpoint) {
         const cached = (await offlineSync.getAll('products'))
             .map(normalizeCachedProduct)
@@ -427,6 +510,11 @@ const OfflineAPI = {
         const status = normalizeStatusFilter(url.searchParams.get('status') || '');
 
         let filtered = cached;
+
+        // The POS only offers brands with stock left (see Product.findAllForPOS)
+        if (isPosProductsEndpoint(endpoint)) {
+            filtered = filtered.filter(product => Number(product.stock_quantity) > 0);
+        }
 
         if (search) {
             const lowerSearch = search.toLowerCase();
@@ -523,6 +611,98 @@ const OfflineAPI = {
         }
     },
 
+    // -- Pending offline sales (the "Pending" list on the POS page) --
+
+    // A random reference for one sale. The server saves it (orders.client_ref,
+    // UNIQUE) so the same sale can never be recorded twice, however many times
+    // it is re-sent.
+    newSaleRef() {
+        if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+            return crypto.randomUUID();
+        }
+        return 's' + Date.now().toString(36) + Math.random().toString(36).slice(2, 12);
+    },
+
+    // Every checkout that has not reached the server yet (queued) or that the
+    // server refused (failed), oldest sale first, shaped for the list.
+    async getPendingCheckouts() {
+        const queued = (await offlineSync.getAll('sync_queue')).filter(i => isCheckoutEndpoint(i.endpoint));
+        const failed = (await offlineSync.getAll('failed_syncs')).filter(i => isCheckoutEndpoint(i.endpoint));
+
+        const shape = (item, source) => ({
+            id:          item.id,
+            source,                                    // 'queue' | 'failed'
+            ref:         item.body?.client_ref || null,
+            createdAt:   item.body?.client_created_at || new Date(item.timestamp || Date.now()).toISOString(),
+            items:       item.meta?.items
+                         || (item.body?.items || []).map(i => ({ name: `Product #${i.product_id}`, quantity: i.quantity })),
+            total:       item.meta?.total ?? null,
+            cashierId:   item.meta?.cashier_id ?? null,
+            cashierName: item.meta?.cashier_name ?? null,
+            status:      source === 'failed' ? 'failed' : 'pending',
+            reason:      source === 'failed' ? item.reason : (item.lastError || null),
+            retries:     item.retries || 0
+        });
+
+        return [...queued.map(i => shape(i, 'queue')), ...failed.map(i => shape(i, 'failed'))]
+            .sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
+    },
+
+    async getPendingCheckoutCount() {
+        const list = await this.getPendingCheckouts();
+        return { total: list.length, failed: list.filter(i => i.status === 'failed').length };
+    },
+
+    // Puts a refused checkout back in the queue (same reference, same payload)
+    // so it can be tried again; returns its new queue id.
+    async retryFailedCheckout(failedId) {
+        const record = await offlineSync.get('failed_syncs', failedId);
+        if (!record) return null;
+        const newId = await offlineSync.addToSyncQueue({
+            endpoint: record.endpoint,
+            method:   record.method || 'POST',
+            headers:  buildAuthHeaders(),
+            body:     record.body,
+            meta:     record.meta || null
+        });
+        await offlineSync.delete('failed_syncs', failedId);
+        return newId;
+    },
+
+    // Older queued checkouts (from before this update) have no reference yet.
+    // Give each one now so even those are protected against double-sending,
+    // and keep the time they were originally queued as the sale time.
+    async ensureCheckoutRefs() {
+        const queue = await offlineSync.getAll('sync_queue');
+        for (const item of queue) {
+            if (isCheckoutEndpoint(item.endpoint) && item.body && !item.body.client_ref) {
+                item.body = {
+                    ...item.body,
+                    client_ref:         this.newSaleRef(),
+                    client_created_at:  item.body.client_created_at || new Date(item.timestamp || Date.now()).toISOString()
+                };
+                await offlineSync.put('sync_queue', item);
+            }
+        }
+    },
+
+    // Removes any void request left in the browser's storage (queued or failed).
+    // Those carry a manager's password and are no longer allowed to be stored.
+    // Returns how many were removed.
+    async purgeStoredVoidRequests() {
+        let removed = 0;
+        for (const store of ['sync_queue', 'failed_syncs']) {
+            const all = await offlineSync.getAll(store);
+            for (const item of all) {
+                if (item.endpoint === '/pos/void' || item.endpoint === '/pos/partial-void') {
+                    await offlineSync.delete(store, item.id);
+                    removed++;
+                }
+            }
+        }
+        return removed;
+    },
+
     async getFailedSyncs() {
         const all = await offlineSync.getAll('failed_syncs');
         return all.sort((a, b) => b.timestamp - a.timestamp);
@@ -567,7 +747,9 @@ const OfflineAPI = {
                     throw new Error(data?.message || `HTTP ${response.status}`);
                 }
 
-                if (isInventoryListEndpoint(endpoint) || isPosProductsEndpoint(endpoint)) {
+                if (isPosProductsEndpoint(endpoint)) {
+                    await this.cachePosProducts(data?.data || [], endpoint);
+                } else if (isInventoryListEndpoint(endpoint)) {
                     await this.cacheProducts(data?.data || []);
                 }
 
@@ -603,7 +785,7 @@ const OfflineAPI = {
         throw new Error('Offline and no cache available');
     },
 
-    async post(endpoint, body) {
+    async post(endpoint, body, meta = null) {
         if (offlineSync.isOnline) {
             const controller = new AbortController();
             const timeoutId = setTimeout(() => controller.abort(), 10000);
@@ -652,11 +834,34 @@ const OfflineAPI = {
             }
         }
 
+        // Voids (full or partial) are NEVER queued. The request carries a manager's
+        // email and password, which must not sit in the browser's storage waiting
+        // to be sent, and a void needs the live server to check the order anyway.
+        if (endpoint === '/pos/void' || endpoint === '/pos/partial-void') {
+            return {
+                success: false,
+                offline: true,
+                message: 'Voids need an internet connection. Please reconnect and try again.'
+            };
+        }
+
+        // A queued checkout carries (a) the reference that makes re-sending it
+        // safe and (b) the time the sale was actually made, which the server
+        // keeps if it falls inside the open register session. `meta` is for
+        // display only (the Pending list) and is never sent to the server.
+        let queuedBody = body;
+        if (isCheckoutEndpoint(endpoint)) {
+            queuedBody = { ...body };
+            if (!queuedBody.client_ref) queuedBody.client_ref = this.newSaleRef();
+            queuedBody.client_created_at = meta?.created_at || new Date().toISOString();
+        }
+
         await offlineSync.addToSyncQueue({
             endpoint,
             method: 'POST',
             headers: buildAuthHeaders(),
-            body
+            body: queuedBody,
+            meta
         });
 
         if (endpoint === '/inventory') {

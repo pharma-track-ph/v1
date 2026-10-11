@@ -5,7 +5,8 @@ const {
     forgotPassword, verifyOtp, resetPassword, updateProfile,
     requestEmailChangeOtp, confirmEmailChangeOtp,
     requestActionOtp, confirmActionOtp,
-    requestChangePasswordOtp, confirmChangePasswordOtp
+    requestChangePasswordOtp, confirmChangePasswordOtp,
+    requestChangeEmailOtp, confirmChangeEmailOtp
 } = require('../controllers/authController');
 const { verifyToken, requireRole } = require('../middleware/authMiddleware');
 
@@ -22,6 +23,12 @@ router.put('/profile', verifyToken, updateProfile);
 // THOSE act on other people's accounts.
 router.post('/change-password-otp/request', verifyToken, requestChangePasswordOtp);
 router.post('/change-password-otp/confirm', verifyToken, confirmChangePasswordOtp);
+
+// Self-service email change (OTP) -- any logged-in role, since this only
+// ever touches the requester's OWN account. The code goes to their CURRENT
+// email; nothing is written until it is confirmed.
+router.post('/change-email-otp/request', verifyToken, requestChangeEmailOtp);
+router.post('/change-email-otp/confirm', verifyToken, confirmChangeEmailOtp);
 
 // Forgot Password (OTP via email) -- public, no login required. These
 // share the same authLimiter as /login (applied once in server.js on the

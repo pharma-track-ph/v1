@@ -146,7 +146,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         const todayLogs    = allLogs.filter(l => l.created_at?.startsWith(today));
         const loginCount   = todayLogs.filter(l => l.action?.includes('LOGIN')).length;
-        const editCount    = todayLogs.filter(l => l.action?.includes('UPDATE') || l.action?.includes('CREATE')).length;
+        const editCount    = todayLogs.filter(l => l.action?.includes('UPDATE') || l.action?.includes('CREATE') || l.action?.includes('CHANGE')).length;
         const deleteCount  = todayLogs.filter(l => l.action?.includes('DELETE')).length;
 
         const statTotal   = document.getElementById('stat-total');
@@ -284,7 +284,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         let cls = 'DEFAULT';
         if (action.includes('CREATE') || action.includes('IMPORT')) cls = 'CREATE';
-        else if (action.includes('UPDATE'))                          cls = 'UPDATE';
+        else if (action.includes('UPDATE') || action.includes('CHANGE'))                          cls = 'UPDATE';
         else if (action.includes('DELETE'))                          cls = 'DELETE';
         else if (action.includes('LOGIN'))                           cls = 'LOGIN';
         else if (action.includes('CHECKOUT'))                        cls = 'CHECKOUT';
@@ -342,8 +342,49 @@ document.addEventListener('DOMContentLoaded', () => {
                 ['Order #', escHtml(parsed.order_number || '—')],
                 ['Total', Fmt.currency(parsed.total)]
             ];
+            // A partial void records what was voided, the refund and the new receipt
+            if (parsed.partial) {
+                rows.push(['Type', 'Partial void']);
+                rows.push(['Voided', escHtml((parsed.voided_items || []).map(v => `${v.name} x${v.quantity}`).join(', ') || '—')]);
+                rows.push(['Refund', Fmt.currency(parsed.refund_amount)]);
+                rows.push(['New Receipt', escHtml(parsed.replacement_order_number || '—')]);
+            }
+            if (parsed.original_cashier) rows.push(['Rung Up By', escHtml(parsed.original_cashier)]);
+            if (parsed.approved_by)      rows.push(['Approved By', escHtml(parsed.approved_by)]);
             if (parsed.requested_by) rows.push(['Requested By (Pharmacy Assistant)', escHtml(parsed.requested_by)]);
             return detailGrid(rows);
+        }
+
+        // The replacement receipt issued by a partial void
+        if (action === 'PARTIAL_VOID_RECEIPT') {
+            return detailGrid([
+                ['Order #', escHtml(parsed.order_number || '—')],
+                ['Replaces', escHtml(parsed.replaces || '—')],
+                ['Total', Fmt.currency(parsed.total)],
+                ['Refund', Fmt.currency(parsed.refund_amount)]
+            ]);
+        }
+
+        if (action === 'CHANGE_USER_ROLE') {
+            return detailGrid([
+                ['User', escHtml(parsed.user || '—')],
+                ['Role', escHtml(roleLabel(parsed.from_role)) + ' &rarr; ' + escHtml(roleLabel(parsed.to_role))]
+            ]);
+        }
+
+        if (action === 'CHANGE_USER_STATUS') {
+            const statusLabel = s => s === 'active' ? 'Active' : s === 'inactive' ? 'Inactive' : (s || '—');
+            return detailGrid([
+                ['User', escHtml(parsed.user || '—')],
+                ['Status', escHtml(statusLabel(parsed.from_status)) + ' &rarr; ' + escHtml(statusLabel(parsed.to_status))]
+            ]);
+        }
+
+        if (action === 'CHANGE_OWN_EMAIL') {
+            return detailGrid([
+                ['Old Email', escHtml(parsed.old_email || '—')],
+                ['New Email', escHtml(parsed.new_email || '—')]
+            ]);
         }
 
         if (action === 'CHECKOUT') {

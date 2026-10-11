@@ -121,16 +121,16 @@ const Product = {
         const {
             batch_number, name, generic_name = null, category, supplier = null,
             description = null, barcode = null, price, cost, stock_quantity,
-            low_stock_threshold = 10, expiry_date
+            low_stock_threshold = 10, expiry_date, is_tax_exempt = 0
         } = data;
 
         const [result] = await db.query(
             `INSERT INTO products
              (batch_number, name, generic_name, category, supplier, description,
-              barcode, price, cost, stock_quantity, low_stock_threshold, expiry_date)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+              barcode, price, cost, stock_quantity, low_stock_threshold, expiry_date, is_tax_exempt)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
             [batch_number, name, generic_name, category, supplier, description,
-             barcode, price, cost, stock_quantity, low_stock_threshold, expiry_date]
+             barcode, price, cost, stock_quantity, low_stock_threshold, expiry_date, is_tax_exempt ? 1 : 0]
         );
         return result.insertId;
     },
@@ -244,13 +244,18 @@ const Product = {
     // ── POS-specific fetch: only active, non-expired batches ──
     // Used by /api/pos/products so the POS never has to know about
     // expired stock at all — filtering happens once, here.
+    // Only batches that can actually be SOLD right now: active, NOT expired
+    // (a batch is not sellable on its expiry date itself, matching checkout),
+    // and with stock left. A brand whose batches are all sold out or expired
+    // therefore has no rows here and does not appear as a POS card at all.
     findAllForPOS: async (search = '') => {
         let sql = `
             SELECT *,
                    DATEDIFF(expiry_date, CURDATE()) AS days_until_expiry
             FROM products
             WHERE is_active = 1
-              AND expiry_date >= CURDATE()
+              AND expiry_date > CURDATE()
+              AND stock_quantity > 0
         `;
         const params = [];
         if (search) {
@@ -289,7 +294,7 @@ const Product = {
             `SELECT *,
                     DATEDIFF(expiry_date, CURDATE()) AS days_until_expiry
              FROM products
-             WHERE is_active = 1 AND expiry_date >= CURDATE() AND name = ?
+             WHERE is_active = 1 AND expiry_date > CURDATE() AND stock_quantity > 0 AND name = ?
              ORDER BY expiry_date ASC`,
             [name]
         );
@@ -504,6 +509,7 @@ const Product = {
             price:               first.price,
             cost:                first.cost,
             low_stock_threshold: threshold,
+            is_tax_exempt:       first.is_tax_exempt ? 1 : 0,
             description:         first.description,
             stock_quantity:      combinedStock,
             stock_status,
@@ -675,15 +681,22 @@ const Product = {
 
         const {
             name = oldName, generic_name = null, category, supplier = null,
-            description = null, barcode = currentBarcode, price, cost, low_stock_threshold = 10
+            description = null, barcode = currentBarcode, price, cost, low_stock_threshold = 10,
+            is_tax_exempt
         } = data;
+
+        // Tax Exempt applies to EVERY Item No. row of the brand, like the other
+        // shared fields. If the caller doesn't send it, keep what's stored now.
+        const taxExemptFlag = is_tax_exempt === undefined
+            ? (rows[0]?.is_tax_exempt ? 1 : 0)
+            : ((is_tax_exempt === true || is_tax_exempt === 1 || is_tax_exempt === '1') ? 1 : 0);
 
         const [result] = await db.query(
             `UPDATE products SET
                 name = ?, generic_name = ?, category = ?, supplier = ?,
-                description = ?, barcode = ?, price = ?, cost = ?, low_stock_threshold = ?
+                description = ?, barcode = ?, price = ?, cost = ?, low_stock_threshold = ?, is_tax_exempt = ?
              WHERE name = ? AND is_active = 1`,
-            [name, generic_name, category, supplier, description, barcode, price, cost, low_stock_threshold, oldName]
+            [name, generic_name, category, supplier, description, barcode, price, cost, low_stock_threshold, taxExemptFlag, oldName]
         );
         return result.affectedRows;
     },
@@ -727,6 +740,7 @@ const Product = {
             cost:                first.cost,
             stock_quantity,
             low_stock_threshold: first.low_stock_threshold,
+            is_tax_exempt:       first.is_tax_exempt ? 1 : 0,
             expiry_date
         });
     },

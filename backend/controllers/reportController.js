@@ -15,6 +15,42 @@ function buildPeriodLabel(start_date, end_date) {
     return start_date ? `From ${start_date}` : `Until ${end_date}`;
 }
 
+// -- Who a report is allowed to show ---------------------------------
+const isCashier = req => req.user.role === 'cashier';
+
+// The user id a report must be restricted to, or null for "everyone".
+// A Pharmacy Assistant (cashier) is ALWAYS restricted to themselves, taken
+// from their login token -- any user_id they put in the URL is ignored, so
+// this can't be bypassed from the browser. Admin and Owner may narrow a
+// report to one person with ?user_id=.
+function scopedUserId(req) {
+    if (isCashier(req)) return req.user.id;
+    const id = parseInt(req.query.user_id, 10);
+    return Number.isInteger(id) && id > 0 ? id : null;
+}
+
+// For export titles: the name of the person an Admin/Owner filtered by (null
+// when nothing was filtered, or for a Pharmacy Assistant's own report).
+async function filteredUserName(req, userId) {
+    if (!userId || isCashier(req)) return null;
+    const [rows] = await db.query('SELECT name FROM users WHERE id = ? LIMIT 1', [userId]);
+    return rows[0]?.name || null;
+}
+
+const withUser = (title, name) => name ? `${title} (${name})` : title;
+
+// Columns that reveal what the pharmacy pays for stock or earns. A Pharmacy
+// Assistant never receives them -- not in the data and not in exports.
+const COST_COLUMN_LABELS = ['Purchase Cost', 'Profit', 'Cost (₱)', 'Value Lost'];
+
+function withoutCostColumns(columns, rows) {
+    const keep = columns.map((c, i) => COST_COLUMN_LABELS.includes(c.label) ? -1 : i).filter(i => i >= 0);
+    return {
+        columns: keep.map(i => columns[i]),
+        rows:    rows.map(r => keep.map(i => r[i]))
+    };
+}
+
 /**
  * GET /api/reports/sales
  * Returns sales data filtered by date range, including items sold per order.
@@ -22,17 +58,22 @@ function buildPeriodLabel(start_date, end_date) {
 const getSalesReport = async (req, res, next) => {
     try {
         const { start_date, end_date, limit = 500, offset = 0 } = req.query;
+        const userId   = scopedUserId(req);
+        const hideCost = isCashier(req);
 
         // ── Main orders query ─────────────────────────────────
         let sql = `
             SELECT o.id, o.order_number, o.cashier_id, o.subtotal, o.discount,
+                   o.vatable_sales, o.vat_exempt_sales,
                    o.tax, o.total, o.payment_method, o.amount_tendered,
                    o.change_amount, o.status, o.notes, o.created_at,
                    u.name AS cashier_name,
+                   parent.order_number AS parent_order_number,
                    COALESCE(SUM(oi.unit_cost * oi.quantity), 0) AS purchase_cost,
-                   ((o.subtotal - o.discount) - COALESCE(SUM(oi.unit_cost * oi.quantity), 0)) AS profit
+                   ((o.total - o.tax) - COALESCE(SUM(oi.unit_cost * oi.quantity), 0)) AS profit
             FROM orders o
             JOIN users u ON u.id = o.cashier_id
+            LEFT JOIN orders parent ON parent.id = o.parent_order_id
             LEFT JOIN order_items oi ON oi.order_id = o.id
             WHERE o.status = 'completed'
         `;
@@ -40,10 +81,12 @@ const getSalesReport = async (req, res, next) => {
 
         if (start_date) { sql += ' AND DATE(o.created_at) >= ?'; params.push(start_date); }
         if (end_date)   { sql += ' AND DATE(o.created_at) <= ?'; params.push(end_date);   }
+        if (userId)     { sql += ' AND o.cashier_id = ?'; params.push(userId); }
 
         sql += ` GROUP BY o.id, o.order_number, o.cashier_id, o.subtotal, o.discount,
+                         o.vatable_sales, o.vat_exempt_sales,
                          o.tax, o.total, o.payment_method, o.amount_tendered,
-                         o.change_amount, o.status, o.notes, o.created_at, u.name
+                         o.change_amount, o.status, o.notes, o.created_at, u.name, parent.order_number
                  ORDER BY o.created_at DESC LIMIT ? OFFSET ?`;
         params.push(parseInt(limit), parseInt(offset));
 
@@ -53,7 +96,9 @@ const getSalesReport = async (req, res, next) => {
             return res.json({
                 success: true,
                 data: [],
-                summary: { total_sales: 0, total_cost: 0, total_profit: 0, total_discount: 0, transaction_count: 0 }
+                summary: hideCost
+                    ? { total_sales: 0, total_discount: 0, transaction_count: 0 }
+                    : { total_sales: 0, total_cost: 0, total_profit: 0, total_discount: 0, transaction_count: 0 }
             });
         }
 
@@ -61,7 +106,8 @@ const getSalesReport = async (req, res, next) => {
         const orderIds = orders.map(o => o.id);
         const placeholders = orderIds.map(() => '?').join(',');
         const [items] = await db.query(
-            `SELECT order_id, product_name, quantity, unit_price, subtotal
+            `SELECT order_id, product_name, quantity, unit_price, subtotal,
+                    is_tax_exempt, discount_amount
              FROM order_items
              WHERE order_id IN (${placeholders})
              ORDER BY order_id, id`,
@@ -90,6 +136,14 @@ const getSalesReport = async (req, res, next) => {
             transaction_count: acc.transaction_count + 1
         }), { total_sales: 0, total_cost: 0, total_profit: 0, total_discount: 0, transaction_count: 0 });
 
+        // A Pharmacy Assistant never receives purchase cost or profit -- they are
+        // removed here on the server, not just hidden on the page.
+        if (hideCost) {
+            ordersWithItems.forEach(o => { delete o.purchase_cost; delete o.profit; });
+            delete totals.total_cost;
+            delete totals.total_profit;
+        }
+
         res.json({ success: true, data: ordersWithItems, summary: totals });
 
     } catch (err) { next(err); }
@@ -97,7 +151,7 @@ const getSalesReport = async (req, res, next) => {
 
 const SALES_COLUMNS = [
     { label: 'Order #',            excelWidth: 20, pdfWidth: 100 },
-    { label: 'Date/Time',          excelWidth: 20, pdfWidth: 95  },
+    { label: 'Date/Time',          excelWidth: 26, pdfWidth: 108 },
     { label: 'Processed By',       excelWidth: 22, pdfWidth: 95  },
     { label: 'Subtotal',           excelWidth: 12, pdfWidth: 60  },
     { label: 'Purchase Cost',      excelWidth: 14, pdfWidth: 65  },
@@ -118,12 +172,13 @@ const SALES_COLUMNS = [
 const exportSalesReport = async (req, res, next) => {
     try {
         const { start_date, end_date } = req.query;
+        const userId = scopedUserId(req);
 
         let sql = `
             SELECT o.order_number, o.created_at, o.subtotal, o.discount, o.total,
                    o.payment_method, u.name AS cashier_name,
                    COALESCE(SUM(oi.unit_cost * oi.quantity), 0) AS purchase_cost,
-                   ((o.subtotal - o.discount) - COALESCE(SUM(oi.unit_cost * oi.quantity), 0)) AS profit
+                   ((o.total - o.tax) - COALESCE(SUM(oi.unit_cost * oi.quantity), 0)) AS profit
             FROM orders o
             JOIN users u ON u.id = o.cashier_id
             LEFT JOIN order_items oi ON oi.order_id = o.id
@@ -132,6 +187,7 @@ const exportSalesReport = async (req, res, next) => {
         const params = [];
         if (start_date) { sql += ' AND DATE(o.created_at) >= ?'; params.push(start_date); }
         if (end_date)   { sql += ' AND DATE(o.created_at) <= ?'; params.push(end_date);   }
+        if (userId)     { sql += ' AND o.cashier_id = ?'; params.push(userId); }
         sql += ` GROUP BY o.id, o.order_number, o.created_at, o.subtotal, o.discount,
                           o.total, o.payment_method, u.name
                  ORDER BY o.created_at DESC`;
@@ -145,23 +201,27 @@ const exportSalesReport = async (req, res, next) => {
             `₱${Number(o.profit).toFixed(2)}`
         ]);
 
+        const hideCost = isCashier(req);
+        const out = hideCost ? withoutCostColumns(SALES_COLUMNS, rows) : { columns: SALES_COLUMNS, rows };
+        const scopeName = await filteredUserName(req, userId);
+
         let totalsRow = null;
-        if (orders.length) {
+        if (orders.length && !hideCost) {
             const totalProfit = orders.reduce((s, o) => s + parseFloat(o.profit || 0), 0);
             // Label sits under Order # (leftmost column) rather than
             // buried mid-row, so it reads the same way a spreadsheet total
             // normally does -- the actual figure still sits under Profit,
             // the column it's summarizing.
-            totalsRow = ['TOTAL PROFIT', '', '', '', '', '', `₱${totalProfit.toFixed(2)}`];
+            totalsRow = ['TOTAL PROFIT', '', '', '', '', '', '', `₱${totalProfit.toFixed(2)}`];
         }
 
         await exportReport(req.params.format, {
             res,
-            title:       'Sales Report',
+            title:       withUser('Sales Report', scopeName),
             generatedBy: req.user.name,
             filename:    'PharmaTrack_Sales_Report',
-            columns:     SALES_COLUMNS,
-            rows,
+            columns:     out.columns,
+            rows:        out.rows,
             totalsRow,
             periodLabel: buildPeriodLabel(start_date, end_date)
         });
@@ -208,14 +268,15 @@ const getExpiredReport = async (req, res, next) => {
 
         const totalLoss = rows.reduce((s, r) => s + parseFloat(r.value_lost), 0);
 
-        res.json({
-            success: true,
-            data: rows,
-            summary: {
-                total_products: rows.length,
-                total_value_lost: totalLoss
-            }
-        });
+        // A Pharmacy Assistant never receives what the stock cost or the value
+        // lost -- those fields are removed from the data itself, not just hidden.
+        const hideCost = isCashier(req);
+        const data     = hideCost ? rows.map(({ cost, value_lost, ...rest }) => rest) : rows;
+        const summary  = hideCost
+            ? { total_products: rows.length }
+            : { total_products: rows.length, total_value_lost: totalLoss };
+
+        res.json({ success: true, data, summary });
     } catch (err) { next(err); }
 };
 
@@ -266,13 +327,17 @@ const exportExpiredReport = async (req, res, next) => {
         let periodLabel = buildPeriodLabel(start_date, end_date);
         if (!periodLabel && months && months !== 'all') periodLabel = `Last ${months} month(s)`;
 
+        const out = isCashier(req)
+            ? withoutCostColumns(EXPIRED_COLUMNS, exportRows)
+            : { columns: EXPIRED_COLUMNS, rows: exportRows };
+
         await exportReport(req.params.format, {
             res,
             title:       'Expired Inventory Report',
             generatedBy: req.user.name,
             filename:    'PharmaTrack_Expired_Inventory_Report',
-            columns:     EXPIRED_COLUMNS,
-            rows:        exportRows,
+            columns:     out.columns,
+            rows:        out.rows,
             periodLabel
         });
     } catch (err) { next(err); }
@@ -345,25 +410,31 @@ const getDashboardKPIs = async (req, res, next) => {
 const getVoidReport = async (req, res, next) => {
     try {
         const { start_date, end_date, limit = 500, offset = 0 } = req.query;
+        const userId = scopedUserId(req);
 
         let sql = `
             SELECT o.id, o.order_number, o.created_at, o.total, o.subtotal, o.discount,
                    cashier.name AS cashier_name,
                    voider.name  AS voided_by_name,
                    al.created_at AS voided_at,
-                   al.details   AS void_details
+                   al.details   AS void_details,
+                   child.order_number AS replaced_by_order_number
             FROM orders o
             JOIN users cashier ON cashier.id = o.cashier_id
             LEFT JOIN audit_logs al ON al.entity = 'orders'
                                    AND al.entity_id = o.id
                                    AND al.action = 'VOID_ORDER'
             LEFT JOIN users voider ON voider.id = al.user_id
+            LEFT JOIN orders child ON child.parent_order_id = o.id
             WHERE o.status = 'voided'
         `;
         const params = [];
 
         if (start_date) { sql += ' AND DATE(o.created_at) >= ?'; params.push(start_date); }
         if (end_date)   { sql += ' AND DATE(o.created_at) <= ?'; params.push(end_date);   }
+        // A person's void report = voids of sales they rang up OR voids they
+        // performed themselves (the audit entry's user is whoever performed it)
+        if (userId)     { sql += ' AND (o.cashier_id = ? OR al.user_id = ?)'; params.push(userId, userId); }
 
         sql += ' ORDER BY o.created_at DESC LIMIT ? OFFSET ?';
         params.push(parseInt(limit), parseInt(offset));
@@ -390,7 +461,21 @@ const getVoidReport = async (req, res, next) => {
             itemsByOrder[item.order_id].push(item);
         });
 
-        const ordersWithItems = orders.map(o => ({ ...o, items: itemsByOrder[o.id] || [] }));
+        // The audit entry written at void time says whether this was a PARTIAL
+        // void (and what was voided, the refund, and the replacement receipt).
+        const ordersWithItems = orders.map(o => {
+            let details = o.void_details;
+            if (typeof details === 'string') { try { details = JSON.parse(details); } catch { details = null; } }
+            const isPartial = !!(details && details.partial) || !!o.replaced_by_order_number;
+            return {
+                ...o,
+                items:                    itemsByOrder[o.id] || [],
+                is_partial:               isPartial,
+                refund_amount:            isPartial ? (details?.refund_amount ?? null) : null,
+                voided_items:             isPartial ? (details?.voided_items || []) : [],
+                replaced_by_order_number: o.replaced_by_order_number || details?.replacement_order_number || null
+            };
+        });
 
         res.json({ success: true, data: ordersWithItems });
 
@@ -399,11 +484,12 @@ const getVoidReport = async (req, res, next) => {
 
 const VOID_COLUMNS = [
     { label: 'Order #',            excelWidth: 20, pdfWidth: 90  },
-    { label: 'Date/Time',           excelWidth: 20, pdfWidth: 85  },
+    { label: 'Date/Time',           excelWidth: 26, pdfWidth: 108 },
     { label: 'Processed By',        excelWidth: 22, pdfWidth: 95  },
     { label: 'Voided By',           excelWidth: 18, pdfWidth: 90  },
-    { label: 'Voided At',           excelWidth: 20, pdfWidth: 90  },
-    { label: 'Total',               excelWidth: 12, pdfWidth: 60  }
+    { label: 'Voided At',           excelWidth: 26, pdfWidth: 108 },
+    { label: 'Total',               excelWidth: 12, pdfWidth: 60  },
+    { label: 'Details',             excelWidth: 36, pdfWidth: 150 }
 ];
 
 /**
@@ -412,36 +498,53 @@ const VOID_COLUMNS = [
 const exportVoidReport = async (req, res, next) => {
     try {
         const { start_date, end_date } = req.query;
+        const userId = scopedUserId(req);
 
         let sql = `
             SELECT o.order_number, o.created_at, o.total,
                    cashier.name AS cashier_name,
                    voider.name  AS voided_by_name,
-                   al.created_at AS voided_at
+                   al.created_at AS voided_at,
+                   al.details    AS void_details,
+                   child.order_number AS replaced_by_order_number
             FROM orders o
             JOIN users cashier ON cashier.id = o.cashier_id
             LEFT JOIN audit_logs al ON al.entity = 'orders'
                                    AND al.entity_id = o.id
                                    AND al.action = 'VOID_ORDER'
             LEFT JOIN users voider ON voider.id = al.user_id
+            LEFT JOIN orders child ON child.parent_order_id = o.id
             WHERE o.status = 'voided'
         `;
         const params = [];
         if (start_date) { sql += ' AND DATE(o.created_at) >= ?'; params.push(start_date); }
         if (end_date)   { sql += ' AND DATE(o.created_at) <= ?'; params.push(end_date);   }
+        if (userId)     { sql += ' AND (o.cashier_id = ? OR al.user_id = ?)'; params.push(userId, userId); }
         sql += ' ORDER BY o.created_at DESC';
 
         const [orders] = await db.query(sql, params);
 
-        const rows = orders.map(o => [
-            o.order_number, formatShortDateTime(o.created_at), o.cashier_name,
-            o.voided_by_name || '—', o.voided_at ? formatShortDateTime(o.voided_at) : '—',
-            `₱${Number(o.total).toFixed(2)}`
-        ]);
+        const rows = orders.map(o => {
+            let details = o.void_details;
+            if (typeof details === 'string') { try { details = JSON.parse(details); } catch { details = null; } }
+            const replacedBy = o.replaced_by_order_number || details?.replacement_order_number || null;
+            const detailText = (details && details.partial) || replacedBy
+                ? `Partial void, replaced by ${replacedBy || 'a new receipt'}` +
+                  (details?.refund_amount != null ? ` (refund ₱${Number(details.refund_amount).toFixed(2)})` : '')
+                : 'Full void';
+            return [
+                o.order_number, formatShortDateTime(o.created_at), o.cashier_name,
+                o.voided_by_name || '—', o.voided_at ? formatShortDateTime(o.voided_at) : '—',
+                `₱${Number(o.total).toFixed(2)}`,
+                detailText
+            ];
+        });
+
+        const scopeName = await filteredUserName(req, userId);
 
         await exportReport(req.params.format, {
             res,
-            title:       'Void Report',
+            title:       withUser('Void Report', scopeName),
             generatedBy: req.user.name,
             filename:    'PharmaTrack_Void_Report',
             columns:     VOID_COLUMNS,
@@ -462,9 +565,10 @@ const exportVoidReport = async (req, res, next) => {
 const getRegisterReport = async (req, res, next) => {
     try {
         const { start_date, end_date, limit = 500, offset = 0 } = req.query;
+        const userId = scopedUserId(req);
 
         const sessions = await CashSession.findAllForReport({
-            startDate: start_date, endDate: end_date, limit, offset
+            startDate: start_date, endDate: end_date, cashierId: userId, limit, offset
         });
 
         const summary = sessions.reduce((acc, s) => ({
@@ -481,11 +585,11 @@ const getRegisterReport = async (req, res, next) => {
 
 const REGISTER_COLUMNS = [
     { label: 'Processed By',       excelWidth: 22, pdfWidth: 90  },
-    { label: 'Opened At',           excelWidth: 20, pdfWidth: 85  },
+    { label: 'Opened At',           excelWidth: 26, pdfWidth: 108 },
     { label: 'Opening Cash',        excelWidth: 14, pdfWidth: 60  },
     { label: 'Opened Approved By',  excelWidth: 20, pdfWidth: 90  },
     { label: 'Status',              excelWidth: 10, pdfWidth: 45  },
-    { label: 'Closed At',           excelWidth: 20, pdfWidth: 85  },
+    { label: 'Closed At',           excelWidth: 26, pdfWidth: 108 },
     { label: 'Variance',            excelWidth: 12, pdfWidth: 55  },
     { label: 'Closed Approved By',  excelWidth: 20, pdfWidth: 90  }
 ];
@@ -496,9 +600,10 @@ const REGISTER_COLUMNS = [
 const exportRegisterReport = async (req, res, next) => {
     try {
         const { start_date, end_date } = req.query;
+        const userId = scopedUserId(req);
 
         const sessions = await CashSession.findAllForReport({
-            startDate: start_date, endDate: end_date, limit: 500, offset: 0
+            startDate: start_date, endDate: end_date, cashierId: userId, limit: 500, offset: 0
         });
 
         const rows = sessions.map(s => {
@@ -517,7 +622,7 @@ const exportRegisterReport = async (req, res, next) => {
 
         await exportReport(req.params.format, {
             res,
-            title:       'Register Report',
+            title:       withUser('Register Report', await filteredUserName(req, userId)),
             generatedBy: req.user.name,
             filename:    'PharmaTrack_Register_Report',
             columns:     REGISTER_COLUMNS,
@@ -527,7 +632,22 @@ const exportRegisterReport = async (req, res, next) => {
     } catch (err) { next(err); }
 };
 
+/**
+ * GET /api/reports/users  [Admin and Owner only -- see reportRoutes.js]
+ * Feeds the "User" filter dropdown on the Reports page: every account that
+ * could appear in a report, inactive ones included (their past sales still
+ * show up). Names and roles only -- never emails or anything sensitive.
+ */
+const getReportUsers = async (req, res, next) => {
+    try {
+        const [rows] = await db.query(
+            'SELECT id, name, role, is_active FROM users ORDER BY is_active DESC, name ASC'
+        );
+        res.json({ success: true, data: rows });
+    } catch (err) { next(err); }
+};
+
 module.exports = {
-    getSalesReport, getExpiredReport, getDashboardKPIs, getVoidReport, getRegisterReport,
+    getSalesReport, getExpiredReport, getDashboardKPIs, getVoidReport, getRegisterReport, getReportUsers,
     exportSalesReport, exportExpiredReport, exportVoidReport, exportRegisterReport
 };

@@ -1,0 +1,114 @@
+/* ============================================================
+   Receipt styles (receipt.js)
+   - On screen: the receipt shown in the POS "Transaction Receipt" window.
+   - On paper: the print-only 80mm output (see @media print at the bottom).
+   Both use the SAME markup, so what you see is what prints.
+   ============================================================ */
+
+.receipt {
+    font-family: 'Courier New', Courier, monospace;
+    font-size:   12.5px;
+    line-height: 1.4;
+    color:       #000;
+    background:  #fff;
+    max-width:   320px;
+    margin:      0 auto;
+    padding:     14px 12px;
+    border:      1px solid #d9d9d9;
+    border-radius: 6px;
+    box-sizing:  border-box;
+}
+
+.receipt .rc-center { text-align: center; }
+
+.receipt .rc-logo {
+    display:    block;
+    width:      46px;
+    height:     46px;
+    margin:     0 auto 4px;
+    object-fit: contain;
+}
+
+.receipt .rc-brand {
+    font-size:   1.3em;
+    font-weight: 700;
+    letter-spacing: 0.5px;
+}
+
+.receipt .rc-sep {
+    border-top: 1px dashed #000;
+    margin:     7px 0;
+}
+
+.receipt .rc-row {
+    display:         flex;
+    justify-content: space-between;
+    gap:             10px;
+}
+
+.receipt .rc-row span:last-child { white-space: nowrap; }
+
+.receipt .rc-item { margin-bottom: 5px; }
+
+.receipt .rc-item-name {
+    font-weight: 700;
+    word-break:  break-word;
+}
+
+.receipt .rc-tag { font-size: 0.88em; }
+
+.receipt .rc-total {
+    font-size:   1.2em;
+    font-weight: 700;
+}
+
+.receipt .rc-bold { font-weight: 700; }
+
+.receipt .rc-thanks {
+    margin-top: 10px;
+    font-size:  0.9em;
+}
+
+/* Hidden everywhere except while a receipt is actually being printed */
+#receipt-print-area { display: none; }
+
+@media print {
+    /* 2mm margins; the paper SIZE comes from the printer (choose the 80mm
+       roll in the print dialog / printer preferences). */
+    @page { margin: 2mm; }
+
+    /* Hide everything on the page except the receipt. Scoped to
+       body.printing-receipt, which receipt.js only sets for the duration
+       of a receipt print -- an ordinary Ctrl+P is unaffected. */
+    body.printing-receipt > *:not(#receipt-print-area) {
+        display: none !important;
+    }
+
+    /* Some pages (POS, Reports) lock the body to the screen height with
+       overflow:hidden -- undo that so a tall receipt is never clipped. */
+    html body.printing-receipt {
+        height:     auto !important;
+        min-height: 0 !important;
+        overflow:   visible !important;
+        background: #fff !important;
+    }
+
+    body.printing-receipt #receipt-print-area {
+        display: block !important;
+    }
+
+    #receipt-print-area .receipt {
+        width:         72mm;
+        max-width:     72mm;
+        margin:        0 auto;   /* centered on the page; on an 80mm roll the 2mm page margins leave it centered too */
+        padding:       0;
+        border:        none;
+        border-radius: 0;
+        font-size:     11px;
+    }
+
+    /* Thermal printers are black and white */
+    #receipt-print-area .rc-logo {
+        filter: grayscale(1) contrast(1.6);
+    }
+}

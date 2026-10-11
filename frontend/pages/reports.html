@@ -7,6 +7,7 @@
     <link rel="icon" type="image/png" href="../images/pharmatrack-logo.png">
     <link rel="stylesheet" href="../css/global.css">
     <link rel="stylesheet" href="../css/reports.css">
+    <link rel="stylesheet" href="../css/receipt.css">
 </head>
 <body class="confined-page">
 <div class="app-container">
@@ -20,11 +21,11 @@
             <ul>
                 <li class="nav-item" data-roles="admin,super_admin,cashier"><a href="dashboard.html"><span class="nav-icon"></span> Dashboard</a></li>
                 <li class="nav-item" data-roles="admin,super_admin,cashier"><a href="pos.html"><span class="nav-icon"></span> Point of Sale</a></li>
+                <li class="nav-item active" data-roles="admin,super_admin,cashier"><a href="reports.html"><span class="nav-icon"></span> Reports</a></li>
             </ul>
             <p class="nav-section-label">Management</p>
             <ul>
                 <li class="nav-item" data-roles="admin,super_admin"><a href="inventory.html"><span class="nav-icon"></span> Inventory</a></li>
-                <li class="nav-item active" data-roles="admin,super_admin"><a href="reports.html"><span class="nav-icon"></span> Reports</a></li>
                 <li class="nav-item" data-roles="admin,super_admin"><a href="forecasting.html"><span class="nav-icon"></span> Forecasting</a></li>
             </ul>
             <p class="nav-section-label">Admin</p>
@@ -82,6 +83,13 @@
                         <button class="btn btn-primary btn-sm" id="btn-run-report">Generate Report</button>
                     </div>
 
+                    <!-- User filter -- Admin and Owner only (shown by the page script). All
+                         the User dropdowns on this page stay in step with each other. -->
+                    <div class="user-filter-inline" style="display:none">
+                        <label>User</label>
+                        <select class="form-control report-user-select"><option value="">All Users</option></select>
+                    </div>
+
                     <div class="spacer"></div>
                     <div class="export-dropdown" id="sales-export-dropdown">
                         <button class="btn btn-outline" id="sales-export-toggle">Export ▾</button>
@@ -95,8 +103,8 @@
 
                 <div class="summary-chips" id="sales-summary-chips" style="display:none">
                     <div class="summary-chip"><div class="chip-label">Total Sales</div><div class="chip-value" id="chip-total-sales">₱0</div></div>
-                    <div class="summary-chip"><div class="chip-label">Purchase Cost</div><div class="chip-value" id="chip-total-cost">₱0</div></div>
-                    <div class="summary-chip"><div class="chip-label">Profit</div><div class="chip-value" id="chip-profit">₱0</div></div>
+                    <div class="summary-chip cost-col"><div class="chip-label">Purchase Cost</div><div class="chip-value" id="chip-total-cost">₱0</div></div>
+                    <div class="summary-chip cost-col"><div class="chip-label">Profit</div><div class="chip-value" id="chip-profit">₱0</div></div>
                     <div class="summary-chip"><div class="chip-label">Transactions</div><div class="chip-value" id="chip-txn-count">0</div></div>
                     <div class="summary-chip"><div class="chip-label">Total Discount</div><div class="chip-value" id="chip-discount">₱0</div></div>
                 </div>
@@ -111,10 +119,10 @@
                                     <th class="col-text sortable-col" data-sort-key="created_at">Date/Time</th>
                                     <th class="col-text sortable-col" data-sort-key="cashier_name">Processed By</th>
                                     <th class="col-num sortable-col" data-sort-key="subtotal">Subtotal</th>
-                                    <th class="col-num sortable-col" data-sort-key="purchase_cost">Purchase Cost</th>
+                                    <th class="col-num sortable-col cost-col" data-sort-key="purchase_cost">Purchase Cost</th>
                                     <th class="col-num sortable-col" data-sort-key="discount">Discount</th>
                                     <th class="col-num sortable-col" data-sort-key="total">Total</th>
-                                    <th class="col-num sortable-col" data-sort-key="profit">Profit</th>
+                                    <th class="col-num sortable-col cost-col" data-sort-key="profit">Profit</th>
                                 </tr>
                             </thead>
                             <tbody id="sales-tbody">
@@ -163,10 +171,10 @@
                                     <th class="col-text sortable-col" data-sort-key="name">Product Name</th>
                                     <th class="col-text sortable-col" data-sort-key="category">Category</th>
                                     <th class="col-num sortable-col" data-sort-key="stock_quantity">Qty</th>
-                                    <th class="col-num sortable-col" data-sort-key="cost">Cost (₱)</th>
+                                    <th class="col-num sortable-col cost-col" data-sort-key="cost">Cost (₱)</th>
                                     <th class="col-num sortable-col" data-sort-key="expiry_date">Expiry Date</th>
                                     <th class="col-num sortable-col" data-sort-key="days_expired">Days Expired</th>
-                                    <th class="col-num sortable-col" data-sort-key="value_lost">Value Lost</th>
+                                    <th class="col-num sortable-col cost-col" data-sort-key="value_lost">Value Lost</th>
                                 </tr>
                             </thead>
                             <tbody id="expired-tbody">
@@ -193,6 +201,11 @@
                         <button class="btn btn-primary btn-sm" id="btn-run-void">Generate Report</button>
                     </div>
 
+                    <div class="user-filter-inline" style="display:none">
+                        <label>User</label>
+                        <select class="form-control report-user-select"><option value="">All Users</option></select>
+                    </div>
+
                     <div class="spacer"></div>
                     <div class="export-dropdown" id="void-export-dropdown">
                         <button class="btn btn-outline" id="void-export-toggle">Export ▾</button>
@@ -215,10 +228,11 @@
                                     <th class="col-text sortable-col" data-sort-key="voided_by_name">Voided By</th>
                                     <th class="col-text sortable-col" data-sort-key="voided_at">Voided At</th>
                                     <th class="col-num sortable-col" data-sort-key="total">Total</th>
+                                    <th class="col-text">Details</th>
                                 </tr>
                             </thead>
                             <tbody id="void-tbody">
-                                <tr><td colspan="7" class="text-center" style="padding:24px"><div class="spinner" style="margin:0 auto"></div></td></tr>
+                                <tr><td colspan="8" class="text-center" style="padding:24px"><div class="spinner" style="margin:0 auto"></div></td></tr>
                             </tbody>
                         </table>
                     </div>
@@ -240,6 +254,11 @@
                         <label>To</label>
                         <input type="date" id="register-end">
                         <button class="btn btn-primary btn-sm" id="btn-run-register">Generate Report</button>
+                    </div>
+
+                    <div class="user-filter-inline" style="display:none">
+                        <label>User</label>
+                        <select class="form-control report-user-select"><option value="">All Users</option></select>
                     </div>
 
                     <div class="spacer"></div>
@@ -289,9 +308,25 @@
 
 <div id="toast-container" class="toast-container"></div>
 <script src="../js/main.js"></script>
+<script src="../js/receipt.js"></script>
 <script>
 document.addEventListener('DOMContentLoaded', () => {
-    if (!Auth.requireAuth(['admin', 'super_admin'])) return;
+    if (!Auth.requireAuth(['admin', 'super_admin', 'cashier'])) return;
+
+    const currentUser = Auth.getUser();
+    const isCashier   = currentUser?.role === 'cashier';
+
+    // The User filter (Admin and Owner only); '' means "All Users". A Pharmacy
+    // Assistant's reports are restricted to their own data BY THE SERVER, and
+    // the server also leaves cost/profit figures out of what it sends them --
+    // this class just hides the then-empty columns and cards.
+    let reportUserId = '';
+    if (isCashier) document.body.classList.add('hide-cost');
+
+    function userParam(params) {
+        if (reportUserId) params.set('user_id', reportUserId);
+        return params;
+    }
 
     let salesData = [];
     let salesSort  = null; // set once the table's sortable headers are wired up (see loadSalesReport)
@@ -400,7 +435,7 @@ document.addEventListener('DOMContentLoaded', () => {
     wireExportDropdown({
         toggleId: 'sales-export-toggle', menuId: 'sales-export-menu', wrapId: 'sales-export-dropdown',
         endpointPath: '/reports/sales', filenameBase: 'PharmaTrack_Sales_Report',
-        getParams: () => new URLSearchParams({ start_date: startInput.value, end_date: endInput.value })
+        getParams: () => userParam(new URLSearchParams({ start_date: startInput.value, end_date: endInput.value }))
     });
 
     // ── Load sales report ─────────────────────────────────────
@@ -409,7 +444,7 @@ document.addEventListener('DOMContentLoaded', () => {
         tbody.innerHTML = '<tr><td colspan="9" class="text-center" style="padding:24px"><div class="spinner" style="margin:0 auto"></div></td></tr>';
         document.getElementById('sales-summary-chips').style.display = 'none';
 
-        const data = await API.get(`/reports/sales?start_date=${start}&end_date=${end}&limit=500`);
+        const data = await API.get(`/reports/sales?start_date=${start}&end_date=${end}&limit=500${reportUserId ? '&user_id=' + encodeURIComponent(reportUserId) : ''}`);
         if (!data?.success) {
             Toast.show('Failed to load report.', 'error');
             tbody.innerHTML = '<tr><td colspan="9" class="text-center text-muted" style="padding:24px">Failed to load data.</td></tr>';
@@ -477,17 +512,21 @@ document.addEventListener('DOMContentLoaded', () => {
         tbody.innerHTML = pageItems.map((o) => `
             <tr>
                 <td><button class="btn-expand" data-key="${o.order_number}" title="View items sold">▶</button></td>
-                <td class="fw-600 col-text sticky-col${tint('order_number')}">${o.order_number}</td>
+                <td class="fw-600 col-text sticky-col${tint('order_number')}">${o.order_number}${o.parent_order_number ? `<div class="replaces-tag">Replaces ${escHtml(o.parent_order_number)}</div>` : ''}</td>
                 <td class="col-text${tint('created_at')}">${Fmt.datetime(o.created_at)}</td>
                 <td class="col-text${tint('cashier_name')}">${o.cashier_name}</td>
                 <td class="col-num${tint('subtotal')}">${Fmt.currency(o.subtotal)}</td>
-                <td class="col-num${tint('purchase_cost')}">${Fmt.currency(o.purchase_cost)}</td>
+                <td class="col-num cost-col${tint('purchase_cost')}">${Fmt.currency(o.purchase_cost)}</td>
                 <td class="col-num${tint('discount')}">${Fmt.currency(o.discount)}</td>
                 <td class="fw-600 col-num${tint('total')}" style="color:var(--primary)">${Fmt.currency(o.total)}</td>
-                <td class="fw-600 col-num${tint('profit')}" style="color:${parseFloat(o.profit || 0) >= 0 ? 'var(--success)' : 'var(--danger)'}">${Fmt.currency(o.profit)}</td>
+                <td class="fw-600 col-num cost-col${tint('profit')}" style="color:${parseFloat(o.profit || 0) >= 0 ? 'var(--success)' : 'var(--danger)'}">${Fmt.currency(o.profit)}</td>
             </tr>
             <tr class="detail-row hidden" id="order-detail-${o.order_number}">
                 <td colspan="9">
+                    <div style="margin-bottom:8px">
+                        <button type="button" class="btn btn-light btn-sm btn-print-receipt" data-key="${o.order_number}">Print Receipt</button>
+                    </div>
+                    ${o.parent_order_number ? `<div style="font-size:0.82rem;margin-bottom:8px"><strong>Replacement receipt</strong> for ${escHtml(o.parent_order_number)} (a partial void). The original receipt is in the Void Report.</div>` : ''}
                     <strong style="font-size:0.82rem">Items Sold:</strong>
                     <div class="table-container" style="margin-top:8px">
                         <table class="table" style="white-space:normal">
@@ -505,6 +544,16 @@ document.addEventListener('DOMContentLoaded', () => {
                     </div>
                 </td>
             </tr>`).join('');
+
+        // Print Receipt (inside the expanded row): rebuilds the receipt from the
+        // stored order, using the same template as the POS (receipt.js).
+        tbody.querySelectorAll('.btn-print-receipt').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const order = salesData.find(o => o.order_number === btn.dataset.key);
+                if (!order) return;
+                Receipt.print(Receipt.fromOrder(order));
+            });
+        });
 
         // Wire expand buttons -- keyed by the order's own number now
         // (stable regardless of sort order or which page it's on), not a
@@ -604,7 +653,7 @@ document.addEventListener('DOMContentLoaded', () => {
         expiredData = expired || [];
         document.getElementById('expired-stats').innerHTML = `
             <div class="expired-stat-card"><div class="stat-label">Expired Products</div><div class="stat-value">${summary.total_products}</div></div>
-            <div class="expired-stat-card"><div class="stat-label">Total Value Lost</div><div class="stat-value">${Fmt.currency(summary.total_value_lost)}</div></div>`;
+            <div class="expired-stat-card cost-col"><div class="stat-label">Total Value Lost</div><div class="stat-value">${Fmt.currency(summary.total_value_lost)}</div></div>`;
 
         if (!expiredSort) {
             expiredSort = TableSort.attach(document.querySelector('#expired-table thead'), {
@@ -655,10 +704,10 @@ document.addEventListener('DOMContentLoaded', () => {
                 <td class="fw-600 col-text${tint('name')}">${p.name}</td>
                 <td class="col-text${tint('category')}">${p.category}</td>
                 <td class="col-num${tint('stock_quantity')}">${p.stock_quantity}</td>
-                <td class="col-num${tint('cost')}">${Fmt.currency(p.cost)}</td>
+                <td class="col-num cost-col${tint('cost')}">${Fmt.currency(p.cost)}</td>
                 <td class="col-num${tint('expiry_date')}" style="color:var(--danger)">${Fmt.date(p.expiry_date)}</td>
                 <td class="col-num${tint('days_expired')}" style="color:var(--danger);font-weight:600">${p.days_expired}d ago</td>
-                <td class="col-num${tint('value_lost')}" style="color:var(--danger);font-weight:700">${Fmt.currency(p.value_lost)}</td>
+                <td class="col-num cost-col${tint('value_lost')}" style="color:var(--danger);font-weight:700">${Fmt.currency(p.value_lost)}</td>
             </tr>`).join('');
     }
 
@@ -700,7 +749,7 @@ document.addEventListener('DOMContentLoaded', () => {
     wireExportDropdown({
         toggleId: 'void-export-toggle', menuId: 'void-export-menu', wrapId: 'void-export-dropdown',
         endpointPath: '/reports/void', filenameBase: 'PharmaTrack_Void_Report',
-        getParams: () => new URLSearchParams({ start_date: voidStartInput.value, end_date: voidEndInput.value })
+        getParams: () => userParam(new URLSearchParams({ start_date: voidStartInput.value, end_date: voidEndInput.value }))
     });
 
     async function loadVoidReport(start, end) {
@@ -711,6 +760,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (start) params.set('start_date', start);
         if (end)   params.set('end_date', end);
 
+        if (reportUserId) params.set('user_id', reportUserId);
         const data = await API.get('/reports/void?' + params.toString());
         if (!data?.success) {
             Toast.show('Failed to load void report.', 'error');
@@ -751,7 +801,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const tint = (key) => key === activeKey ? ' sort-col-tint' : '';
 
         if (!voidData.length) {
-            tbody.innerHTML = '<tr><td colspan="7" class="text-center text-muted" style="padding:24px">No voided transactions for this period.</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="8" class="text-center text-muted" style="padding:24px">No voided transactions for this period.</td></tr>';
             return;
         }
 
@@ -764,9 +814,16 @@ document.addEventListener('DOMContentLoaded', () => {
                 <td class="col-text${tint('voided_by_name')}">${o.voided_by_name || '—'}</td>
                 <td class="col-text${tint('voided_at')}">${o.voided_at ? Fmt.datetime(o.voided_at) : '—'}</td>
                 <td class="fw-600 col-num${tint('total')}" style="color:var(--danger)">${Fmt.currency(o.total)}</td>
+                <td class="col-text">${o.is_partial
+                    ? `<span class="void-type-partial">Partial</span> &rarr; ${escHtml(o.replaced_by_order_number || 'new receipt')}${o.refund_amount != null ? ` <span class="text-muted">(refund ${Fmt.currency(o.refund_amount)})</span>` : ''}`
+                    : '<span class="void-type-full">Full void</span>'}</td>
             </tr>
             <tr class="detail-row hidden" id="order-detail-void-${o.order_number}">
-                <td colspan="7">
+                <td colspan="8">
+                    ${o.is_partial ? `<div style="font-size:0.82rem;margin-bottom:10px">
+                        <strong>Partial void.</strong> Voided: ${(o.voided_items || []).map(v => `${escHtml(v.name)} x${v.quantity} (${Fmt.currency(v.amount)})`).join(', ') || '-'}.
+                        Refund ${Fmt.currency(o.refund_amount || 0)}. The remaining items are on <strong>${escHtml(o.replaced_by_order_number || 'a new receipt')}</strong>.
+                    </div>` : ''}
                     <strong style="font-size:0.82rem">Items Sold (before void):</strong>
                     <div class="table-container" style="margin-top:8px">
                         <table class="table" style="white-space:normal">
@@ -836,7 +893,7 @@ document.addEventListener('DOMContentLoaded', () => {
     wireExportDropdown({
         toggleId: 'register-export-toggle', menuId: 'register-export-menu', wrapId: 'register-export-dropdown',
         endpointPath: '/reports/register', filenameBase: 'PharmaTrack_Register_Report',
-        getParams: () => new URLSearchParams({ start_date: registerStartInput.value, end_date: registerEndInput.value })
+        getParams: () => userParam(new URLSearchParams({ start_date: registerStartInput.value, end_date: registerEndInput.value }))
     });
 
     async function loadRegisterReport(start, end) {
@@ -848,6 +905,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (start) params.set('start_date', start);
         if (end)   params.set('end_date', end);
 
+        if (reportUserId) params.set('user_id', reportUserId);
         const data = await API.get('/reports/register?' + params.toString());
         if (!data?.success) {
             Toast.show('Failed to load register report.', 'error');
@@ -923,6 +981,41 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // ── Auto-load daily on open ───────────────────────────────
+    // -- User filter (Admin and Owner only) --
+    // One User dropdown inside each report's toolbar (Sales, Void, Register),
+    // kept in step with each other. Expired Inventory has none.
+    const userSelects = [...document.querySelectorAll('.report-user-select')];
+
+    if (!isCashier && userSelects.length) {
+        document.querySelectorAll('.user-filter-inline').forEach(el => { el.style.display = ''; });
+        loadReportUsers();
+        userSelects.forEach(select => select.addEventListener('change', () => {
+            reportUserId = select.value;
+            userSelects.forEach(s => { s.value = reportUserId; });
+            reloadActiveReport();
+        }));
+    }
+
+    async function loadReportUsers() {
+        const data = await API.get('/reports/users');
+        if (!data?.success) { Toast.show('Could not load the user list.', 'warning'); return; }
+        const roleLabels = { super_admin: 'Admin', admin: 'Owner', cashier: 'Pharmacy Assistant' };
+        data.data.forEach(u => {
+            const opt = document.createElement('option');
+            opt.value = u.id;
+            opt.textContent = `${u.name} (${roleLabels[u.role] || u.role})${u.is_active ? '' : ' - Inactive'}`;
+            userSelects.forEach(select => select.appendChild(opt.cloneNode(true)));
+        });
+    }
+
+    // Re-run whichever report tab is showing, with its current date range
+    function reloadActiveReport() {
+        const tab = document.querySelector('.report-tab.active')?.dataset.tab;
+        if (tab === 'sales')    loadSalesReport(startInput.value, endInput.value);
+        if (tab === 'void')     loadVoidReport(voidStartInput.value, voidEndInput.value);
+        if (tab === 'register') loadRegisterReport(registerStartInput.value, registerEndInput.value);
+    }
+
     const initRange = getDateRange('daily');
     startInput.value = initRange.start;
     endInput.value   = initRange.end;

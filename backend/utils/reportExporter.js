@@ -78,7 +78,8 @@ function formatShortDateTime(value) {
     const hours12 = hours24 % 12 || 12;
     const ampm    = hours24 >= 12 ? 'PM' : 'AM';
     const minutes = String(d.getMinutes()).padStart(2, '0');
-    return `${formatShortDate(d)}, ${hours12}:${minutes} ${ampm}`;
+    const seconds = String(d.getSeconds()).padStart(2, '0');
+    return `${formatShortDate(d)}, ${hours12}:${minutes}:${seconds} ${ampm}`;
 }
 
 /**
@@ -122,7 +123,7 @@ async function exportExcel({ res, title, generatedBy, filename, columns, rows, p
     sheet.getCell('A2').alignment = { horizontal: 'center' };
 
     sheet.mergeCells(`A3:${lastColLetter}3`);
-    sheet.getCell('A3').value = periodLabel ? `${formatManilaDateTime()} — ${periodLabel}` : formatManilaDateTime();
+    sheet.getCell('A3').value = periodLabel || '';
     sheet.getCell('A3').font = { size: 10, italic: true, color: { argb: 'FF6C757D' } };
     sheet.getCell('A3').alignment = { horizontal: 'center' };
 
@@ -172,6 +173,16 @@ async function exportExcel({ res, title, generatedBy, filename, columns, rows, p
     }
 
     sheet.columns.forEach((col, i) => { col.width = columns[i]?.excelWidth || 16; });
+
+    // Generated date/time: directly below the table (and its totals row),
+    // above Prepared by / Approved by.
+    sheet.addRow([]);
+    const generatedRowNum = sheet.rowCount + 1;
+    sheet.mergeCells(`A${generatedRowNum}:${lastColLetter}${generatedRowNum}`);
+    const generatedCell = sheet.getCell(`A${generatedRowNum}`);
+    generatedCell.value     = `Generated: ${formatManilaDateTime()}`;
+    generatedCell.font      = { size: 10, italic: true, color: { argb: 'FF6C757D' } };
+    generatedCell.alignment = { horizontal: 'center' };
 
     sheet.addRow([]);
     sheet.addRow([]);
@@ -266,8 +277,12 @@ async function exportPDF({ res, title, generatedBy, filename, columns, rows, per
     doc.y = groupY + brandTextHeight + 4;
 
     doc.fontSize(13).font('Helvetica-Bold').fillColor('#212529').text(title, { align: 'center' });
-    doc.fontSize(9).font('Helvetica-Oblique').fillColor('#6c757d')
-       .text(periodLabel ? `${formatManilaDateTime()} — ${periodLabel}` : formatManilaDateTime(), { align: 'center' });
+    // Only the report range goes above the table now. The generated date and
+    // time is printed BELOW the table, above Prepared by / Approved by.
+    if (periodLabel) {
+        doc.fontSize(9).font('Helvetica-Oblique').fillColor('#6c757d')
+           .text(periodLabel, { align: 'center' });
+    }
     doc.moveDown(1);
 
     const colWidths  = columns.map(c => c.pdfWidth || 70);
@@ -353,7 +368,16 @@ async function exportPDF({ res, title, generatedBy, filename, columns, rows, per
     // A real drawn line (not underscores), with the caption centered
     // underneath using the exact same x-start and width as that line --
     // so it can never drift out of alignment with it.
-    y += 40;
+    // Generated date/time: directly below the table (and its totals row),
+    // above the signature block.
+    y += 14;
+    if (y > doc.page.height - doc.page.margins.bottom - 120) {
+        doc.addPage();
+        y = doc.page.margins.top;
+    }
+    doc.fontSize(9).font('Helvetica-Oblique').fillColor('#6c757d')
+       .text(`Generated: ${formatManilaDateTime()}`, startX, y, { width: tableWidth, align: 'center' });
+    y += 26;
     if (y > doc.page.height - doc.page.margins.bottom - 70) {
         doc.addPage();
         y = doc.page.margins.top;
@@ -490,7 +514,7 @@ async function exportWord({ res, title, generatedBy, filename, columns, rows, pe
                 new Paragraph({
                     alignment: AlignmentType.CENTER,
                     children: [new TextRun({
-                        text: periodLabel ? `${formatManilaDateTime()} — ${periodLabel}` : formatManilaDateTime(),
+                        text: periodLabel || '',
                         italics: true, size: 18, color: '6C757D'
                     })]
                 }),
@@ -500,6 +524,10 @@ async function exportWord({ res, title, generatedBy, filename, columns, rows, pe
                     rows: [new TableRow({ children: headerCells }), ...dataRows, ...totalsRows]
                 }),
                 new Paragraph({ text: '' }),
+                new Paragraph({
+                    alignment: AlignmentType.CENTER,
+                    children: [new TextRun({ text: `Generated: ${formatManilaDateTime()}`, italics: true, size: 18, color: '6C757D' })]
+                }),
                 new Paragraph({ text: '' }),
                 signatureBlock
             ]

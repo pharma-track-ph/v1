@@ -812,6 +812,23 @@ const EditProfileModal = {
                         <input type="password" id="edit-profile-confirm-pw" class="form-control" autocomplete="new-password">
                     </div>
 
+                    <hr style="margin:18px 0;border:none;border-top:1px solid var(--gray-200)">
+
+                    <div style="font-size:0.85rem;font-weight:600;margin-bottom:10px">Change Email</div>
+                    <div class="form-group">
+                        <label class="form-label">Current Email</label>
+                        <input type="email" id="edit-profile-current-email" class="form-control" disabled>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">New Email</label>
+                        <input type="email" id="edit-profile-new-email" class="form-control" autocomplete="off" placeholder="name@example.com">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Confirm New Email</label>
+                        <input type="email" id="edit-profile-confirm-email" class="form-control" autocomplete="off">
+                        <div style="font-size:0.72rem;color:var(--secondary);margin-top:4px">A verification code is sent to your current email before the change takes effect.</div>
+                    </div>
+
                     <p class="error-msg" id="edit-profile-error" aria-live="polite" style="min-height:20px"></p>
                 </div>
                 <div class="modal-footer">
@@ -822,6 +839,14 @@ const EditProfileModal = {
         document.body.appendChild(overlay);
 
         document.getElementById('btn-close-edit-profile')?.addEventListener('click', () => Modal.close('edit-profile-modal'));
+
+        // The form now has Name, Password and Email sections, so let its body
+        // scroll on short screens instead of running off the bottom.
+        const profileBody = overlay.querySelector('.modal-body');
+        if (profileBody) {
+            profileBody.style.maxHeight = 'calc(100dvh - 190px)';
+            profileBody.style.overflowY = 'auto';
+        }
         document.getElementById('btn-close-edit-profile-2')?.addEventListener('click', () => Modal.close('edit-profile-modal'));
 
         document.getElementById('btn-choose-avatar')?.addEventListener('click', () => {
@@ -860,6 +885,24 @@ const EditProfileModal = {
             const newPw     = document.getElementById('edit-profile-new-pw')?.value;
             const confirmPw = document.getElementById('edit-profile-confirm-pw')?.value;
             const wantsPasswordChange = !!(currentPw || newPw || confirmPw);
+
+            // Email change is its own OTP-gated flow (see ChangeEmailOtpModal
+            // below) -- the code goes to the CURRENT email on file.
+            const newEmail     = (document.getElementById('edit-profile-new-email')?.value || '').trim().toLowerCase();
+            const confirmEmail = (document.getElementById('edit-profile-confirm-email')?.value || '').trim().toLowerCase();
+            const wantsEmailChange = !!(newEmail || confirmEmail);
+
+            if (wantsEmailChange) {
+                // Both flows share one pending-code slot per person on the server,
+                // so doing both in one Save would silently drop the first.
+                if (wantsPasswordChange) {
+                    errEl.textContent = 'Change your email and your password one at a time. Clear one of them and save again.';
+                    return;
+                }
+                if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(newEmail)) { errEl.textContent = 'Enter a valid new email address.'; return; }
+                if (newEmail !== confirmEmail) { errEl.textContent = 'The new email addresses do not match.'; return; }
+                if (newEmail === (Auth.getUser()?.email || '').toLowerCase()) { errEl.textContent = 'That is already your email address.'; return; }
+            }
 
             if (wantsPasswordChange) {
                 if (!currentPw) { errEl.textContent = 'Enter your current password to set a new one.'; return; }
@@ -918,6 +961,16 @@ const EditProfileModal = {
                 // code sent to YOUR OWN email (the now-open OTP modal).
                 Modal.close('edit-profile-modal');
                 if (Object.keys(body).length) Toast.show('Other changes saved. Verify your password change to finish.', 'info');
+            } else if (wantsEmailChange) {
+                // Request the code BEFORE closing this modal -- if the email is
+                // already taken (or sending fails), the error shows right here.
+                const emailResult = await ChangeEmailOtpModal.open(newEmail);
+                if (!emailResult.success) {
+                    errEl.textContent = emailResult.message;
+                    return;
+                }
+                Modal.close('edit-profile-modal');
+                if (Object.keys(body).length) Toast.show('Other changes saved. Verify your email change to finish.', 'info');
             } else {
                 Toast.show('Profile updated.', 'success');
                 Modal.close('edit-profile-modal');
@@ -987,6 +1040,13 @@ const EditProfileModal = {
         if (confirmPwEl) confirmPwEl.value = '';
         const errEl = document.getElementById('edit-profile-error');
         if (errEl) errEl.textContent = '';
+
+        const currentEmailEl = document.getElementById('edit-profile-current-email');
+        const newEmailEl     = document.getElementById('edit-profile-new-email');
+        const confirmEmailEl = document.getElementById('edit-profile-confirm-email');
+        if (currentEmailEl) currentEmailEl.value = user?.email || '';
+        if (newEmailEl)     newEmailEl.value     = '';
+        if (confirmEmailEl) confirmEmailEl.value = '';
 
         Modal.open('edit-profile-modal');
     }
@@ -1201,6 +1261,154 @@ async function downloadAuthenticatedFile(url, fallbackFilename) {
         return false;
     }
 }
+
+// -- Change Email Verification (OTP) --
+// Second step of EditProfileModal's email-change flow. Same shape as
+// ChangePasswordOtpModal above: the code request happens BEFORE this modal
+// opens (so a taken email or a send failure shows back in Edit Profile),
+// and the code is emailed to the person's CURRENT address. Closing without
+// confirming just abandons the change -- nothing was written to the database.
+const ChangeEmailOtpModal = {
+    pendingNewEmail: null,
+    resendCooldown:  null,
+
+    ensureModal() {
+        if (document.getElementById('change-email-otp-modal')) return;
+
+        const overlay = document.createElement('div');
+        overlay.className = 'modal-overlay';
+        overlay.id = 'change-email-otp-modal';
+        overlay.innerHTML = `
+            <div class="modal" style="max-width:380px">
+                <div class="modal-header">
+                    <h3>Verify Email Change</h3>
+                    <button class="btn-close" id="btn-close-change-email-otp">✕</button>
+                </div>
+                <div class="modal-body">
+                    <p style="font-size:0.85rem;color:var(--secondary);margin-bottom:6px">
+                        Changing your email to <strong id="change-email-otp-new">-</strong>.
+                    </p>
+                    <p id="change-email-otp-status" style="font-size:0.8rem;color:var(--secondary);margin-bottom:16px">Sending verification code...</p>
+                    <div class="form-group">
+                        <label class="form-label">6-Digit Code *</label>
+                        <input type="text" id="change-email-otp-code" class="form-control" inputmode="numeric" maxlength="6"
+                               placeholder="000000" autocomplete="one-time-code" style="letter-spacing:6px;text-align:center;font-size:1.2rem">
+                    </div>
+                    <p style="font-size:0.78rem;color:var(--secondary);margin-top:10px">
+                        Didn't get a code? <button type="button" id="btn-resend-change-email-otp" style="background:none;border:none;color:var(--primary);cursor:pointer;padding:0;font-size:0.78rem;text-decoration:underline">Resend code</button>
+                    </p>
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-light" id="btn-close-change-email-otp-2">Cancel</button>
+                    <button class="btn btn-primary" id="btn-confirm-change-email-otp">Confirm</button>
+                </div>
+            </div>`;
+        document.body.appendChild(overlay);
+
+        document.getElementById('btn-close-change-email-otp')?.addEventListener('click', () => this.close());
+        document.getElementById('btn-close-change-email-otp-2')?.addEventListener('click', () => this.close());
+
+        document.getElementById('btn-resend-change-email-otp')?.addEventListener('click', async () => {
+            if (!this.pendingNewEmail) return;
+            const result = await API.post('/auth/change-email-otp/request', { newEmail: this.pendingNewEmail });
+            if (result?.success) {
+                this.setStatus(result.message || 'A new code has been sent.');
+                this.startResendCooldown();
+            } else {
+                this.setStatus(result?.message || 'Could not resend code.', true);
+            }
+        });
+
+        document.getElementById('btn-confirm-change-email-otp')?.addEventListener('click', () => this.confirm());
+        document.getElementById('change-email-otp-code')?.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') this.confirm();
+        });
+    },
+
+    setStatus(message, isError = false) {
+        const el = document.getElementById('change-email-otp-status');
+        if (!el) return;
+        el.textContent = message;
+        el.style.color = isError ? 'var(--danger)' : 'var(--secondary)';
+    },
+
+    startResendCooldown() {
+        const btn = document.getElementById('btn-resend-change-email-otp');
+        if (!btn) return;
+        let seconds = 30;
+        btn.disabled    = true;
+        btn.textContent = `Resend code (${seconds}s)`;
+        if (this.resendCooldown) clearInterval(this.resendCooldown);
+        this.resendCooldown = setInterval(() => {
+            seconds--;
+            if (seconds <= 0) {
+                clearInterval(this.resendCooldown);
+                btn.disabled    = false;
+                btn.textContent = 'Resend code';
+            } else {
+                btn.textContent = `Resend code (${seconds}s)`;
+            }
+        }, 1000);
+    },
+
+    // Returns { success, message } so EditProfileModal can show a failure in
+    // place; this modal only becomes visible once a code has really gone out.
+    async open(newEmail) {
+        this.ensureModal();
+
+        const result = await API.post('/auth/change-email-otp/request', { newEmail });
+        if (!result?.success) {
+            return { success: false, message: result?.message || 'Could not send the verification email.' };
+        }
+
+        this.pendingNewEmail = newEmail;
+
+        const newEl = document.getElementById('change-email-otp-new');
+        if (newEl) newEl.textContent = newEmail;
+        const codeInput = document.getElementById('change-email-otp-code');
+        if (codeInput) codeInput.value = '';
+        Modal.open('change-email-otp-modal');
+        this.setStatus(result.message || 'A verification code has been sent.');
+        this.startResendCooldown();
+        codeInput?.focus();
+
+        return { success: true };
+    },
+
+    close() {
+        Modal.close('change-email-otp-modal');
+        if (this.resendCooldown) clearInterval(this.resendCooldown);
+        this.pendingNewEmail = null;
+    },
+
+    async confirm() {
+        const otp = document.getElementById('change-email-otp-code')?.value.trim();
+        if (!/^\d{6}$/.test(otp)) {
+            this.setStatus('Enter the 6-digit code.', true);
+            return;
+        }
+
+        const btn = document.getElementById('btn-confirm-change-email-otp');
+        btn.disabled    = true;
+        btn.textContent = 'Verifying...';
+        const result = await API.post('/auth/change-email-otp/confirm', { otp });
+        btn.disabled    = false;
+        btn.textContent = 'Confirm';
+
+        if (result?.success) {
+            if (this.resendCooldown) clearInterval(this.resendCooldown);
+            this.pendingNewEmail = null;
+            Modal.close('change-email-otp-modal');
+            // Keep the stored profile in step so Edit Profile shows the new
+            // address immediately; the login token only carries the id, so it
+            // stays valid and nobody has to log in again.
+            if (result.email) Auth.updateStoredUser({ email: result.email });
+            Toast.show(result.message || 'Email updated.', 'success');
+        } else {
+            this.setStatus(result?.message || 'Incorrect code.', true);
+        }
+    }
+};
 
 const Modal = {
     open(id) {
