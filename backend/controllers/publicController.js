@@ -78,7 +78,10 @@ const searchInventoryForAgent = async (req, res) => {
     try {
         let { q, results } = await searchTolerant(rawQ);
 
-        results = results.filter(p => p.stock_status !== 'out_of_stock' && !isHiddenFromChatbot(p));
+        results = results.filter(p =>
+            !['out_of_stock', 'expired'].includes(p.stock_status) &&
+            !isHiddenFromChatbot(p)
+        );
         results.sort((a, b) => a.name.localeCompare(b.name));
 
         const total      = results.length;
