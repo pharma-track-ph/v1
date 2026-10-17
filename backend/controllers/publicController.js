@@ -40,6 +40,22 @@ function statusLabel(status) {
     return labels[status] || status;
 }
 
+// Cleans what the AI sent as "q" and, when a multi-word search finds
+// nothing (e.g. "Tempra Forte tablet"), retries each word on its own.
+async function searchTolerant(rawQ) {
+    const q = String(rawQ || '').replace(/[?!.,;:"'()]/g, ' ').replace(/\s+/g, ' ').trim();
+    let results = await Product.findAllGroupedBroadSearch(q);
+    if (results.length || !q.includes(' ')) return { q, results };
+
+    const seen = new Map();
+    for (const word of q.split(' ').filter(w => w.length >= 3)) {
+        for (const p of await Product.findAllGroupedBroadSearch(word)) {
+            if (!seen.has(p.id)) seen.set(p.id, p);
+        }
+    }
+    return { q, results: [...seen.values()] };
+}
+
 /**
  * GET /api/public/inventory-search?q=<term>&page=<n>&key=<JOTFORM_API_KEY>
  *
@@ -52,22 +68,21 @@ function statusLabel(status) {
 const searchInventoryForAgent = async (req, res) => {
     const providedKey = req.query.key || req.headers['x-api-key'];
     if (!process.env.JOTFORM_API_KEY || providedKey !== process.env.JOTFORM_API_KEY) {
+        console.log('[inventory-search] REJECTED: missing or wrong key');
         return res.status(401).json({ success: false, message: 'Invalid or missing API key.' });
     }
 
-    const q    = (req.query.q || '').trim();
+    const rawQ = req.query.q || req.query.query || '';
     const page = Math.max(1, parseInt(req.query.page, 10) || 1);
 
     try {
-        let results = await Product.findAllGroupedBroadSearch(q);
+        let { q, results } = await searchTolerant(rawQ);
 
-        results = results.filter(p =>
-            !['out_of_stock', 'expired'].includes(p.stock_status) &&
-            !isHiddenFromChatbot(p)
-        );
+        results = results.filter(p => p.stock_status !== 'out_of_stock' && !isHiddenFromChatbot(p));
         results.sort((a, b) => a.name.localeCompare(b.name));
 
         const total      = results.length;
+        console.log(`[inventory-search] q="${q}" page=${page} -> ${total} available product(s)`);
         const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
         const slice      = results.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
