@@ -14,6 +14,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // ── State ────────────────────────────────────────────────
     let products     = [];   // grouped brand summaries (main table)
+    let invSort       = null; // set once the table's sortable headers are wired up (see loadProducts)
+    let invPaginate   = null; // set once, alongside invSort (see loadProducts)
     let editingId     = null; // representative row id of the brand being edited
     let currentItems  = [];   // Item No. entries for the brand currently open in the modal
 
@@ -29,6 +31,482 @@ document.addEventListener('DOMContentLoaded', () => {
     const submitBtn      = document.getElementById('btn-submit-product');
 
     // ── Initial load ─────────────────────────────────────────
+    // A stored category list ("Analgesic|Antipyretic") shown the way people read it
+    function fmtCategory(value) {
+        return String(value ?? '').split('|').map(s => s.trim()).filter(Boolean).join(', ');
+    }
+
+    function levenshtein(a, b) {
+        const dp = Array.from({ length: a.length + 1 }, (_, i) => [i, ...Array(b.length).fill(0)]);
+        for (let j = 0; j <= b.length; j++) dp[0][j] = j;
+        for (let i = 1; i <= a.length; i++) {
+            for (let j = 1; j <= b.length; j++) {
+                dp[i][j] = Math.min(dp[i - 1][j] + 1, dp[i][j - 1] + 1, dp[i - 1][j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+            }
+        }
+        return dp[a.length][b.length];
+    }
+
+    // -- Category picker (Add / Edit Product) --
+    // A product can have several categories. They are ticked from the list of
+    // categories already in use; a brand-new one is typed in and added. Typing
+    // something that looks like an existing category (a typo, a plural) shows a
+    // "Did you mean...?" choice first. The chosen categories are kept, joined
+    // with |, in the hidden #field-category input, which the form already reads.
+    const CategoryPicker = {
+        known:    [],   // every category currently in use
+        selected: [],   // the ones ticked for THIS product
+        el: (id) => document.getElementById(id),
+
+        setKnown(list) { this.known = list.slice(); this.render(); },
+
+        setValue(joined) {
+            this.selected = String(joined || '').split('|').map(s => s.trim()).filter(Boolean);
+            const input = this.el('field-new-category');
+            if (input) input.value = '';
+            this.hideSuggestion();
+            this.close();
+            this.render();
+        },
+
+        sync() {
+            const hidden = this.el('field-category');
+            if (hidden) hidden.value = this.selected.join('|');
+        },
+
+        has(name) { return this.selected.some(s => s.toLowerCase() === name.toLowerCase()); },
+
+        // The dropdown list (filtered by what is typed in the input above it, each
+        // category with a checkbox) and the chips for what is ticked.
+        render() {
+            const list  = this.el('category-list');
+            const typed = (this.el('field-new-category')?.value || '').trim().replace(/\s+/g, ' ');
+            const byKey = new Map();
+            [...this.known, ...this.selected].forEach(c => { if (!byKey.has(c.toLowerCase())) byKey.set(c.toLowerCase(), c); });
+            const all   = [...byKey.values()].sort((a, b) => a.localeCompare(b));
+            const shown = typed ? all.filter(n => n.toLowerCase().includes(typed.toLowerCase())) : all;
+            const exact = typed && all.some(n => n.toLowerCase() === typed.toLowerCase());
+
+            if (list) {
+                const addRow = (typed && !exact)
+                    ? `<button type="button" class="category-add-item" data-add="1">+ Add "${escHtml(typed)}" as a new category</button>`
+                    : '';
+                const items = shown.map(name => `
+                    <label class="category-item">
+                        <input type="checkbox" value="${escHtml(name)}" ${this.has(name) ? 'checked' : ''}>
+                        <span>${escHtml(name)}</span>
+                    </label>`).join('');
+                list.innerHTML = (addRow + items) || '<div class="category-empty">No categories yet. Type a name above to add the first one.</div>';
+            }
+            this.renderChips();
+            this.sync();
+        },
+
+        renderChips() {
+            const chips = this.el('category-selected');
+            if (!chips) return;
+            chips.innerHTML = this.selected.length
+                ? this.selected.map(name => `<span class="category-chip">${escHtml(name)}<button type="button" class="category-chip-x" data-remove="${escHtml(name)}" aria-label="Remove ${escHtml(name)}">&times;</button></span>`).join('')
+                : '<span class="text-muted" style="font-size:0.78rem">No category chosen yet.</span>';
+        },
+
+        open() {
+            this.el('category-list')?.classList.remove('hidden');
+            this.el('field-new-category')?.setAttribute('aria-expanded', 'true');
+        },
+
+        close() {
+            this.el('category-list')?.classList.add('hidden');
+            this.el('field-new-category')?.setAttribute('aria-expanded', 'false');
+        },
+
+        toggle(name, checked) {
+            if (checked && !this.has(name)) this.selected.push(name);
+            if (!checked) this.selected = this.selected.filter(s => s.toLowerCase() !== name.toLowerCase());
+            this.sync();
+        },
+
+        // The existing category a typed name most likely means, or null. Names that
+        // differ only by capitals, spaces, punctuation or a plural "s" count as the
+        // same; longer names also tolerate a small typo.
+        findSimilar(name) {
+            const norm = (s) => s.toLowerCase().replace(/[^a-z0-9]/g, '').replace(/s$/, '');
+            const target = norm(name);
+            if (target.length < 3) return null;
+            const allowed = target.length >= 8 ? 2 : (target.length >= 5 ? 1 : 0);
+            let best = null, bestDist = Infinity;
+            for (const c of this.known) {
+                if (c.toLowerCase() === name.toLowerCase()) continue;
+                const n = norm(c);
+                const d = n === target ? 0 : levenshtein(n, target);
+                if (d <= allowed && d < bestDist) { best = c; bestDist = d; }
+            }
+            return best;
+        },
+
+        hideSuggestion() {
+            const s = this.el('category-suggestion');
+            if (s) { s.classList.add('hidden'); s.innerHTML = ''; }
+        },
+
+        showSuggestion(typed, similar) {
+            const s = this.el('category-suggestion');
+            if (!s) return;
+            s.innerHTML = `Did you mean <strong>${escHtml(similar)}</strong>?<br>
+                <button type="button" class="btn btn-light btn-sm" data-act="use" data-name="${escHtml(similar)}">Yes, use "${escHtml(similar)}"</button>
+                <button type="button" class="btn btn-light btn-sm" data-act="new" data-name="${escHtml(typed)}">No, add "${escHtml(typed)}" as a new category</button>`;
+            s.classList.remove('hidden');
+        },
+
+        addTyped() {
+            const input = this.el('field-new-category');
+            const name = (input?.value || '').trim().replace(/\s+/g, ' ');
+            if (!name) return;
+            if (name.includes('|'))  { Toast.show('A category name cannot contain the | character.', 'error'); return; }
+            if (name.length > 60)    { Toast.show('A category name can be at most 60 characters.', 'error'); return; }
+
+            // already exists (any capitals): just tick it, never create a twin
+            const existing = [...this.known, ...this.selected].find(c => c.toLowerCase() === name.toLowerCase());
+            if (existing) {
+                this.toggle(existing, true);
+                input.value = '';
+                this.hideSuggestion();
+                this.render();
+                return;
+            }
+
+            const similar = this.findSimilar(name);
+            if (similar) { this.showSuggestion(name, similar); return; }
+
+            this.commitNew(name);
+        },
+
+        commitNew(name) {
+            const input = this.el('field-new-category');
+            if (!this.has(name)) this.selected.push(name);
+            if (input) input.value = '';
+            this.hideSuggestion();
+            this.render();
+        },
+
+        init() {
+            const input = this.el('field-new-category');
+            const list  = this.el('category-list');
+
+            // opening: click into the input (like the Forecasting product search)
+            input?.addEventListener('focus', () => { this.render(); this.open(); });
+            input?.addEventListener('click', () => { this.render(); this.open(); });
+            // typing filters the list (and offers "+ Add ..." for a new name)
+            input?.addEventListener('input', () => { this.hideSuggestion(); this.render(); this.open(); });
+            input?.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter')  { e.preventDefault(); this.addTyped(); }
+                if (e.key === 'Escape') { this.close(); }
+            });
+
+            // ticking a checkbox keeps the list open so several can be ticked in a row
+            list?.addEventListener('change', (e) => {
+                const cb = e.target.closest('input[type="checkbox"]');
+                if (cb) { this.toggle(cb.value, cb.checked); this.renderChips(); }
+            });
+            list?.addEventListener('click', (e) => {
+                if (e.target.closest('[data-add]')) this.addTyped();
+            });
+
+            // the little x on a chip un-ticks it
+            this.el('category-selected')?.addEventListener('click', (e) => {
+                const x = e.target.closest('[data-remove]');
+                if (!x) return;
+                this.toggle(x.dataset.remove, false);
+                this.render();
+            });
+
+            // clicking anywhere outside the field closes the list
+            document.addEventListener('click', (e) => {
+                if (!this.el('category-combo')?.contains(e.target)) this.close();
+            });
+
+            this.el('category-suggestion')?.addEventListener('click', (e) => {
+                const btn = e.target.closest('button[data-act]');
+                if (!btn) return;
+                if (btn.dataset.act === 'use') {
+                    this.toggle(btn.dataset.name, true);
+                    const inp = this.el('field-new-category'); if (inp) inp.value = '';
+                    this.hideSuggestion();
+                    this.render();
+                } else {
+                    this.commitNew(btn.dataset.name);
+                }
+            });
+        }
+    };
+    CategoryPicker.init();
+
+    // -- Manage Categories (rename / merge / split) --
+    // Every change rewrites the category of every product that uses it, so each
+    // one goes through the typed "confirm" step.
+    const ManageCategories = {
+        rows: [],
+
+        ensureModal() {
+            if (document.getElementById('manage-categories-modal')) return;
+            const overlay = document.createElement('div');
+            overlay.className = 'modal-overlay';
+            overlay.id = 'manage-categories-modal';
+            overlay.innerHTML = `
+                <div class="modal" style="max-width:640px">
+                    <div class="modal-header">
+                        <h3>Manage Categories</h3>
+                        <button class="btn-close" id="mc-close">X</button>
+                    </div>
+                    <div class="modal-body" style="max-height:62vh;overflow-y:auto">
+                        <p class="mc-note">Rename or delete a category, or add a new one. A change applies to every product that uses it, so you will be asked to type "confirm". To delete, tick the categories first (you can tick several).</p>
+                        <div class="table-container">
+                            <table class="table mc-table" style="white-space:normal">
+                                <thead><tr>
+                                    <th style="width:36px"></th>
+                                    <th class="col-text">Category</th>
+                                    <th class="col-num">Products</th>
+                                    <th class="col-text" style="text-align:right">Actions</th>
+                                </tr></thead>
+                                <tbody id="mc-tbody"></tbody>
+                            </table>
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <button class="btn btn-light" id="mc-close-2">Close</button>
+                        <button class="btn btn-danger" id="mc-delete" disabled>Delete</button>
+                        <button class="btn btn-primary" id="mc-add">Add Category</button>
+                    </div>
+                </div>`;
+            document.body.appendChild(overlay);
+
+            const close = () => Modal.close('manage-categories-modal');
+            document.getElementById('mc-close').addEventListener('click', close);
+            document.getElementById('mc-close-2').addEventListener('click', close);
+            document.getElementById('mc-delete').addEventListener('click', () => this.remove());
+            document.getElementById('mc-add').addEventListener('click', () => this.add());
+
+            const tbody = document.getElementById('mc-tbody');
+            tbody.addEventListener('change', () => {
+                const picked = tbody.querySelectorAll('input.mc-pick:checked').length;
+                document.getElementById('mc-delete').disabled = picked < 1;
+            });
+            tbody.addEventListener('click', (e) => {
+                const btn = e.target.closest('button[data-act]');
+                if (!btn) return;
+                if (btn.dataset.act === 'rename') this.rename(btn.dataset.name);
+            });
+        },
+
+        async open() {
+            this.ensureModal();
+            Modal.open('manage-categories-modal');
+            await this.load();
+        },
+
+        async load() {
+            const res = await API.get('/inventory/categories');
+            const tbody = document.getElementById('mc-tbody');
+            if (!tbody) return;
+            if (!res?.success) {
+                tbody.innerHTML = `<tr><td colspan="4" class="text-center text-muted">${escHtml(res?.message || 'Could not load categories.')}</td></tr>`;
+                return;
+            }
+            this.rows = res.data || [];
+            tbody.innerHTML = this.rows.length ? this.rows.map(r => `
+                <tr>
+                    <td><input type="checkbox" class="mc-pick" value="${escHtml(r.name)}" aria-label="Select ${escHtml(r.name)}"></td>
+                    <td class="col-text">${escHtml(r.name)}</td>
+                    <td class="col-num">${r.brands}</td>
+                    <td class="mc-actions">
+                        <button type="button" class="btn btn-light btn-sm" data-act="rename" data-name="${escHtml(r.name)}">Rename</button>
+                    </td>
+                </tr>`).join('')
+                : '<tr><td colspan="4" class="text-center text-muted">No categories yet.</td></tr>';
+            document.getElementById('mc-delete').disabled = true;
+        },
+
+        // A small window asking for one or more names. Resolves to an array of
+        // clean names, or null if cancelled.
+        askNames({ title, intro, labels, initial = [], confirmText = 'Continue', allowMore = false }) {
+            return new Promise((resolve) => {
+                let overlay = document.getElementById('category-name-modal');
+                if (!overlay) {
+                    overlay = document.createElement('div');
+                    overlay.className = 'modal-overlay';
+                    overlay.id = 'category-name-modal';
+                    overlay.innerHTML = `
+                        <div class="modal" style="max-width:420px">
+                            <div class="modal-header"><h3 id="cn-title"></h3></div>
+                            <div class="modal-body">
+                                <p class="mc-note" id="cn-intro"></p>
+                                <div id="cn-inputs"></div>
+                                <button type="button" class="btn btn-light btn-sm hidden" id="cn-more">+ Add another</button>
+                                <p class="error-msg" id="cn-error" style="min-height:18px;margin-top:8px"></p>
+                            </div>
+                            <div class="modal-footer">
+                                <button class="btn btn-light" id="cn-cancel">Cancel</button>
+                                <button class="btn btn-primary" id="cn-ok">Continue</button>
+                            </div>
+                        </div>`;
+                    document.body.appendChild(overlay);
+                }
+                document.getElementById('cn-title').textContent = title;
+                document.getElementById('cn-intro').textContent = intro || '';
+                document.getElementById('cn-error').textContent = '';
+                document.getElementById('cn-ok').textContent = confirmText;
+                const holder = document.getElementById('cn-inputs');
+                const addInput = (label, value = '') => {
+                    const row = document.createElement('div');
+                    row.className = 'form-group mc-name-row';
+                    row.innerHTML = `<label class="form-label">${escHtml(label)}</label><input type="text" class="form-control cn-input" maxlength="60" value="${escHtml(value)}" autocomplete="off">`;
+                    holder.appendChild(row);
+                };
+                holder.innerHTML = '';
+                labels.forEach((label, i) => addInput(label, initial[i] || ''));
+                const more = document.getElementById('cn-more');
+                more.classList.toggle('hidden', !allowMore);
+                more.onclick = () => addInput(`Another category`);
+
+                const finish = (value) => { Modal.close('category-name-modal'); resolve(value); };
+                document.getElementById('cn-cancel').onclick = () => finish(null);
+                document.getElementById('cn-ok').onclick = () => {
+                    const names = [...holder.querySelectorAll('.cn-input')].map(i => i.value.trim().replace(/\s+/g, ' ')).filter(Boolean);
+                    const err = document.getElementById('cn-error');
+                    if (names.length < labels.length && !allowMore) { err.textContent = 'Please fill in every name.'; return; }
+                    if (allowMore && names.length < 2) { err.textContent = 'Give at least two names.'; return; }
+                    if (names.some(n => n.includes('|'))) { err.textContent = 'A name cannot contain the | character.'; return; }
+                    if (names.some(n => n.length > 60)) { err.textContent = 'A name can be at most 60 characters.'; return; }
+                    if (new Set(names.map(n => n.toLowerCase())).size !== names.length) { err.textContent = 'The names must be different from each other.'; return; }
+                    finish(names);
+                };
+                Modal.open('category-name-modal');
+                setTimeout(() => holder.querySelector('.cn-input')?.focus(), 50);
+            });
+        },
+
+        async apply(kind, payload, title, message) {
+            const ok = await TypedConfirm.show({
+                title, message,
+                confirmText:  'Apply Change',
+                finalMessage: 'This changes every product that uses it.'
+            });
+            if (!ok) return;
+            const res = await API.post(`/inventory/categories/${kind}`, payload);
+            if (res?.success) {
+                Toast.show(res.message, 'success');
+                await this.load();
+                await loadCategories();     // the filter list and the picker
+                loadProducts();
+            } else if (res?.details?.blocked?.length) {
+                // refused: some product would be left with no category -- say which ones
+                await this.showBlocked(res.details.blocked, payload.names);
+            } else {
+                Toast.show(res?.message || 'The change could not be applied.', 'error');
+            }
+        },
+
+        // The server refused a Delete because products would be left with no category. This is
+        // a notice with one OK button (not a toast that vanishes), so it is actually read, and
+        // it names the products that depend on the category.
+        async showBlocked(blocked, askedNames) {
+            const asked = (askedNames || []).filter(Boolean);
+            const n = blocked.length;
+            const lead = asked.length === 1
+                ? `<strong>${escHtml(asked[0])}</strong> is the <strong>only</strong> category of ${n} product${n === 1 ? '' : 's'}, so it cannot be deleted.`
+                : `${n} product${n === 1 ? '' : 's'} would be left with <strong>no category</strong>, so nothing was deleted.`;
+            const rows = blocked.slice(0, 8).map(b => `
+                <div class="dlg-item"><div>${escHtml(b.product)}
+                    <small>${b.categories.length === 1 ? 'Only category' : 'Categories'}: ${escHtml(b.categories.join(', '))}</small></div></div>`).join('');
+            const more = n > 8 ? `<div class="dlg-item"><div><small>and ${n - 8} more</small></div></div>` : '';
+            await ConfirmDialog.show({
+                title:       'Cannot Delete This Category',
+                html:        `<div class="dlg-alert warn" style="margin-top:0">${lead}</div>
+                              <div class="dlg-items" style="margin-top:12px">${rows}${more}</div>
+                              <div class="dlg-alert info">Every product needs at least one category. Give ${n === 1 ? 'that product' : 'those products'} another category first (Edit Product), or use <strong>Rename</strong> instead. Nothing was changed.</div>`,
+                confirmText: 'OK',
+                danger:      false,
+                hideCancel:  true
+            });
+        },
+
+        brandsOf(name) { return this.rows.find(r => r.name.toLowerCase() === name.toLowerCase())?.brands ?? 0; },
+
+        async rename(name) {
+            const names = await this.askNames({ title: `Rename "${name}"`, intro: 'Enter the new name for this category.', labels: ['New name'], initial: [name], confirmText: 'Continue' });
+            if (!names) return;
+            const to = names[0];
+            if (to.toLowerCase() === name.toLowerCase() && to === name) return;
+            const exists = this.rows.some(r => r.name.toLowerCase() === to.toLowerCase() && r.name.toLowerCase() !== name.toLowerCase());
+            await this.apply('rename', { from: name, to }, 'Rename Category',
+                `Rename "${name}" to "${to}" on ${this.brandsOf(name)} product${this.brandsOf(name) === 1 ? '' : 's'}.` +
+                (exists ? `\n\n"${to}" already exists, so the two will be combined.` : ''));
+        },
+
+        // Add a category to the list (it can be ticked on products afterwards)
+        async add() {
+            const names = await this.askNames({ title: 'Add Category', intro: 'Add a category to the list. You can tick it on products afterwards.', labels: ['Category name'], confirmText: 'Add' });
+            if (!names) return;
+            const res = await API.post('/inventory/categories', { name: names[0] });
+            if (res?.success) {
+                Toast.show(res.message, 'success');
+                await this.load();
+                await loadCategories();
+            } else {
+                Toast.show(res?.message || 'The category could not be added.', 'error');
+            }
+        },
+
+        // Delete every ticked category (one or several at once)
+        async remove() {
+            const picked = [...document.querySelectorAll('#mc-tbody input.mc-pick:checked')].map(i => i.value);
+            if (!picked.length) return;
+            const uses = picked.reduce((s, n) => s + this.brandsOf(n), 0);
+            await this.apply('delete', { names: picked }, `Delete ${picked.length} Categor${picked.length === 1 ? 'y' : 'ies'}`,
+                `Delete ${picked.map(p => `"${p}"`).join(', ')}.\n\n` +
+                (uses
+                    ? `They will be removed from the products that use them (up to ${uses}). A product cannot lose its ONLY category: if any would, nothing is deleted.`
+                    : 'None of them is used by a product yet.'));
+        }
+    };
+
+    // -- Import Results window: what happened to every row --
+    const ImportResults = {
+        show(result) {
+            if (!document.getElementById('import-result-modal')) {
+                const overlay = document.createElement('div');
+                overlay.className = 'modal-overlay';
+                overlay.id = 'import-result-modal';
+                overlay.innerHTML = `
+                    <div class="modal" style="max-width:680px">
+                        <div class="modal-header">
+                            <h3>Import Results</h3>
+                            <button class="btn-close" id="ir-close">X</button>
+                        </div>
+                        <div class="modal-body" id="ir-body" style="max-height:65vh;overflow-y:auto"></div>
+                        <div class="modal-footer"><button class="btn btn-primary" id="ir-close-2">Close</button></div>
+                    </div>`;
+                document.body.appendChild(overlay);
+                const close = () => Modal.close('import-result-modal');
+                document.getElementById('ir-close').addEventListener('click', close);
+                document.getElementById('ir-close-2').addEventListener('click', close);
+            }
+            const d = result.data || {};
+            const list = (items) => `<ul>${items.map(i => `<li>${escHtml(i)}</li>`).join('')}</ul>`;
+            document.getElementById('ir-body').innerHTML = `
+                <div class="ir-summary">${escHtml(result.message || 'Import complete.')}</div>
+                ${d.details?.length ? `<div class="ir-section"><h4>What happened to each row</h4>${list(d.details)}</div>` : ''}
+                ${d.errors?.length ? `<div class="ir-section ir-errors"><h4>Rows that could not be imported (${d.errors.length})</h4>${list(d.errors)}</div>` : ''}
+                ${d.field_mismatches?.length ? `<div class="ir-section ir-warnings"><h4>Details left unchanged (${d.field_mismatches.length})</h4>${list(d.field_mismatches)}</div>` : ''}
+                ${d.ignored_columns?.length ? `<div class="ir-section ir-warnings"><h4>Columns not recognized, so ignored</h4>${list(d.ignored_columns)}</div>` : ''}`;
+            Modal.open('import-result-modal');
+        }
+    };
+
+    // Inventory changes the server refused (a product or restock that could not be
+    // saved) show here, in plain words -- not only on the POS page.
+    SyncIssues.mount('inventory');
+
     const urlStatus = new URLSearchParams(window.location.search).get('status');
     if (urlStatus && statusFilter) statusFilter.value = urlStatus;
 
@@ -43,17 +521,17 @@ document.addEventListener('DOMContentLoaded', () => {
     SearchSuggest.attach(searchInput, {
         getItems:    () => products,
         getLabel:    p => p.name,
-        getSubLabel: p => `${p.category} \u00b7 ${p.item_count} item${p.item_count === 1 ? '' : 's'}`
+        getSubLabel: p => `${fmtCategory(p.category)} \u00b7 ${p.item_count} item${p.item_count === 1 ? '' : 's'}`
     });
 
     // ── Toolbar ───────────────────────────────────────────────
     document.getElementById('btn-add-product')?.addEventListener('click', openAddModal);
+    document.getElementById('btn-manage-categories')?.addEventListener('click', () => ManageCategories.open());
     document.getElementById('btn-import-csv')?.addEventListener('click', () => importInput?.click());
     importInput?.addEventListener('change', handleCSVImport);
     submitBtn?.addEventListener('click', handleFormSubmit);
 
-    document.getElementById('btn-download-template')?.addEventListener('click', async (e) => {
-        e.preventDefault();
+    document.getElementById('btn-download-template')?.addEventListener('click', async () => {
         const config = typeof getRuntimeConfig === 'function' ? getRuntimeConfig() : CONFIG;
         const ok = await downloadAuthenticatedFile(
             `${config.API_BASE}/inventory/import/template`,
@@ -87,8 +565,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const EXPORT_FILE_INFO = {
         excel: { path: 'excel', filename: 'PharmaTrack_Inventory_Report.xlsx' },
         pdf:   { path: 'pdf',   filename: 'PharmaTrack_Inventory_Report.pdf'  },
-        word:  { path: 'word',  filename: 'PharmaTrack_Inventory_Report.docx' },
-        csv:   { path: 'csv',   filename: 'PharmaTrack_Inventory_Report.csv'  }
+        word:  { path: 'word',  filename: 'PharmaTrack_Inventory_Report.docx' }
     };
 
     // Uses fetch (not a plain <a href>) since the endpoint needs the
@@ -111,7 +588,19 @@ document.addEventListener('DOMContentLoaded', () => {
             const res = await fetch(`${config.API_BASE}/inventory/export/${info.path}`, {
                 headers: token ? { 'Authorization': `Bearer ${token}` } : {}
             });
-            if (!res.ok) throw new Error('Export failed.');
+
+            if (!res.ok) {
+                // A real endpoint failure sends a JSON error body -- read
+                // it instead of a generic message, same fix as
+                // main.js's shared API.request().
+                let message = 'Export failed.';
+                try {
+                    const errBody = await res.json();
+                    if (errBody?.message) message = errBody.message;
+                } catch (e) { /* not JSON -- keep the generic message */ }
+                Toast.show(message, 'error');
+                return;
+            }
 
             const blob = await res.blob();
             const url  = URL.createObjectURL(blob);
@@ -123,6 +612,8 @@ document.addEventListener('DOMContentLoaded', () => {
             a.remove();
             URL.revokeObjectURL(url);
         } catch (err) {
+            // Genuine network-level failure (fetch() itself rejected) --
+            // distinct from the clean-but-unsuccessful response above.
             Toast.show('Export failed. Check your connection.', 'error');
         }
     }
@@ -149,8 +640,54 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         products = data.data;
-        renderTable(products);
         if (totalCount) totalCount.textContent = products.length;
+
+        // Sort wiring is done ONCE -- re-attaching on every load (search/
+        // filter changes all re-fetch from the server) would double up
+        // click listeners on the same header cells. getData (not a plain
+        // array) means this stays correct even though `products` gets
+        // REASSIGNED to a new array on every load above -- see TableSort's
+        // own comment for why a plain array reference would go stale here.
+        if (!invSort) {
+            invSort = TableSort.attach(document.querySelector('.inventory-table thead'), {
+                getData: () => products,
+                getValue: (row, key) => {
+                    if (key === 'stock_quantity' || key === 'price') return parseFloat(row[key] || 0);
+                    if (key === 'earliest_expiry_days_left') {
+                        // No expiry left to compare (every item already
+                        // expired) sorts to the end regardless of
+                        // direction -- null is handled that way by
+                        // TableSort itself already.
+                        return row.earliest_expiry ? parseInt(row.earliest_expiry_days_left) : null;
+                    }
+                    return (row[key] || '').toString().toLowerCase();
+                },
+                // Goes through Paginate now, not straight to renderTable --
+                // sorting changes ORDER, and pagination needs to reslice
+                // against that new order, not just redraw whatever page
+                // was already showing against the OLD order.
+                onSorted: () => invPaginate.resetToFirstPage()
+            });
+        }
+
+        // Same one-time-attach guard as invSort above.
+        if (!invPaginate) {
+            invPaginate = Paginate.attach(document.getElementById('inv-pagination'), {
+                getData:  () => products,
+                onRender: (pageItems) => renderTable(pageItems),
+                pageSize: 25
+            });
+        }
+
+        // Always -- TableSort's resort() unconditionally triggers onSorted
+        // at the end regardless of whether a sort is currently active (see
+        // that function's own implementation), which is exactly what's
+        // needed here either way: on the very first load, this is what
+        // produces the FIRST render at all (attach() alone doesn't render
+        // without a defaultKey, which this doesn't use); on every later
+        // load (a fresh search/filter/Refresh), this re-sorts the new data
+        // (a no-op if nothing's sorted) and resets to page 1 against it.
+        invSort.resort();
     }
 
     // ─────────────────────────────────────────────────────────
@@ -165,31 +702,35 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
 
+        const activeKey = invSort?.getCurrentSort().key;
+        const tint = (key) => key === activeKey ? ' sort-col-tint' : '';
+
         tbody.innerHTML = data.map(p => {
             const statusBadge = getStatusBadge(p);
             const expiryCell  = getEarliestExpiryCell(p);
             const rowClass    = getRowClass(p);
             return `
             <tr class="${rowClass}" data-id="${p.id}">
-                <td title="${escHtml(p.name)}">
+                <td class="col-text sticky-col${tint('name')}" title="${escHtml(p.name)}">
                     <div class="fw-600">${escHtml(p.name)}</div>
                     ${p.generic_name ? `<div class="text-muted" style="font-size:0.73rem">${escHtml(p.generic_name)}</div>` : ''}
                 </td>
-                <td title="${escHtml(p.category)}">${escHtml(p.category)}</td>
-                <td>
+                <td class="col-text${tint('category')}" title="${escHtml(fmtCategory(p.category))}">${escHtml(fmtCategory(p.category))}</td>
+                <td class="col-num${tint('stock_quantity')}">
                     <span class="${p.stock_quantity <= p.low_stock_threshold ? 'text-danger fw-600' : ''}">
                         ${p.stock_quantity}
                     </span>
                     <div class="text-muted" style="font-size:0.7rem">${p.item_count} item${p.item_count === 1 ? '' : 's'}</div>
                 </td>
-                <td>${Fmt.currency(p.price)}</td>
-                <td>${expiryCell}</td>
-                <td>${statusBadge}</td>
+                <td class="col-num${tint('price')}">${Fmt.currency(p.price)}</td>
+                <td class="col-text${tint('earliest_expiry_days_left')}">${expiryCell}</td>
+                <td class="col-text${tint('effective_status')}">${statusBadge}</td>
                 <td>
-                    <div class="d-flex gap-8">
+                    <div class="d-flex gap-8 row-actions">
                         <button class="btn btn-light btn-sm btn-edit"    data-id="${p.id}" title="Edit">Edit</button>
                         <button class="btn btn-danger btn-sm btn-delete" data-id="${p.id}" title="Delete">Delete</button>
                     </div>
+                    <button class="kebab-trigger" data-id="${p.id}" data-name="${escHtml(p.name)}" title="More actions" aria-label="More actions">⋮</button>
                 </td>
             </tr>`;
         }).join('');
@@ -199,6 +740,16 @@ document.addEventListener('DOMContentLoaded', () => {
         });
         tbody.querySelectorAll('.btn-delete').forEach(btn => {
             btn.addEventListener('click', () => confirmDelete(parseInt(btn.dataset.id)));
+        });
+        // Touch-device equivalent of the two buttons above -- see
+        // .kebab-trigger in global.css, only ever visible where hover isn't
+        // available.
+        tbody.querySelectorAll('.kebab-trigger').forEach(btn => {
+            const id = parseInt(btn.dataset.id);
+            attachKebabMenu(btn, [
+                { label: 'Edit', onClick: () => openEditModal(id) },
+                { label: 'Delete', danger: true, onClick: () => confirmDelete(id) }
+            ]);
         });
     }
 
@@ -270,13 +821,18 @@ document.addEventListener('DOMContentLoaded', () => {
     // ─────────────────────────────────────────────────────────
     async function loadCategories() {
         const data = await OfflineAPI.get('/inventory/alerts/summary');
-        if (!data?.success || !categoryFilter) return;
+        if (!data?.success) return;
         const cats = data.data.categories || [];
+        CategoryPicker.setKnown(cats);          // the checkboxes in Add / Edit Product
+        if (!categoryFilter) return;
+        const keep = categoryFilter.value;      // re-runnable: Manage Categories calls this after a change
+        while (categoryFilter.options.length > 1) categoryFilter.remove(1);
         cats.forEach(cat => {
             const opt = document.createElement('option');
             opt.value = cat; opt.textContent = cat;
             categoryFilter.appendChild(opt);
         });
+        if (keep && cats.includes(keep)) categoryFilter.value = keep;
     }
 
     // ─────────────────────────────────────────────────────────
@@ -287,6 +843,7 @@ document.addEventListener('DOMContentLoaded', () => {
         currentItems = [];
         if (modalTitle) modalTitle.textContent = 'Add New Product';
         productForm?.reset();
+        CategoryPicker.setValue('');
         document.getElementById('field-first-item-row')?.classList.remove('hidden');
         document.getElementById('edit-only-item-section')?.classList.add('hidden');
         document.getElementById('field-barcode-preview')?.classList.add('hidden');
@@ -317,6 +874,11 @@ document.addEventListener('DOMContentLoaded', () => {
             const el = document.getElementById(`field-${f}`);
             if (el) el.value = p[f] ?? '';
         });
+        CategoryPicker.setValue(p.category);
+
+        // Tax Exempt checkbox (not a text field, so it isn't in the list above)
+        const taxExemptEl = document.getElementById('field-is_tax_exempt');
+        if (taxExemptEl) taxExemptEl.checked = Number(p.is_tax_exempt) === 1;
 
         document.getElementById('field-first-item-row')?.classList.add('hidden');
         document.getElementById('edit-only-item-section')?.classList.remove('hidden');
@@ -511,7 +1073,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     async function deleteItemRow(itemId) {
-        const confirmed = await ConfirmDialog.show({
+        const confirmed = await TypedConfirm.show({
             title:       'Delete Item No.',
             message:     'Remove this restock batch? This cannot be undone.',
             confirmText: 'Delete'
@@ -622,21 +1184,25 @@ document.addEventListener('DOMContentLoaded', () => {
             body.expiry_date    = document.getElementById('field-expiry_date')?.value              || '';
         }
 
+        body.is_tax_exempt = document.getElementById('field-is_tax_exempt')?.checked ? 1 : 0;
+
         ['generic_name', 'supplier', 'description'].forEach(k => {
             if (body[k] === '') body[k] = null;
         });
 
         const summary = editingId
             ? `Brand Name: ${body.name}${body.generic_name ? ' (' + body.generic_name + ')' : ''}\n` +
-              `Category: ${body.category}\n` +
+              `Category: ${fmtCategory(body.category)}\n` +
               `Price: ${Fmt.currency(body.price)}   Cost: ${Fmt.currency(body.cost)}\n` +
-              `Low-stock alert at: ${body.low_stock_threshold}\n\n` +
+              `Low-stock alert at: ${body.low_stock_threshold}\n` +
+              `Tax Exempt: ${body.is_tax_exempt ? 'Yes (no VAT)' : 'No'}\n\n` +
               `This updates ALL ${currentItems.length} Item No. entr${currentItems.length === 1 ? 'y' : 'ies'} under this product ` +
               `with these shared details. Stock/expiry per item is managed separately below.`
             : `Brand Name: ${body.name}${body.generic_name ? ' (' + body.generic_name + ')' : ''}\n` +
-              `Category: ${body.category}\n` +
+              `Category: ${fmtCategory(body.category)}\n` +
               `Price: ${Fmt.currency(body.price)}   Cost: ${Fmt.currency(body.cost)}\n` +
               `Stock: ${body.stock_quantity} units   Low-stock alert at: ${body.low_stock_threshold}\n` +
+              `Tax Exempt: ${body.is_tax_exempt ? 'Yes (no VAT)' : 'No'}\n` +
               `Expiry: ${Fmt.date(body.expiry_date)}`;
 
         const confirmed = await ConfirmDialog.show({
@@ -683,7 +1249,7 @@ document.addEventListener('DOMContentLoaded', () => {
     async function confirmDelete(id) {
         const p = products.find(x => x.id === id);
         if (!p) return;
-        const confirmed = await ConfirmDialog.show({
+        const confirmed = await TypedConfirm.show({
             title:       'Remove Product',
             message:     `Remove "${p.name}" and all ${p.item_count} of its Item No. entries from inventory?\n\nThis is a soft delete — historical orders will be preserved.`,
             confirmText: 'Remove'
@@ -743,6 +1309,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         if (result?.success) {
             Toast.show(result.message, 'success');
+            ImportResults.show(result);   // what happened to every row, and why any row failed
 
             // Field mismatches aren't errors -- the import still applied
             // the row's Stock Quantity/Expiry Date as a restock, it just
@@ -761,7 +1328,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
             const errors = result.data?.errors || [];
             if (errors.length) {
-                Toast.show(`${errors.length} row${errors.length === 1 ? '' : 's'} could not be imported. Check the browser console for specifics.`, 'warning');
+                Toast.show(`${errors.length} row${errors.length === 1 ? '' : 's'} could not be imported. See the results window for the reason on each row.`, 'warning');
                 console.warn('[Inventory Import] Row errors:', errors);
             }
 

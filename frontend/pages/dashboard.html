@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Dashboard – PharmaTrack</title>
+    <link rel="icon" type="image/png" href="../images/pharmatrack-logo.png">
     <link rel="stylesheet" href="../css/global.css">
     <link rel="stylesheet" href="../css/dashboard.css">
     <!-- Chart.js CDN -->
@@ -15,7 +16,7 @@
     <!-- ── Sidebar ──────────────────────────────────────────── -->
     <aside class="sidebar" id="sidebar">
         <div class="sidebar-brand">
-            <div class="brand-icon">💊</div>
+            <div class="brand-icon"><img src="../images/pharmatrack-logo.png" alt="PharmaTrack"></div>
             <div class="brand-text">
                 <h1>PharmaTrack</h1>
                 <p>Management System</p>
@@ -31,15 +32,15 @@
                 <li class="nav-item" data-roles="admin,super_admin,cashier">
                     <a href="pos.html"><span class="nav-icon"></span>Point of Sale</a>
                 </li>
+                <li class="nav-item" data-roles="admin,super_admin,cashier">
+                    <a href="reports.html"><span class="nav-icon"></span>Reports</a>
+                </li>
             </ul>
 
             <p class="nav-section-label">Management</p>
             <ul>
                 <li class="nav-item" data-roles="admin,super_admin">
                     <a href="inventory.html"><span class="nav-icon"></span>Inventory</a>
-                </li>
-                <li class="nav-item" data-roles="admin,super_admin">
-                    <a href="reports.html"><span class="nav-icon"></span>Reports</a>
                 </li>
                 <li class="nav-item" data-roles="admin,super_admin">
                     <a href="forecasting.html"><span class="nav-icon"></span>Forecasting</a>
@@ -156,7 +157,7 @@
                             <tr>
                                 <th style="width:30px"></th>
                                 <th>Order #</th>
-                                <th>Pharmacy Assistant</th>
+                                <th>Processed By</th>
                                 <th>Items</th>
                                 <th>Total</th>
                                 <th>Date/Time</th>
@@ -176,6 +177,7 @@
 
 <div id="toast-container" class="toast-container"></div>
 
+<script src="../js/passwordToggle.js"></script>
 <script src="../js/main.js"></script>
 <script src="../js/analytics.js"></script>
 </body>

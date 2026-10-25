@@ -102,7 +102,9 @@ const openSession = async (req, res, next) => {
     if (isCashier) {
         approver = await verifyManagerApproval(req.body);
         if (!approver) {
-            return res.status(401).json({ success: false, message: 'Invalid admin/owner credentials.' });
+            // 403, NOT 401: the browser treats any 401 as "your login expired" and
+            // signs you out, which is wrong for a mistyped MANAGER password.
+            return res.status(403).json({ success: false, message: 'Invalid admin/owner credentials.' });
         }
     }
 
@@ -169,7 +171,8 @@ function makeMovementHandler(type) {
         if (isCashier) {
             const manager = await verifyManagerApproval(req.body);
             if (!manager) {
-                return res.status(401).json({ success: false, message: 'Invalid admin/owner credentials.' });
+                // 403, not 401 (a 401 would sign the cashier out) -- see openSession
+                return res.status(403).json({ success: false, message: 'Invalid admin/owner credentials.' });
             }
             approverId   = manager.id;
             approverName = manager.name;
@@ -261,7 +264,8 @@ const closeSession = async (req, res, next) => {
     if (isCashier) {
         const manager = await verifyManagerApproval(req.body);
         if (!manager) {
-            return res.status(401).json({ success: false, message: 'Invalid admin/owner credentials.' });
+            // 403, not 401 (a 401 would sign the cashier out) -- see openSession
+            return res.status(403).json({ success: false, message: 'Invalid admin/owner credentials.' });
         }
         approverId   = manager.id;
         approverName = manager.name;

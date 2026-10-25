@@ -1,98 +1,104 @@
 // ============================================================
 // Mailer Utility
-// Sends transactional emails (currently just password-reset OTP codes)
-// via Gmail SMTP using an App Password — not the account's real
-// password. See EMAIL_USER / EMAIL_APP_PASSWORD in .env.
+// Sends transactional OTP emails via EmailJS's Node.js SDK (HTTPS API),
+// not SMTP and not the Gmail API directly.
 //
-// Nodemailer's 'gmail' shorthand service handles the host/port/security
-// details automatically (smtp.gmail.com, port 465, TLS).
+// Why EmailJS instead of the earlier approaches: Render's free tier
+// blocks all outbound SMTP ports (25/465/587), which killed the original
+// nodemailer/Gmail-SMTP setup entirely. The Gmail API (OAuth2) sidestepped
+// that by sending over HTTPS instead, but brought its own complexity --
+// a Google Cloud project, OAuth consent screen, test users, and a
+// 7-day refresh-token expiry while the app stays in "Testing" publishing
+// status (fixed by publishing the app, but still a lot of moving parts
+// for what is fundamentally "send a 6-digit code"). EmailJS connects to
+// the same Gmail account through ITS OWN already-approved Google app --
+// no Cloud Console project, no consent screen, no token expiry to
+// manage on our end at all.
+//
+// All three OTP situations (password reset, email change confirmation,
+// and the generic Add User/Change Password/Delete action confirmation)
+// now share ONE EmailJS template (see EMAILJS_TEMPLATE_ID) rather than
+// each having its own custom HTML email -- the template only has room
+// for the code and its expiry time, not a per-situation description, so
+// none of these emails say WHAT the code is for anymore, just that
+// there is one. That's a deliberate simplicity trade-off; if a
+// per-situation description is wanted later, it just needs a new
+// variable added to the template and threaded through here.
 // ============================================================
-const nodemailer = require('nodemailer');
+const emailjs = require('@emailjs/nodejs');
 
-let transporter = null;
+emailjs.init({
+    publicKey:  process.env.EMAILJS_PUBLIC_KEY,
+    privateKey: process.env.EMAILJS_PRIVATE_KEY // required for sending from a server (non-browser) context
+});
 
-function getTransporter() {
-    if (!transporter) {
-        transporter = nodemailer.createTransport({
-            service: 'gmail',
-            auth: {
-                user: process.env.EMAIL_USER,
-                pass: process.env.EMAIL_APP_PASSWORD
-            }
-        });
-    }
-    return transporter;
+// Formats "when this code stops working" as a plain clock time in the
+// pharmacy's own timezone (Asia/Manila), e.g. "2:15 PM" -- matches the
+// EmailJS template's own wording ("valid for 15 minutes till {{time}}").
+function formatExpiryTime(minutesFromNow) {
+    const expiry = new Date(Date.now() + minutesFromNow * 60 * 1000);
+    return expiry.toLocaleTimeString('en-US', {
+        timeZone: 'Asia/Manila',
+        hour:     '2-digit',
+        minute:   '2-digit',
+        hour12:   true
+    });
+}
+
+/**
+ * Sends the shared OTP template via EmailJS. Template variables
+ * ({{email}}, {{passcode}}, {{time}}) must match exactly what's actually
+ * defined in the EmailJS dashboard template (EMAILJS_TEMPLATE_ID) --
+ * changing them on either side without the other breaks sending.
+ */
+async function sendOtpViaEmailJs(toEmail, otp) {
+    await emailjs.send(
+        process.env.EMAILJS_SERVICE_ID,
+        process.env.EMAILJS_TEMPLATE_ID,
+        {
+            email:    toEmail,
+            passcode: otp,
+            time:     formatExpiryTime(15) // keep in sync with authController.js's OTP_EXPIRY_MINUTES
+        }
+    );
 }
 
 /**
  * Sends a 6-digit OTP code for password reset.
  * @param {string} toEmail
  * @param {string} otp - plain 6-digit code (never store this anywhere, only its hash)
- * @param {string} userName
+ * @param {string} userName - unused with the shared template (kept in the signature so authController.js doesn't need to change)
  */
 async function sendOtpEmail(toEmail, otp, userName) {
-    const fromAddress = process.env.EMAIL_USER;
-
-    await getTransporter().sendMail({
-        from: `"PharmaTrack" <${fromAddress}>`,
-        to: toEmail,
-        subject: 'Your PharmaTrack password reset code',
-        html: `
-            <div style="font-family:Segoe UI,Arial,sans-serif;max-width:420px;margin:0 auto;padding:24px;border:1px solid #e9ecef;border-radius:12px;">
-                <div style="text-align:center;margin-bottom:20px">
-                    <div style="font-size:28px">💊</div>
-                    <div style="font-size:18px;font-weight:700;color:#0d6efd">PharmaTrack</div>
-                </div>
-                <p style="font-size:14px;color:#212529">Hi ${userName || 'there'},</p>
-                <p style="font-size:14px;color:#212529">Use this code to reset your password. It expires in 10 minutes.</p>
-                <div style="text-align:center;margin:24px 0">
-                    <span style="font-size:32px;font-weight:700;letter-spacing:8px;color:#0d6efd">${otp}</span>
-                </div>
-                <p style="font-size:12px;color:#6c757d">If you didn't request this, you can safely ignore this email — your password won't change unless this code is used.</p>
-            </div>
-        `
-    });
+    await sendOtpViaEmailJs(toEmail, otp);
 }
 
 /**
  * Sends a 6-digit OTP code confirming an EMAIL CHANGE on a user account.
- * Deliberately sent to the person PERFORMING the change (the admin/owner
- * doing the edit in User Management), not to the target account's new or
- * old address -- this confirms the person at the keyboard actually owns
- * the session making the request, the same way a re-authentication step
- * would, rather than confirming that the new address is reachable.
+ * Sent to the person PERFORMING the change (the admin/owner doing the
+ * edit in User Management), not to the target account's new or old
+ * address.
  * @param {string} toEmail - the requester's (admin/owner's) own email
  * @param {string} otp - plain 6-digit code (never store this anywhere, only its hash)
- * @param {string} requesterName - name of the admin/owner making the change
- * @param {string} targetUserName - name of the account whose email is being changed
- * @param {string} newEmail - the email address being changed TO
+ * @param {string} requesterName - unused with the shared template
+ * @param {string} targetUserName - unused with the shared template
+ * @param {string} newEmail - unused with the shared template
  */
 async function sendEmailChangeOtp(toEmail, otp, requesterName, targetUserName, newEmail) {
-    const fromAddress = process.env.EMAIL_USER;
-
-    await getTransporter().sendMail({
-        from: `"PharmaTrack" <${fromAddress}>`,
-        to: toEmail,
-        subject: 'Your PharmaTrack email change verification code',
-        html: `
-            <div style="font-family:Segoe UI,Arial,sans-serif;max-width:420px;margin:0 auto;padding:24px;border:1px solid #e9ecef;border-radius:12px;">
-                <div style="text-align:center;margin-bottom:20px">
-                    <div style="font-size:28px">💊</div>
-                    <div style="font-size:18px;font-weight:700;color:#0d6efd">PharmaTrack</div>
-                </div>
-                <p style="font-size:14px;color:#212529">Hi ${requesterName || 'there'},</p>
-                <p style="font-size:14px;color:#212529">
-                    You requested to change the email address for the account
-                    <strong>${targetUserName || 'a user'}</strong> to <strong>${newEmail}</strong>.
-                    Use this code to confirm the change. It expires in 10 minutes.
-                </p>
-                <div style="text-align:center;margin:24px 0">
-                    <span style="font-size:32px;font-weight:700;letter-spacing:8px;color:#0d6efd">${otp}</span>
-                </div>
-                <p style="font-size:12px;color:#6c757d">If you didn't request this, you can safely ignore this email and the address will not change -- but you may want to check who has access to your User Management page.</p>
-            </div>
-        `
-    });
+    await sendOtpViaEmailJs(toEmail, otp);
 }
 
-module.exports = { sendOtpEmail, sendEmailChangeOtp };
+/**
+ * Sends a 6-digit OTP code confirming a sensitive User Management action
+ * (Add User, Change Password, or Delete/Deactivate) -- sent to the
+ * person PERFORMING the action.
+ * @param {string} toEmail - the requester's (owner's) own email
+ * @param {string} otp - plain 6-digit code (never store this anywhere, only its hash)
+ * @param {string} requesterName - unused with the shared template
+ * @param {string} actionDescriptionHtml - unused with the shared template
+ */
+async function sendActionOtp(toEmail, otp, requesterName, actionDescriptionHtml) {
+    await sendOtpViaEmailJs(toEmail, otp);
+}
+
+module.exports = { sendOtpEmail, sendEmailChangeOtp, sendActionOtp };

@@ -4,15 +4,17 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Inventory – PharmaTrack</title>
+    <link rel="icon" type="image/png" href="../images/pharmatrack-logo.png">
     <link rel="stylesheet" href="../css/global.css">
     <link rel="stylesheet" href="../css/inventory.css">
+    <link rel="stylesheet" href="../css/categories.css">
 </head>
-<body>
+<body class="confined-page">
 <div class="app-container">
 
     <aside class="sidebar" id="sidebar">
         <div class="sidebar-brand">
-            <div class="brand-icon">💊</div>
+            <div class="brand-icon"><img src="../images/pharmatrack-logo.png" alt="PharmaTrack"></div>
             <div class="brand-text"><h1>PharmaTrack</h1><p>Management System</p></div>
         </div>
         <nav class="sidebar-nav">
@@ -20,11 +22,11 @@
             <ul>
                 <li class="nav-item" data-roles="admin,super_admin,cashier"><a href="dashboard.html"><span class="nav-icon"></span> Dashboard</a></li>
                 <li class="nav-item" data-roles="admin,super_admin,cashier"><a href="pos.html"><span class="nav-icon"></span> Point of Sale</a></li>
+                <li class="nav-item" data-roles="admin,super_admin,cashier"><a href="reports.html"><span class="nav-icon"></span> Reports</a></li>
             </ul>
             <p class="nav-section-label">Management</p>
             <ul>
                 <li class="nav-item active" data-roles="admin,super_admin"><a href="inventory.html"><span class="nav-icon"></span> Inventory</a></li>
-                <li class="nav-item" data-roles="admin,super_admin"><a href="reports.html"><span class="nav-icon"></span> Reports</a></li>
                 <li class="nav-item" data-roles="admin,super_admin"><a href="forecasting.html"><span class="nav-icon"></span> Forecasting</a></li>
             </ul>
             <p class="nav-section-label">Admin</p>
@@ -84,14 +86,14 @@
             <div class="page-header" style="justify-content:flex-end;margin-bottom:12px">
                 <div class="d-flex gap-8" style="align-items:center">
                     <button class="btn btn-outline" id="btn-import-csv">Import CSV/Excel</button>
-                    <a href="#" id="btn-download-template" style="font-size:0.78rem;color:var(--secondary);text-decoration:underline;white-space:nowrap">Download Template</a>
+                    <button class="btn btn-outline" id="btn-download-template">Download Template</button>
+                    <button class="btn btn-outline" id="btn-manage-categories">Manage Categories</button>
                     <div class="export-dropdown" id="export-dropdown">
                         <button class="btn btn-outline" id="btn-export-toggle">Export ▾</button>
                         <div class="export-menu hidden" id="export-menu">
                             <button class="export-menu-item" data-format="excel">Excel (.xlsx)</button>
                             <button class="export-menu-item" data-format="pdf">PDF</button>
                             <button class="export-menu-item" data-format="word">Word (.docx)</button>
-                            <button class="export-menu-item" data-format="csv">CSV (.csv)</button>
                         </div>
                     </div>
                     <button class="btn btn-primary" id="btn-add-product">＋ Add Product</button>
@@ -99,8 +101,8 @@
                 </div>
             </div>
 
-            <div class="card" style="padding:0">
-                <div class="table-container">
+            <div class="card confined-card-wrapper" style="padding:0">
+                <div class="table-container confined-scroll-area">
                     <table class="table inventory-table">
                         <colgroup>
                             <col style="width:21%">
@@ -113,12 +115,12 @@
                         </colgroup>
                         <thead>
                             <tr>
-                                <th>Brand Name</th>
-                                <th>Category</th>
-                                <th>Stock</th>
-                                <th>Price</th>
-                                <th>Earliest Expiry</th>
-                                <th>Status</th>
+                                <th class="col-text sticky-col sortable-col" data-sort-key="name">Brand Name</th>
+                                <th class="col-text sortable-col" data-sort-key="category">Category</th>
+                                <th class="col-num sortable-col" data-sort-key="stock_quantity">Stock</th>
+                                <th class="col-num sortable-col" data-sort-key="price">Price</th>
+                                <th class="col-text sortable-col" data-sort-key="earliest_expiry_days_left">Earliest Expiry</th>
+                                <th class="col-text sortable-col" data-sort-key="effective_status">Status</th>
                                 <th>Actions</th>
                             </tr>
                         </thead>
@@ -130,6 +132,9 @@
                     </table>
                 </div>
             </div>
+
+            <!-- Pagination -->
+            <div class="pagination" id="inv-pagination"></div>
         </main>
     </div>
 </div>
@@ -157,9 +162,20 @@
                 </div>
                 <div class="form-row">
                     <div class="form-group">
-                        <label class="form-label">Category *</label>
-                        <input type="text" id="field-category" name="category"
-                               class="form-control" required placeholder="Analgesic">
+                        <label class="form-label">Category * <span class="field-hint">choose one or more</span></label>
+                        <!-- Holds the chosen categories joined with | (e.g. Analgesic|Antipyretic);
+                             the checkboxes below keep it up to date. -->
+                        <input type="hidden" id="field-category" name="category">
+                        <!-- Same look as the product search on the Forecasting page: the input on
+                             top, the list of categories opening BELOW it, each with a checkbox. -->
+                        <div class="category-combo" id="category-combo">
+                            <input type="text" id="field-new-category" class="form-control" maxlength="60"
+                                   placeholder="Search or add a category..." autocomplete="off"
+                                   role="combobox" aria-expanded="false" aria-controls="category-list">
+                            <div id="category-list" class="category-list hidden" role="listbox"></div>
+                        </div>
+                        <div id="category-selected" class="category-selected"></div>
+                        <div id="category-suggestion" class="category-suggestion hidden" role="status"></div>
                     </div>
                     <div class="form-group">
                         <label class="form-label">Supplier</label>
@@ -183,6 +199,15 @@
                         <input type="number" id="field-low_stock_threshold" name="low_stock_threshold"
                                class="form-control" min="1" value="10">
                     </div>
+                </div>
+
+                <!-- Tax Exempt: no VAT is charged on this brand at the POS. Saved on
+                     every Item No. of the brand, like the other shared fields. -->
+                <div class="form-group">
+                    <label style="display:flex;align-items:center;gap:8px;font-size:0.875rem;cursor:pointer">
+                        <input type="checkbox" id="field-is_tax_exempt" style="width:16px;height:16px">
+                        <span>Tax Exempt (no VAT on this brand)</span>
+                    </label>
                 </div>
 
                 <!-- ADD mode only: the product's very first Item No.,
@@ -264,6 +289,7 @@
 
 <div id="toast-container" class="toast-container"></div>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jsbarcode/3.12.3/JsBarcode.all.min.js"></script>
+<script src="../js/passwordToggle.js"></script>
 <script src="../js/main.js"></script>
 <script src="../js/offlineSync.js"></script>
 <script src="../js/inventory.js"></script>

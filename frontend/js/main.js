@@ -47,19 +47,42 @@ const API = {
             const res  = await fetch(`${CONFIG.API_BASE}${endpoint}`, config);
             clearTimeout(timeoutId);
 
-            if (!res.ok) {
-                if (res.status === 401) {
-                    // Token expired or invalid — force logout
-                    Auth.logout();
-                    return null;
-                }
-                throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+            // Parsed regardless of status -- a 400/403/409/etc. still has
+            // a real {success:false, message:'...'} body the caller needs
+            // to read (e.g. "Current password is incorrect", "Email
+            // already in use"). Previously only a 200 OK ever got its body
+            // read; every other status threw and lost that message to the
+            // generic "Connection error" catch below -- which is exactly
+            // why a validation failure kept looking identical to an actual
+            // dead server. Falls back to null only if the body genuinely
+            // isn't JSON.
+            let data = null;
+            try { data = await res.json(); } catch (e) { /* not JSON -- data stays null */ }
+
+            if (res.status === 401) {
+                // Token expired/invalid/deactivated -- see
+                // authMiddleware.js's verifyToken for exactly which. The
+                // server's own message is passed through to the login page
+                // rather than silently redirecting with no explanation.
+                Auth.logout(data?.message || 'Your session expired. Please log in again.');
+                return null;
             }
 
-            const data = await res.json();
+            if (!res.ok) {
+                // A real HTTP error, but WITH a parsed body -- return it as-
+                // is so the caller can read result.message, instead of
+                // throwing and losing it to the generic toast below.
+                return data || { success: false, message: `HTTP ${res.status}: ${res.statusText}` };
+            }
+
             return data;
 
         } catch (err) {
+            // A GENUINE network-level failure -- fetch() itself rejected
+            // (dropped connection, DNS failure, CORS) or the abort timeout
+            // above fired. This is the actual "server unreachable" case,
+            // distinct from the clean-but-unsuccessful HTTP responses
+            // handled above.
             if (err.name === 'AbortError') {
                 console.error(`[API Timeout] ${endpoint}: Request took too long`);
                 Toast.show('Server not responding. Check your connection.', 'error');
@@ -121,9 +144,14 @@ const Auth = {
         return merged;
     },
 
-    logout() {
+    logout(reason) {
         localStorage.removeItem(CONFIG.TOKEN_KEY);
         localStorage.removeItem(CONFIG.USER_KEY);
+        // sessionStorage (not a URL param) since this needs to survive
+        // exactly one navigation and then be gone -- login.html reads and
+        // immediately clears it on load, so it never lingers or reappears
+        // on a later, unrelated visit to the login page.
+        if (reason) sessionStorage.setItem('pharmatrack_logout_reason', reason);
         window.location.href = '../pages/login.html';
     },
 
@@ -190,13 +218,11 @@ const Toast = {
     show(message, type = 'info', title = '') {
         if (!this.container) this.init();
 
-        const icons = { success: '✅', error: '❌', warning: '⚠️', info: 'ℹ️' };
         const defaultTitles = { success: 'Success', error: 'Error', warning: 'Warning', info: 'Notice' };
 
         const toast = document.createElement('div');
         toast.className = `toast ${type}`;
         toast.innerHTML = `
-            <span class="toast-icon">${icons[type] || icons.info}</span>
             <div>
                 <div class="toast-title">${title || defaultTitles[type]}</div>
                 <div class="toast-message">${message}</div>
@@ -276,7 +302,10 @@ const Nav = {
         // Display-only label — the underlying role value stays 'super_admin'/
         // 'cashier' everywhere in code/DB/JWT; this only changes what's shown
         // on screen, same as AUDIT_ROLE_LABELS/ROLE_LABELS elsewhere in the app.
-        const roleLabel = user.role === 'super_admin' ? 'Owner'
+        // Owner/Admin label swap: super_admin now displays as "Admin" (was
+        // "Owner") -- the DB value and every permission check are unchanged.
+        const roleLabel = user.role === 'super_admin' ? 'Admin'
+            : user.role === 'admin'   ? 'Owner'
             : user.role === 'cashier' ? 'Pharmacy Assistant'
             : user.role.replace('_', ' ');
 
@@ -371,6 +400,26 @@ const Nav = {
         document.querySelectorAll('[data-action="logout"]').forEach(el => {
             el.addEventListener('click', async (e) => {
                 e.preventDefault();
+
+                // Anything made on this computer that has NOT reached the server yet stays on
+                // this computer when you sign out. Say so, instead of a bare "are you sure?".
+                const left = await OfflineLeftovers.count(Auth.getUser()?.id);
+                if (left.sales + left.changes > 0) {
+                    const parts = [];
+                    if (left.sales)   parts.push(`<strong>${left.sales} sale${left.sales === 1 ? '' : 's'}</strong>`);
+                    if (left.changes) parts.push(`<strong>${left.changes} change${left.changes === 1 ? '' : 's'}</strong>`);
+                    const confirmedWithWarning = await ConfirmDialog.show({
+                        title:       'Unsent Work on This Computer',
+                        html:        `<div class="dlg-alert warn" style="margin-top:0">You have ${parts.join(' and ')} that ${left.sales + left.changes === 1 ? 'has' : 'have'} <strong>not reached the server yet</strong>.</div>
+                                      <p style="margin:12px 0">If you sign out now they stay on this computer and are only sent after <strong>you</strong> sign in here again, with an internet connection. Until then they are missing from the reports, and ${left.sales ? 'the register cannot be closed with sales still waiting.' : 'other computers will not see them.'}</p>
+                                      <div class="dlg-alert info">Better: stay signed in, make sure you are online, and wait for the "waiting to sync" or "Pending Sales" note to disappear.</div>`,
+                        confirmText: 'Sign Out Anyway',
+                        danger:      true
+                    });
+                    if (confirmedWithWarning) Auth.logout();
+                    return;
+                }
+
                 const confirmed = await ConfirmDialog.show({
                     title:       'Sign Out',
                     message:     'Are you sure you want to sign out?',
@@ -378,6 +427,47 @@ const Nav = {
                 });
                 if (confirmed) Auth.logout();
             });
+        });
+    }
+};
+
+// -- What is still waiting on THIS computer --
+// Offline sales and changes are kept in the browser's own database until they reach the
+// server. This only COUNTS them (read-only, nothing is changed), straight from that
+// database, so it works on every page -- not just the two that load the offline layer.
+const OfflineLeftovers = {
+    async count(userId) {
+        const none = { sales: 0, changes: 0 };
+        if (typeof indexedDB === 'undefined') return none;
+        return new Promise((resolve) => {
+            let request;
+            try { request = indexedDB.open('pharmatrack_offline'); } catch (e) { return resolve(none); }
+            // never create the database just to look: if it does not exist yet, cancel
+            request.onupgradeneeded = (ev) => { try { ev.target.transaction.abort(); } catch (e) { /* nothing to cancel */ } };
+            request.onerror   = () => resolve(none);
+            request.onblocked = () => resolve(none);
+            request.onsuccess = () => {
+                const db = request.result;
+                const done = (value) => { try { db.close && db.close(); } catch (e) { /* ignore */ } resolve(value); };
+                try {
+                    if (!db.objectStoreNames.contains('sync_queue')) return done(none);
+                    const getAll = db.transaction(['sync_queue'], 'readonly').objectStore('sync_queue').getAll();
+                    getAll.onerror   = () => done(none);
+                    getAll.onsuccess = () => {
+                        let sales = 0, changes = 0;
+                        for (const item of getAll.result || []) {
+                            if (String(item.endpoint || '').startsWith('/pos/checkout')) {
+                                // a sale belongs to whoever rang it up; one with no recorded owner counts as yours
+                                const owner = item.meta?.cashier_id;
+                                if (owner == null || owner === userId) sales++;
+                            } else {
+                                changes++;
+                            }
+                        }
+                        done({ sales, changes });
+                    };
+                } catch (e) { done(none); }
+            };
         });
     }
 };
@@ -398,7 +488,7 @@ const ConfirmDialog = {
                     <h3 id="confirm-dialog-title">Are you sure?</h3>
                 </div>
                 <div class="modal-body">
-                    <p id="confirm-dialog-message" style="font-size:0.9rem;color:var(--gray-700);white-space:pre-line"></p>
+                    <div id="confirm-dialog-message" style="font-size:0.9rem;color:var(--gray-700);white-space:pre-line"></div>
                 </div>
                 <div class="modal-footer">
                     <button class="btn btn-light" id="confirm-dialog-cancel">Cancel</button>
@@ -412,15 +502,31 @@ const ConfirmDialog = {
         // removed everywhere.
     },
 
-    show({ title = 'Are you sure?', message = '', confirmText = 'Confirm', danger = true } = {}) {
+    // `html` (optional) replaces the plain-text message with prepared markup -- an item
+    // list, a totals card, alert boxes -- so a confirmation reads at a glance. Whoever
+    // passes it must escape any user-supplied text (escHtml); `message` is the plain
+    // text used when no html is given.
+    // `hideCancel` turns it into a plain notice with a single OK button (a refusal the person
+    // only needs to read), instead of a question.
+    show({ title = 'Are you sure?', message = '', html = null, confirmText = 'Confirm', danger = true, hideCancel = false } = {}) {
         this.ensureModal();
         const overlay = document.getElementById('confirm-dialog-modal');
 
-        document.getElementById('confirm-dialog-title').textContent   = title;
-        document.getElementById('confirm-dialog-message').textContent = message;
+        document.getElementById('confirm-dialog-title').textContent = title;
+        const msgEl = document.getElementById('confirm-dialog-message');
+        if (html !== null) {
+            msgEl.style.whiteSpace = 'normal';
+            msgEl.innerHTML = html;
+        } else {
+            msgEl.style.whiteSpace = 'pre-line';
+            msgEl.textContent = message;
+        }
+        const box = overlay.querySelector('.modal');
+        if (box) box.style.maxWidth = html !== null ? '440px' : '380px';
 
         const okBtn     = document.getElementById('confirm-dialog-ok');
         const cancelBtn = document.getElementById('confirm-dialog-cancel');
+        cancelBtn.style.display = hideCancel ? 'none' : '';
         okBtn.textContent = confirmText;
         okBtn.className   = danger ? 'btn btn-danger' : 'btn btn-primary';
 
@@ -437,7 +543,96 @@ const ConfirmDialog = {
             okBtn.addEventListener('click', onOk);
             cancelBtn.addEventListener('click', onCancel);
 
+            Modal.bringToFront(overlay);
             overlay.classList.add('active');
+        });
+    }
+};
+
+// -- Typed Confirm (two steps) --
+// ONE component for every destructive action (deleting a product, an Item
+// No., a backup; restoring a backup; dismissing an unsynced sale; an Admin
+// changing their own access). Step 1 is the usual confirmation popup.
+// Step 2 asks the person to TYPE the word "confirm"; the final button stays
+// disabled until they have. The match ignores capitals and surrounding
+// spaces, so "Confirm " counts. Resolves true only after BOTH steps.
+//   TypedConfirm.show({ title, message, confirmText: 'Delete' })
+const TypedConfirm = {
+    WORD: 'confirm',
+
+    ensureModal() {
+        if (document.getElementById('typed-confirm-modal')) return;
+
+        const overlay = document.createElement('div');
+        overlay.className = 'modal-overlay';
+        overlay.id = 'typed-confirm-modal';
+        overlay.innerHTML = `
+            <div class="modal" style="max-width:380px">
+                <div class="modal-header">
+                    <h3 id="typed-confirm-title">Are you sure?</h3>
+                </div>
+                <div class="modal-body">
+                    <p id="typed-confirm-message" style="font-size:0.9rem;color:var(--gray-700);white-space:pre-line"></p>
+                    <div class="form-group" style="margin-top:14px;margin-bottom:0">
+                        <label class="form-label" for="typed-confirm-input">Type <strong>confirm</strong> to continue</label>
+                        <input type="text" id="typed-confirm-input" class="form-control" autocomplete="off"
+                               autocapitalize="off" spellcheck="false" placeholder="confirm">
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-light" id="typed-confirm-cancel">Cancel</button>
+                    <button class="btn btn-danger" id="typed-confirm-ok" disabled>Delete</button>
+                </div>
+            </div>`;
+        document.body.appendChild(overlay);
+    },
+
+    async show({ title = 'Are you sure?', message = '', confirmText = 'Delete', danger = true,
+                finalMessage = 'This cannot be undone.' } = {}) {
+
+        // Step 1: the ordinary confirmation popup
+        const first = await ConfirmDialog.show({ title, message, confirmText: 'Continue', danger });
+        if (!first) return false;
+
+        // Step 2: type the word to enable the final button
+        this.ensureModal();
+        const overlay   = document.getElementById('typed-confirm-modal');
+        const input     = document.getElementById('typed-confirm-input');
+        const okBtn     = document.getElementById('typed-confirm-ok');
+        const cancelBtn = document.getElementById('typed-confirm-cancel');
+
+        document.getElementById('typed-confirm-title').textContent   = title;
+        document.getElementById('typed-confirm-message').textContent = finalMessage;
+        okBtn.textContent = confirmText;
+        okBtn.className   = danger ? 'btn btn-danger' : 'btn btn-primary';
+        okBtn.disabled   = true;
+        input.value       = '';
+
+        return new Promise((resolve) => {
+            const matches = () => input.value.trim().toLowerCase() === TypedConfirm.WORD;
+
+            function cleanup(result) {
+                overlay.classList.remove('active');
+                input.removeEventListener('input', onInput);
+                input.removeEventListener('keydown', onKey);
+                okBtn.removeEventListener('click', onOk);
+                cancelBtn.removeEventListener('click', onCancel);
+                input.value = '';
+                resolve(result);
+            }
+            function onInput()  { okBtn.disabled = !matches(); }
+            function onKey(e)  { if (e.key === 'Enter' && matches()) { e.preventDefault(); cleanup(true); } }
+            function onOk()    { if (matches()) cleanup(true); }
+            function onCancel() { cleanup(false); }
+
+            input.addEventListener('input', onInput);
+            input.addEventListener('keydown', onKey);
+            okBtn.addEventListener('click', onOk);
+            cancelBtn.addEventListener('click', onCancel);
+
+            Modal.bringToFront(overlay);
+            overlay.classList.add('active');
+            setTimeout(() => input.focus(), 50);
         });
     }
 };
@@ -523,6 +718,7 @@ const ManagerApprovalDialog = {
             okBtn.addEventListener('click', onOk);
             cancelBtn.addEventListener('click', onCancel);
 
+            Modal.bringToFront(overlay);
             overlay.classList.add('active');
             setTimeout(() => emailEl.focus(), 50);
         });
@@ -767,6 +963,47 @@ const EditProfileModal = {
                         <input type="text" id="edit-profile-name" class="form-control" ${isCashier ? 'disabled' : ''}>
                         ${isCashier ? '<div style="font-size:0.72rem;color:var(--secondary);margin-top:4px">Only an admin or owner can change your name.</div>' : ''}
                     </div>
+
+                    <hr style="margin:18px 0;border:none;border-top:1px solid var(--gray-200)">
+
+                    <!-- The password and email fields stay hidden until their button is clicked. -->
+                    <div class="profile-change-actions">
+                        <button type="button" class="btn btn-outline btn-sm" id="btn-show-change-pw" aria-expanded="false">Change Password</button>
+                        <button type="button" class="btn btn-outline btn-sm" id="btn-show-change-email" aria-expanded="false">Change Email</button>
+                    </div>
+
+                    <div id="profile-password-section" class="profile-change-section hidden">
+                    <div class="form-group">
+                        <label class="form-label">Current Password</label>
+                        <input type="password" id="edit-profile-current-pw" class="form-control" autocomplete="current-password">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">New Password</label>
+                        <input type="password" id="edit-profile-new-pw" class="form-control" autocomplete="new-password" placeholder="Min. 8 characters">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Confirm New Password</label>
+                        <input type="password" id="edit-profile-confirm-pw" class="form-control" autocomplete="new-password">
+                    </div>
+                    </div>
+
+                    <div id="profile-email-section" class="profile-change-section hidden">
+                    <div class="form-group">
+                        <label class="form-label">Current Email</label>
+                        <input type="email" id="edit-profile-current-email" class="form-control" disabled>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">New Email</label>
+                        <input type="email" id="edit-profile-new-email" class="form-control" autocomplete="off" placeholder="name@example.com">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Confirm New Email</label>
+                        <input type="email" id="edit-profile-confirm-email" class="form-control" autocomplete="off">
+                        <div style="font-size:0.72rem;color:var(--secondary);margin-top:4px">A verification code is sent to your current email before the change takes effect.</div>
+                    </div>
+
+                    </div>
+
                     <p class="error-msg" id="edit-profile-error" aria-live="polite" style="min-height:20px"></p>
                 </div>
                 <div class="modal-footer">
@@ -777,6 +1014,48 @@ const EditProfileModal = {
         document.body.appendChild(overlay);
 
         document.getElementById('btn-close-edit-profile')?.addEventListener('click', () => Modal.close('edit-profile-modal'));
+
+        // "Change Password" / "Change Email" reveal their fields. Only one is open
+        // at a time (the two changes can't be saved together), and hiding a
+        // section clears what was typed in it, so a hidden field can never be
+        // saved by accident (or filled by the browser's autofill).
+        const pwBtn       = document.getElementById('btn-show-change-pw');
+        const emailBtn    = document.getElementById('btn-show-change-email');
+        const pwSection   = document.getElementById('profile-password-section');
+        const emailSection = document.getElementById('profile-email-section');
+
+        this.showSection = (which) => {
+            const showPw    = which === 'password';
+            const showEmail = which === 'email';
+            pwSection?.classList.toggle('hidden', !showPw);
+            emailSection?.classList.toggle('hidden', !showEmail);
+            pwBtn?.classList.toggle('active', showPw);
+            emailBtn?.classList.toggle('active', showEmail);
+            pwBtn?.setAttribute('aria-expanded', String(showPw));
+            emailBtn?.setAttribute('aria-expanded', String(showEmail));
+
+            if (!showPw) {
+                ['edit-profile-current-pw', 'edit-profile-new-pw', 'edit-profile-confirm-pw']
+                    .forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
+            }
+            if (!showEmail) {
+                ['edit-profile-new-email', 'edit-profile-confirm-email']
+                    .forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
+            }
+            const errEl = document.getElementById('edit-profile-error');
+            if (errEl) errEl.textContent = '';
+        };
+
+        pwBtn?.addEventListener('click', () => this.showSection(pwSection.classList.contains('hidden') ? 'password' : null));
+        emailBtn?.addEventListener('click', () => this.showSection(emailSection.classList.contains('hidden') ? 'email' : null));
+
+        // The form now has Name, Password and Email sections, so let its body
+        // scroll on short screens instead of running off the bottom.
+        const profileBody = overlay.querySelector('.modal-body');
+        if (profileBody) {
+            profileBody.style.maxHeight = 'calc(100dvh - 190px)';
+            profileBody.style.overflowY = 'auto';
+        }
         document.getElementById('btn-close-edit-profile-2')?.addEventListener('click', () => Modal.close('edit-profile-modal'));
 
         document.getElementById('btn-choose-avatar')?.addEventListener('click', () => {
@@ -808,21 +1087,105 @@ const EditProfileModal = {
             }
             if (this.pendingAvatar) body.avatar = this.pendingAvatar;
 
+            // Password change goes through a SEPARATE OTP-gated flow (see
+            // ChangePasswordOtpModal below), not this same PUT -- only
+            // validated here, never sent as part of `body`.
+            const currentPw = document.getElementById('edit-profile-current-pw')?.value;
+            const newPw     = document.getElementById('edit-profile-new-pw')?.value;
+            const confirmPw = document.getElementById('edit-profile-confirm-pw')?.value;
+            const wantsPasswordChange = !!(currentPw || newPw || confirmPw);
+
+            // Email change is its own OTP-gated flow (see ChangeEmailOtpModal
+            // below) -- the code goes to the CURRENT email on file.
+            const newEmail     = (document.getElementById('edit-profile-new-email')?.value || '').trim().toLowerCase();
+            const confirmEmail = (document.getElementById('edit-profile-confirm-email')?.value || '').trim().toLowerCase();
+            const wantsEmailChange = !!(newEmail || confirmEmail);
+
+            if (wantsEmailChange) {
+                // Both flows share one pending-code slot per person on the server,
+                // so doing both in one Save would silently drop the first.
+                if (wantsPasswordChange) {
+                    errEl.textContent = 'Change your email and your password one at a time. Clear one of them and save again.';
+                    return;
+                }
+                if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(newEmail)) { errEl.textContent = 'Enter a valid new email address.'; return; }
+                if (newEmail !== confirmEmail) { errEl.textContent = 'The new email addresses do not match.'; return; }
+                if (newEmail === (Auth.getUser()?.email || '').toLowerCase()) { errEl.textContent = 'That is already your email address.'; return; }
+            }
+
+            if (wantsPasswordChange) {
+                if (!currentPw) { errEl.textContent = 'Enter your current password to set a new one.'; return; }
+                if (!newPw || newPw.length < 8) { errEl.textContent = 'New password must be at least 8 characters.'; return; }
+                if (newPw !== confirmPw) { errEl.textContent = 'New passwords do not match.'; return; }
+            }
+
             btn.disabled = true;
             btn.textContent = 'Saving…';
-            const result = await API.put('/auth/profile', body);
+
+            // Name/avatar (if anything actually changed) save immediately,
+            // same as before -- skipped entirely if the ONLY thing touched
+            // was the password.
+            let profileResult = { success: true };
+            if (Object.keys(body).length) {
+                profileResult = await API.put('/auth/profile', body);
+            }
+
             btn.disabled = false;
             btn.textContent = 'Save Changes';
 
-            if (result?.success) {
-                Auth.updateStoredUser(result.user);
+            if (!profileResult?.success) {
+                errEl.textContent = profileResult?.message || 'Could not update profile.';
+                return;
+            }
+
+            if (profileResult.user) {
+                Auth.updateStoredUser(profileResult.user);
                 Nav.buildUserInfo(); // re-render header/avatar immediately, no re-login needed
+            }
+
+            // Cleared regardless of what happens next -- plaintext
+            // shouldn't linger in the DOM, and a retry (e.g. wrong current
+            // password) should require deliberately retyping, not silently
+            // resubmitting a leftover value.
+            const currentPwEl = document.getElementById('edit-profile-current-pw');
+            const newPwEl     = document.getElementById('edit-profile-new-pw');
+            const confirmPwEl = document.getElementById('edit-profile-confirm-pw');
+            if (currentPwEl) currentPwEl.value = '';
+            if (newPwEl)     newPwEl.value     = '';
+            if (confirmPwEl) confirmPwEl.value = '';
+
+            if (wantsPasswordChange) {
+                // Request the code BEFORE closing this modal or touching the
+                // OTP one at all -- if it fails (wrong current password,
+                // etc.), the error shows right here, and Edit Profile never
+                // closes in the first place. Only on success does the OTP
+                // modal take over.
+                const otpResult = await ChangePasswordOtpModal.open(currentPw, newPw);
+                if (!otpResult.success) {
+                    errEl.textContent = otpResult.message;
+                    return;
+                }
+                // Other fields (if any) are already saved at this point --
+                // only the password itself is still pending, gated behind a
+                // code sent to YOUR OWN email (the now-open OTP modal).
+                Modal.close('edit-profile-modal');
+                if (Object.keys(body).length) Toast.show('Other changes saved. Verify your password change to finish.', 'info');
+            } else if (wantsEmailChange) {
+                // Request the code BEFORE closing this modal -- if the email is
+                // already taken (or sending fails), the error shows right here.
+                const emailResult = await ChangeEmailOtpModal.open(newEmail);
+                if (!emailResult.success) {
+                    errEl.textContent = emailResult.message;
+                    return;
+                }
+                Modal.close('edit-profile-modal');
+                if (Object.keys(body).length) Toast.show('Other changes saved. Verify your email change to finish.', 'info');
+            } else {
                 Toast.show('Profile updated.', 'success');
                 Modal.close('edit-profile-modal');
-                this.pendingAvatar = null;
-            } else {
-                errEl.textContent = result?.message || 'Could not update profile.';
             }
+
+            this.pendingAvatar = null;
         });
     },
 
@@ -876,7 +1239,187 @@ const EditProfileModal = {
         if (nameInput) nameInput.value = user?.name || '';
         this.setPreview(user?.avatar || '');
 
+        // Same reasoning as pendingAvatar above -- don't carry over
+        // whatever was typed (or left blank) from a previous cancelled visit.
+        const currentPwEl = document.getElementById('edit-profile-current-pw');
+        const newPwEl     = document.getElementById('edit-profile-new-pw');
+        const confirmPwEl = document.getElementById('edit-profile-confirm-pw');
+        if (currentPwEl) currentPwEl.value = '';
+        if (newPwEl)     newPwEl.value     = '';
+        if (confirmPwEl) confirmPwEl.value = '';
+        const errEl = document.getElementById('edit-profile-error');
+        if (errEl) errEl.textContent = '';
+
+        const currentEmailEl = document.getElementById('edit-profile-current-email');
+        const newEmailEl     = document.getElementById('edit-profile-new-email');
+        const confirmEmailEl = document.getElementById('edit-profile-confirm-email');
+        if (currentEmailEl) currentEmailEl.value = user?.email || '';
+        if (newEmailEl)     newEmailEl.value     = '';
+        if (confirmEmailEl) confirmEmailEl.value = '';
+
+        // Opening Edit Profile must NOT show the password/email inputs
+        this.showSection?.(null);
+
         Modal.open('edit-profile-modal');
+    }
+};
+
+// ── Change Password Verification (OTP) ──────
+// Second step of EditProfileModal's password-change flow above. A
+// deliberately SEPARATE modal/id from users.html's own #action-otp-modal
+// (used there for Add User/Change Password-for-others/Delete) -- that one
+// only exists on the User Management page, while this one needs to work
+// from EVERY page, since Edit Profile is available everywhere. Keeping
+// them fully separate (different id, different JS state) avoids any
+// collision between the two on users.html, where both would otherwise be
+// present at once.
+const ChangePasswordOtpModal = {
+    pendingCurrentPassword: null,
+    pendingNewPassword:     null,
+    resendCooldown:         null,
+
+    ensureModal() {
+        if (document.getElementById('change-password-otp-modal')) return;
+
+        const overlay = document.createElement('div');
+        overlay.className = 'modal-overlay';
+        overlay.id = 'change-password-otp-modal';
+        overlay.innerHTML = `
+            <div class="modal" style="max-width:380px">
+                <div class="modal-header">
+                    <h3>🔒 Verify Password Change</h3>
+                    <button class="btn-close" id="btn-close-change-pw-otp">✕</button>
+                </div>
+                <div class="modal-body">
+                    <p id="change-pw-otp-status" style="font-size:0.85rem;color:var(--secondary);margin-bottom:16px">Sending verification code…</p>
+                    <div class="form-group">
+                        <label class="form-label">6-Digit Code *</label>
+                        <input type="text" id="change-pw-otp-code" class="form-control" inputmode="numeric" maxlength="6"
+                               placeholder="000000" autocomplete="one-time-code" style="letter-spacing:6px;text-align:center;font-size:1.2rem">
+                    </div>
+                    <p style="font-size:0.78rem;color:var(--secondary);margin-top:10px">
+                        Didn't get a code? <button type="button" id="btn-resend-change-pw-otp" style="background:none;border:none;color:var(--primary);cursor:pointer;padding:0;font-size:0.78rem;text-decoration:underline">Resend code</button>
+                    </p>
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-light" id="btn-close-change-pw-otp-2">Cancel</button>
+                    <button class="btn btn-primary" id="btn-confirm-change-pw-otp">Confirm</button>
+                </div>
+            </div>`;
+        document.body.appendChild(overlay);
+
+        document.getElementById('btn-close-change-pw-otp')?.addEventListener('click', () => this.close());
+        document.getElementById('btn-close-change-pw-otp-2')?.addEventListener('click', () => this.close());
+
+        document.getElementById('btn-resend-change-pw-otp')?.addEventListener('click', async () => {
+            if (!this.pendingCurrentPassword || !this.pendingNewPassword) return;
+            const result = await API.post('/auth/change-password-otp/request', {
+                currentPassword: this.pendingCurrentPassword,
+                newPassword:     this.pendingNewPassword
+            });
+            if (result?.success) {
+                this.setStatus(result.message || 'A new code has been sent.');
+                this.startResendCooldown();
+            } else {
+                this.setStatus(result?.message || 'Could not resend code.', true);
+            }
+        });
+
+        document.getElementById('btn-confirm-change-pw-otp')?.addEventListener('click', () => this.confirm());
+        document.getElementById('change-pw-otp-code')?.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') this.confirm();
+        });
+    },
+
+    setStatus(message, isError = false) {
+        const el = document.getElementById('change-pw-otp-status');
+        if (!el) return;
+        el.textContent = message;
+        el.style.color = isError ? 'var(--danger)' : 'var(--secondary)';
+    },
+
+    startResendCooldown() {
+        const btn = document.getElementById('btn-resend-change-pw-otp');
+        if (!btn) return;
+        let seconds = 30;
+        btn.disabled    = true;
+        btn.textContent = `Resend code (${seconds}s)`;
+        if (this.resendCooldown) clearInterval(this.resendCooldown);
+        this.resendCooldown = setInterval(() => {
+            seconds--;
+            if (seconds <= 0) {
+                clearInterval(this.resendCooldown);
+                btn.disabled    = false;
+                btn.textContent = 'Resend code';
+            } else {
+                btn.textContent = `Resend code (${seconds}s)`;
+            }
+        }, 1000);
+    },
+
+    async open(currentPassword, newPassword) {
+        this.ensureModal();
+
+        // Sends the request FIRST, before the modal ever opens -- if the
+        // current password is wrong (or anything else the server checks
+        // fails), the person sees that error back where they typed it,
+        // never a code-entry screen for a code that was never actually
+        // sent. Returns a plain {success, message} so the caller
+        // (EditProfileModal) can decide what to do on failure -- this
+        // modal only ever becomes visible once a code has genuinely gone
+        // out.
+        const result = await API.post('/auth/change-password-otp/request', { currentPassword, newPassword });
+
+        if (!result?.success) {
+            return { success: false, message: result?.message || 'Could not send the verification email.' };
+        }
+
+        this.pendingCurrentPassword = currentPassword;
+        this.pendingNewPassword     = newPassword;
+
+        const codeInput = document.getElementById('change-pw-otp-code');
+        if (codeInput) codeInput.value = '';
+        Modal.open('change-password-otp-modal');
+        this.setStatus(result.message || 'A verification code has been sent.');
+        this.startResendCooldown();
+        codeInput?.focus();
+
+        return { success: true };
+    },
+
+    // Closing without confirming just abandons the pending change entirely
+    // -- the password itself was never written to the database, only
+    // verified (see requestChangePasswordOtp).
+    close() {
+        Modal.close('change-password-otp-modal');
+        if (this.resendCooldown) clearInterval(this.resendCooldown);
+        this.pendingCurrentPassword = null;
+        this.pendingNewPassword     = null;
+    },
+
+    async confirm() {
+        const otp = document.getElementById('change-pw-otp-code')?.value.trim();
+        if (!/^\d{6}$/.test(otp)) {
+            this.setStatus('Enter the 6-digit code.', true);
+            return;
+        }
+
+        const btn = document.getElementById('btn-confirm-change-pw-otp');
+        btn.disabled    = true;
+        btn.textContent = 'Verifying…';
+        const result = await API.post('/auth/change-password-otp/confirm', { otp });
+        btn.disabled    = false;
+        btn.textContent = 'Confirm';
+
+        if (result?.success) {
+            if (this.resendCooldown) clearInterval(this.resendCooldown);
+            this.pendingCurrentPassword = null;
+            this.pendingNewPassword     = null;
+            Modal.close('change-password-otp-modal');
+            Toast.show(result.message || 'Password updated.', 'success');
+        } else {
+            this.setStatus(result?.message || 'Incorrect code.', true);
+        }
     }
 };
 
@@ -894,7 +1437,20 @@ async function downloadAuthenticatedFile(url, fallbackFilename) {
     const token = Auth.getToken();
     try {
         const res = await fetch(url, { headers: token ? { 'Authorization': `Bearer ${token}` } : {} });
-        if (!res.ok) throw new Error('Download failed.');
+
+        if (!res.ok) {
+            // A real endpoint failure sends a JSON error body (same
+            // {success:false, message:'...'} shape as everything else) --
+            // read it instead of a generic message, same fix as
+            // API.request() above.
+            let message = 'Download failed.';
+            try {
+                const errBody = await res.json();
+                if (errBody?.message) message = errBody.message;
+            } catch (e) { /* not JSON -- keep the generic message */ }
+            Toast.show(message, 'error');
+            return false;
+        }
 
         const disposition = res.headers.get('Content-Disposition') || '';
         const match = disposition.match(/filename="?([^"]+)"?/);
@@ -911,14 +1467,248 @@ async function downloadAuthenticatedFile(url, fallbackFilename) {
         URL.revokeObjectURL(objectUrl);
         return true;
     } catch (err) {
+        // Genuine network-level failure (fetch() itself rejected) --
+        // distinct from the clean-but-unsuccessful response handled above.
         Toast.show('Download failed. Check your connection.', 'error');
         return false;
     }
 }
 
+// -- Change Email Verification (OTP) --
+// Second step of EditProfileModal's email-change flow. Same shape as
+// ChangePasswordOtpModal above: the code request happens BEFORE this modal
+// opens (so a taken email or a send failure shows back in Edit Profile),
+// and the code is emailed to the person's CURRENT address. Closing without
+// confirming just abandons the change -- nothing was written to the database.
+const ChangeEmailOtpModal = {
+    pendingNewEmail: null,
+    resendCooldown:  null,
+
+    ensureModal() {
+        if (document.getElementById('change-email-otp-modal')) return;
+
+        const overlay = document.createElement('div');
+        overlay.className = 'modal-overlay';
+        overlay.id = 'change-email-otp-modal';
+        overlay.innerHTML = `
+            <div class="modal" style="max-width:380px">
+                <div class="modal-header">
+                    <h3>Verify Email Change</h3>
+                    <button class="btn-close" id="btn-close-change-email-otp">✕</button>
+                </div>
+                <div class="modal-body">
+                    <p style="font-size:0.85rem;color:var(--secondary);margin-bottom:6px">
+                        Changing your email to <strong id="change-email-otp-new">-</strong>.
+                    </p>
+                    <p id="change-email-otp-status" style="font-size:0.8rem;color:var(--secondary);margin-bottom:16px">Sending verification code...</p>
+                    <div class="form-group">
+                        <label class="form-label">6-Digit Code *</label>
+                        <input type="text" id="change-email-otp-code" class="form-control" inputmode="numeric" maxlength="6"
+                               placeholder="000000" autocomplete="one-time-code" style="letter-spacing:6px;text-align:center;font-size:1.2rem">
+                    </div>
+                    <p style="font-size:0.78rem;color:var(--secondary);margin-top:10px">
+                        Didn't get a code? <button type="button" id="btn-resend-change-email-otp" style="background:none;border:none;color:var(--primary);cursor:pointer;padding:0;font-size:0.78rem;text-decoration:underline">Resend code</button>
+                    </p>
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-light" id="btn-close-change-email-otp-2">Cancel</button>
+                    <button class="btn btn-primary" id="btn-confirm-change-email-otp">Confirm</button>
+                </div>
+            </div>`;
+        document.body.appendChild(overlay);
+
+        document.getElementById('btn-close-change-email-otp')?.addEventListener('click', () => this.close());
+        document.getElementById('btn-close-change-email-otp-2')?.addEventListener('click', () => this.close());
+
+        document.getElementById('btn-resend-change-email-otp')?.addEventListener('click', async () => {
+            if (!this.pendingNewEmail) return;
+            const result = await API.post('/auth/change-email-otp/request', { newEmail: this.pendingNewEmail });
+            if (result?.success) {
+                this.setStatus(result.message || 'A new code has been sent.');
+                this.startResendCooldown();
+            } else {
+                this.setStatus(result?.message || 'Could not resend code.', true);
+            }
+        });
+
+        document.getElementById('btn-confirm-change-email-otp')?.addEventListener('click', () => this.confirm());
+        document.getElementById('change-email-otp-code')?.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') this.confirm();
+        });
+    },
+
+    setStatus(message, isError = false) {
+        const el = document.getElementById('change-email-otp-status');
+        if (!el) return;
+        el.textContent = message;
+        el.style.color = isError ? 'var(--danger)' : 'var(--secondary)';
+    },
+
+    startResendCooldown() {
+        const btn = document.getElementById('btn-resend-change-email-otp');
+        if (!btn) return;
+        let seconds = 30;
+        btn.disabled    = true;
+        btn.textContent = `Resend code (${seconds}s)`;
+        if (this.resendCooldown) clearInterval(this.resendCooldown);
+        this.resendCooldown = setInterval(() => {
+            seconds--;
+            if (seconds <= 0) {
+                clearInterval(this.resendCooldown);
+                btn.disabled    = false;
+                btn.textContent = 'Resend code';
+            } else {
+                btn.textContent = `Resend code (${seconds}s)`;
+            }
+        }, 1000);
+    },
+
+    // Returns { success, message } so EditProfileModal can show a failure in
+    // place; this modal only becomes visible once a code has really gone out.
+    async open(newEmail) {
+        this.ensureModal();
+
+        const result = await API.post('/auth/change-email-otp/request', { newEmail });
+        if (!result?.success) {
+            return { success: false, message: result?.message || 'Could not send the verification email.' };
+        }
+
+        this.pendingNewEmail = newEmail;
+
+        const newEl = document.getElementById('change-email-otp-new');
+        if (newEl) newEl.textContent = newEmail;
+        const codeInput = document.getElementById('change-email-otp-code');
+        if (codeInput) codeInput.value = '';
+        Modal.open('change-email-otp-modal');
+        this.setStatus(result.message || 'A verification code has been sent.');
+        this.startResendCooldown();
+        codeInput?.focus();
+
+        return { success: true };
+    },
+
+    close() {
+        Modal.close('change-email-otp-modal');
+        if (this.resendCooldown) clearInterval(this.resendCooldown);
+        this.pendingNewEmail = null;
+    },
+
+    async confirm() {
+        const otp = document.getElementById('change-email-otp-code')?.value.trim();
+        if (!/^\d{6}$/.test(otp)) {
+            this.setStatus('Enter the 6-digit code.', true);
+            return;
+        }
+
+        const btn = document.getElementById('btn-confirm-change-email-otp');
+        btn.disabled    = true;
+        btn.textContent = 'Verifying...';
+        const result = await API.post('/auth/change-email-otp/confirm', { otp });
+        btn.disabled    = false;
+        btn.textContent = 'Confirm';
+
+        if (result?.success) {
+            if (this.resendCooldown) clearInterval(this.resendCooldown);
+            this.pendingNewEmail = null;
+            Modal.close('change-email-otp-modal');
+            // Keep the stored profile in step so Edit Profile shows the new
+            // address immediately; the login token only carries the id, so it
+            // stays valid and nobody has to log in again.
+            if (result.email) Auth.updateStoredUser({ email: result.email });
+            Toast.show(result.message || 'Email updated.', 'success');
+        } else {
+            this.setStatus(result?.message || 'Incorrect code.', true);
+        }
+    }
+};
+
+// A product's stored category list ("Analgesic|Antipyretic") as people read it:
+// "Analgesic, Antipyretic". A product with one category reads exactly as before.
+function fmtCategory(value) {
+    return String(value ?? '').split('|').map(s => s.trim()).filter(Boolean).join(', ');
+}
+
+// -- Table header alignment --
+// A header must sit over its data: numbers right-aligned under a right-aligned
+// header, text left-aligned. Most tables give header and cells the same class, but
+// some never classed their headers (so a numeric header stayed at the left of its
+// right-aligned numbers), and tables are often built later by the page's own
+// script (reports, inventory, user lists, the items inside an expanded row). So
+// this looks at what each column's cells actually do and gives the header the
+// same alignment -- in every table, whenever it is (re)drawn.
+const TableAlign = {
+    syncTable(table) {
+        const head = table.tHead;
+        const body = table.tBodies[0];
+        if (!head || !head.rows.length || !body) return;
+
+        const headRow = head.rows[head.rows.length - 1];
+        const cols    = headRow.cells.length;
+        // only ordinary data rows (an empty-state or expanded detail row spans columns)
+        const rows = [...body.rows].filter(r => r.cells.length === cols).slice(0, 15);
+        if (!rows.length) return;
+
+        for (let i = 0; i < cols; i++) {
+            const th = headRow.cells[i];
+            if (th.colSpan > 1) continue;
+            const cells = rows.map(r => r.cells[i]);
+            const right = cells.filter(td =>
+                td.classList.contains('col-num') ||
+                (!td.classList.contains('col-text') && getComputedStyle(td).textAlign === 'right')
+            ).length;
+
+            if (right > cells.length / 2) {
+                th.classList.add('col-num');
+                th.classList.remove('col-text');
+            } else if (th.classList.contains('col-num') && !right) {
+                th.classList.remove('col-num');       // the data is not numeric after all
+            }
+        }
+    },
+
+    syncAll() {
+        document.querySelectorAll('table').forEach(t => this.syncTable(t));
+    },
+
+    start() {
+        this.syncAll();
+        let timer = null;
+        // only watches for rows/tables being added or replaced (not class changes),
+        // so it can never trigger itself
+        new MutationObserver(() => {
+            clearTimeout(timer);
+            timer = setTimeout(() => this.syncAll(), 60);
+        }).observe(document.body, { childList: true, subtree: true });
+    }
+};
+
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', () => TableAlign.start());
+} else {
+    TableAlign.start();
+}
+
 const Modal = {
+    // Every popup used to share one z-index, so which one painted on top
+    // depended on when its element happened to be created -- a dialog built
+    // earlier (Confirm, Approval) could end up UNDER a window opened later
+    // (e.g. Partial Void). Now each popup is raised above all the others at
+    // the moment it opens, so the newest one is always on top. Toasts sit
+    // far above (z-index 9999), so the counter is reset before it could
+    // ever reach them.
+    _z: 2000,
+
+    bringToFront(el) {
+        if (!el) return;
+        if (this._z > 8000) this._z = 2000;
+        el.style.zIndex = ++this._z;
+    },
+
     open(id) {
-        document.getElementById(id)?.classList.add('active');
+        const el = document.getElementById(id);
+        if (!el) return;
+        this.bringToFront(el);
+        el.classList.add('active');
     },
     close(id) {
         document.getElementById(id)?.classList.remove('active');
@@ -1044,6 +1834,252 @@ const SearchSuggest = {
                 dropdown.classList.add('hidden');
             }
         });
+    }
+};
+
+// ── Escape helper shared by the table utilities below ───────────
+// Several pages already define their own local escHtml -- this global
+// fallback exists purely so TableSort/attachKebabMenu below don't force
+// every page to define one just to use them.
+function escHtmlGlobal(str) {
+    return String(str ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+// ── Generic Column Sort ─────────────────────────────
+// Attaches click-to-sort to a table's .sortable-col <th> elements
+// (data-sort-key identifies which field each one sorts by). Sorting
+// happens entirely CLIENT-SIDE against the already-loaded data array --
+// every table that uses this already loads its full result set into
+// memory up front (reports/inventory/users/audit all do), so there's no
+// extra network round-trip per sort. Handles both the visual state (the
+// arrow, .sort-active, .sort-col-tint on the header) and the actual
+// re-sort + re-render via the caller's onSorted callback -- the CALLER
+// still owns rendering, since only it knows how to turn a row of data
+// into <tr> markup, and how to tag the matching BODY cell in the active
+// column with .sort-col-tint (this helper only reaches the header).
+const TableSort = {
+    attach(theadEl, { getData, data, getValue, onSorted, defaultKey = null, defaultDir = 'asc' }) {
+        if (!theadEl) return null;
+        // getData() (a function) is preferred over a plain `data` array --
+        // pages that REASSIGN their array variable on every reload (e.g.
+        // `salesData = data.data` when switching date ranges) would
+        // otherwise leave this closure holding a stale reference to
+        // whatever array existed at attach-time, silently sorting an array
+        // nobody renders anymore after the first reload. `data` is still
+        // accepted directly for a table that truly never replaces its
+        // array (only ever mutates it in place), but getData is the safer
+        // default for new call sites.
+        const resolveData = getData || (() => data);
+        let currentKey = defaultKey;
+        let currentDir = defaultDir;
+
+        const cols = theadEl.querySelectorAll('.sortable-col');
+        cols.forEach(th => {
+            if (!th.querySelector('.sort-arrow')) {
+                const arrow = document.createElement('span');
+                arrow.className = 'sort-arrow';
+                arrow.textContent = '▲';
+                th.appendChild(arrow);
+            }
+            th.setAttribute('tabindex', '0'); // keyboard-focusable, so :focus-visible's hint arrow (see global.css) actually reaches it
+
+            const activate = () => {
+                const key = th.dataset.sortKey;
+                if (currentKey === key) {
+                    currentDir = currentDir === 'asc' ? 'desc' : 'asc';
+                } else {
+                    currentKey = key;
+                    currentDir = 'asc';
+                }
+                sortAndRender();
+            };
+            th.addEventListener('click', activate);
+            th.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); activate(); }
+            });
+        });
+
+        function sortAndRender() {
+            const currentData = resolveData() || [];
+            if (currentKey) {
+                currentData.sort((a, b) => {
+                    const va = getValue(a, currentKey);
+                    const vb = getValue(b, currentKey);
+                    if (va == null && vb == null) return 0;
+                    if (va == null) return 1;
+                    if (vb == null) return -1;
+                    if (typeof va === 'number' && typeof vb === 'number') {
+                        return currentDir === 'asc' ? va - vb : vb - va;
+                    }
+                    return currentDir === 'asc'
+                        ? String(va).localeCompare(String(vb))
+                        : String(vb).localeCompare(String(va));
+                });
+            }
+
+            cols.forEach(h => {
+                h.classList.remove('sort-active', 'sort-col-tint');
+                const a = h.querySelector('.sort-arrow');
+                if (a) a.textContent = '▲';
+            });
+            if (currentKey) {
+                const activeTh = theadEl.querySelector(`.sortable-col[data-sort-key="${currentKey}"]`);
+                if (activeTh) {
+                    activeTh.classList.add('sort-active', 'sort-col-tint');
+                    const arrow = activeTh.querySelector('.sort-arrow');
+                    if (arrow) arrow.textContent = currentDir === 'asc' ? '▲' : '▼';
+                }
+            }
+
+            onSorted(currentKey, currentDir);
+        }
+
+        if (defaultKey) sortAndRender();
+
+        // Exposed so a render function can re-tag the active column's BODY
+        // cells with .sort-col-tint after rebuilding the table's rows (the
+        // header's own tint is already handled above, but the header and
+        // body are separate DOM subtrees -- this helper can't reach into
+        // markup the caller hasn't built yet). resort() lets a page
+        // re-apply the CURRENT sort after a fresh data load (e.g. changing
+        // a date range) without waiting for the user to click a header
+        // again -- sorts whatever resolveData() returns NOW.
+        return {
+            getCurrentSort: () => ({ key: currentKey, dir: currentDir }),
+            resort: () => sortAndRender()
+        };
+    }
+};
+
+// ── Kebab Row-Action Menu (touch devices) ────────────────
+// Reusable trigger+dropdown for a row's actions on touch devices, where
+// hover-to-reveal (see .row-actions in global.css) doesn't work. Call
+// once per row when rendering: attachKebabMenu(triggerEl, [{label,
+// onClick, danger}]). Builds the dropdown lazily on open and wires
+// outside-click-to-close; only one menu is ever open at a time.
+function attachKebabMenu(triggerEl, actions) {
+    if (!triggerEl) return;
+    triggerEl.addEventListener('click', (e) => {
+        e.stopPropagation();
+        document.querySelectorAll('.kebab-menu').forEach(m => m.remove());
+
+        const menu = document.createElement('div');
+        menu.className = 'kebab-menu';
+        menu.innerHTML = actions.map((a, i) =>
+            `<button type="button" class="kebab-menu-item ${a.danger ? 'danger' : ''}" data-i="${i}">${escHtmlGlobal(a.label)}</button>`
+        ).join('');
+        triggerEl.parentElement.appendChild(menu);
+
+        menu.querySelectorAll('.kebab-menu-item').forEach(btn => {
+            btn.addEventListener('click', (ev) => {
+                ev.stopPropagation();
+                menu.remove();
+                actions[parseInt(btn.dataset.i)].onClick();
+            });
+        });
+
+        const closeOnOutside = (ev) => {
+            if (!menu.contains(ev.target) && ev.target !== triggerEl) {
+                menu.remove();
+                document.removeEventListener('click', closeOnOutside);
+            }
+        };
+        setTimeout(() => document.addEventListener('click', closeOnOutside), 0);
+    });
+}
+
+// ── Generic Pagination ────────────────────────────
+// Client-side pagination controls + slicing, generalized from Audit
+// Logs' original implementation so every table sharing this now (Reports,
+// Inventory, User Management, Backup & Restore) gets identical controls
+// and behavior, not a per-page reimplementation. Purely a SLICING helper
+// -- the dataset is already fully loaded in memory by the time this runs
+// (same assumption TableSort makes), so changing pages never triggers a
+// network request. Same UI as Audit Logs always had: Prev/Next, up to 5
+// numbered page buttons with an ellipsis for the rest, and a "Showing
+// X-Y of Z" label -- and, per explicit direction, NO pagination controls
+// at all when the full dataset already fits on one page.
+const Paginate = {
+    /**
+     * @param {HTMLElement} containerEl - where the controls render (usually a <div class="pagination">)
+     * @param {object} opts
+     * @param {() => any[]} opts.getData - returns the CURRENT full (already filtered/sorted) dataset -- a function, not a plain array, for the same staleness reason TableSort's getData is -- see that comment above.
+     * @param {(pageItems: any[], pageNumber: number) => void} opts.onRender - called with just the current page's slice of rows; the caller still owns turning that into <tr> markup.
+     * @param {number} [opts.pageSize=25]
+     */
+    attach(containerEl, { getData, onRender, pageSize = 25 }) {
+        let currentPage = 1;
+
+        function render() {
+            const data = getData() || [];
+            const totalPages = Math.max(1, Math.ceil(data.length / pageSize));
+            // Clamp -- a filter/search change can shrink the dataset out
+            // from under whatever page was previously showing (e.g. you
+            // were on page 4 of a search result, then typed something
+            // that narrows it to 2 pages).
+            if (currentPage > totalPages) currentPage = totalPages;
+
+            const start     = (currentPage - 1) * pageSize;
+            const pageItems = data.slice(start, start + pageSize);
+            onRender(pageItems, currentPage);
+            renderControls(data.length, totalPages);
+        }
+
+        function renderControls(totalItems, totalPages) {
+            if (!containerEl) return;
+
+            // No pagination UI at all when everything already fits on one
+            // page -- Prev/Next/"page 1 of 1" controls for a 12-row table
+            // would just be clutter with nothing to actually navigate.
+            if (totalPages <= 1) {
+                containerEl.innerHTML = '';
+                return;
+            }
+
+            const start = (currentPage - 1) * pageSize + 1;
+            const end   = Math.min(currentPage * pageSize, totalItems);
+
+            let html = `<button class="page-btn" id="pg-prev" ${currentPage === 1 ? 'disabled' : ''}>← Prev</button>`;
+
+            // Up to 5 page buttons around the current page, same as Audit
+            // Logs' original: always show page 1 and the last page, plus 2
+            // on either side of wherever you currently are, with an
+            // ellipsis filling any gap.
+            const range = 2;
+            for (let p = 1; p <= totalPages; p++) {
+                if (p === 1 || p === totalPages || (p >= currentPage - range && p <= currentPage + range)) {
+                    html += `<button class="page-btn ${p === currentPage ? 'active' : ''}" data-page="${p}">${p}</button>`;
+                } else if (p === currentPage - range - 1 || p === currentPage + range + 1) {
+                    html += `<span class="page-info">…</span>`;
+                }
+            }
+
+            html += `
+                <button class="page-btn" id="pg-next" ${currentPage === totalPages ? 'disabled' : ''}>Next →</button>
+                <span class="page-info">Showing ${start}–${end} of ${totalItems}</span>`;
+
+            containerEl.innerHTML = html;
+
+            containerEl.querySelector('#pg-prev')?.addEventListener('click', () => { currentPage--; render(); });
+            containerEl.querySelector('#pg-next')?.addEventListener('click', () => { currentPage++; render(); });
+            containerEl.querySelectorAll('[data-page]').forEach(btn => {
+                btn.addEventListener('click', () => { currentPage = parseInt(btn.dataset.page); render(); });
+            });
+        }
+
+        return {
+            // Call whenever the underlying data actually changes (a fresh
+            // load, a filter, a sort) -- re-slices and re-renders at
+            // whatever page is currently selected, WITHOUT resetting to
+            // page 1 by itself (see resetToFirstPage for that).
+            render,
+            // A NEW filter/search value (not just a re-sort of the same
+            // results) should generally jump back to page 1, since
+            // "page 3" of the old results has no obvious meaning against
+            // a differently-filtered set.
+            resetToFirstPage: () => { currentPage = 1; render(); },
+            getCurrentPage: () => currentPage
+        };
     }
 };
 

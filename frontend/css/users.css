@@ -109,6 +109,9 @@
 
 /* Self-account warning */
 .self-row td { opacity: 0.6; }
+/* Inactive accounts stay in the list (so they can be set back to Active)
+   but are visibly muted; the action buttons stay fully readable. */
+.row-inactive td:not(.action-cell) { opacity: 0.55; }
 .self-badge {
     display: inline-block;
     padding: 1px 7px;

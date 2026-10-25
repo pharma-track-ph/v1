@@ -40,7 +40,7 @@ const COLUMNS = [
 
 function toRow(p) {
     return [
-        p.name, p.generic_name || '—', p.category,
+        p.name, p.generic_name || '—', String(p.category ?? '').split('|').join(', '),
         String(p.stock_quantity), `₱${Number(p.price).toFixed(2)}`,
         formatShortDate(p.expiry_date), itemStatusLabel(p)
     ];

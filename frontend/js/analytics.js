@@ -17,7 +17,14 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     // ── KPI Cards ─────────────────────────────────────────────
     setKPI('kpi-sales-today',   Fmt.currency(today.total_sales));
-    setKPI('kpi-profit-today',  Fmt.currency(today.total_profit));
+    // The server leaves profit out for a Pharmacy Assistant (it is worked out from purchase
+    // cost, which they never see). No profit figure -> no "Profit Today" card at all.
+    if (today.total_profit === undefined || today.total_profit === null) {
+        const profitCard = document.getElementById('kpi-card-profit');
+        if (profitCard) profitCard.style.display = 'none';
+    } else {
+        setKPI('kpi-profit-today', Fmt.currency(today.total_profit));
+    }
     setKPI('kpi-txn-count',     today.transaction_count);
     setKPI('kpi-low-stock',     alerts.low_stock);
     setKPI('kpi-near-expiry',   alerts.near_expiry);
@@ -54,18 +61,22 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     // ── Monthly Revenue Bar Chart ─────────────────────────────
     const monthlyCtx = document.getElementById('chart-monthly-revenue')?.getContext('2d');
-    if (monthlyCtx && monthly_revenue.length) {
+    if (monthlyCtx) {
         new Chart(monthlyCtx, {
-            type: 'bar',
+            type: 'line',
             data: {
                 labels:   monthly_revenue.map(m => m.month_label),
                 datasets: [{
-                    label:           'Monthly Revenue (₱)',
-                    data:            monthly_revenue.map(m => parseFloat(m.revenue)),
-                    backgroundColor: 'rgba(13, 110, 253, 0.75)',
-                    borderColor:     'rgba(13, 110, 253, 1)',
-                    borderWidth:     1,
-                    borderRadius:    6
+                    label:                'Monthly Revenue (₱)',
+                    data:                 monthly_revenue.map(m => parseFloat(m.revenue)),
+                    borderColor:          'rgba(13, 110, 253, 1)',
+                    backgroundColor:      'rgba(13, 110, 253, 0.12)',
+                    borderWidth:          2,
+                    tension:              0.3,
+                    fill:                 false,
+                    pointRadius:          4,
+                    pointHoverRadius:     6,
+                    pointBackgroundColor: 'rgba(13, 110, 253, 1)'
                 }]
             },
             options: {
@@ -80,10 +91,17 @@ document.addEventListener('DOMContentLoaded', async () => {
                     }
                 },
                 scales: {
+                    // Show EVERY month label. Chart.js hides some category labels
+                    // by default (autoSkip) when it thinks they are crowded, which
+                    // made a month look missing even though its point was there.
+                    // Labels rotate to fit instead of being dropped.
+                    x: {
+                        ticks: { autoSkip: false, maxRotation: 60, minRotation: 0 }
+                    },
                     y: {
                         beginAtZero: true,
                         ticks: {
-                            callback: v => '₱' + (v / 1000).toFixed(0) + 'k'
+                            callback: v => v >= 1000 ? '₱' + (v / 1000).toFixed(v % 1000 === 0 ? 0 : 1) + 'k' : '₱' + Number(v.toFixed(2))
                         }
                     }
                 }
@@ -93,7 +111,11 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     // ── Top 5 Selling Products Pie Chart ─────────────────────
     const pieCtx = document.getElementById('chart-top-products')?.getContext('2d');
-    if (pieCtx && top_products.length) {
+    if (pieCtx && !top_products.length) {
+        // No completed sales yet -- say so instead of leaving a blank canvas
+        const emptyWrap = document.getElementById('chart-top-products')?.parentElement;
+        if (emptyWrap) emptyWrap.innerHTML = '<div class="text-center text-muted" style="padding:60px 0">No sales yet.</div>';
+    } else if (pieCtx) {
         const colors = [
             'rgba(13, 110, 253, 0.85)',
             'rgba(25, 135, 84,  0.85)',
@@ -103,28 +125,43 @@ document.addEventListener('DOMContentLoaded', async () => {
         ];
 
         new Chart(pieCtx, {
-            type: 'doughnut',
+            type: 'bar',
             data: {
                 labels:   top_products.map(p => p.product_name),
                 datasets: [{
                     data:            top_products.map(p => parseInt(p.total_qty)),
                     backgroundColor: colors,
-                    borderWidth:     2,
-                    borderColor:     '#fff'
+                    borderWidth:     1,
+                    borderColor:     colors,
+                    borderRadius:    6
                 }]
             },
             options: {
+                indexAxis:           'y',   // horizontal bars
                 responsive:          true,
                 maintainAspectRatio: false,
-                cutout:              '60%',
                 plugins: {
-                    legend: {
-                        position: 'bottom',
-                        labels:   { boxWidth: 12, font: { size: 11 } }
-                    },
+                    legend: { display: false },
                     tooltip: {
                         callbacks: {
-                            label: ctx => ` ${ctx.label}: ${ctx.raw} units`
+                            // the tooltip title already shows the FULL brand name
+                            label: ctx => ` ${ctx.raw} units`
+                        }
+                    }
+                },
+                scales: {
+                    x: {
+                        beginAtZero: true,
+                        ticks:      { precision: 0 },   // whole units only
+                        title:      { display: true, text: 'Units sold' }
+                    },
+                    y: {
+                        ticks: {
+                            // long brand names are shortened on the axis only
+                            callback: function (value) {
+                                const label = this.getLabelForValue(value);
+                                return label.length > 24 ? label.slice(0, 23) + '...' : label;
+                            }
                         }
                     }
                 }

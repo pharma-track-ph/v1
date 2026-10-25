@@ -22,20 +22,78 @@
 // always lines up under the line regardless of how long the generated
 // name or caption text is.
 //
-// Same emoji/₱ caveat as the original Inventory export: Excel and Word
-// render the 💊 logo and ₱ sign fine (the viewing app handles the font),
-// but PDFKit bakes text into the file with its own bundled fonts at
-// generation time, which don't include either — so the PDF version uses
-// "PHP" instead of "₱", and draws a small vector capsule icon (see
-// drawPillLogo below) in place of the 💊 glyph, since no bundled PDF font
-// has an emoji glyph to fall back on at all.
+// Same currency caveat as the original Inventory export: Excel and Word
+// render the ₱ sign fine (the viewing app handles the font), but PDFKit
+// bakes text into the file with its own bundled fonts at generation
+// time, which don't include it — so the PDF version uses "PHP" instead
+// of "₱". The PharmaTrack logo itself is a raster image, not a font
+// glyph, so it embeds identically across all four formats with no
+// equivalent workaround needed.
 // ============================================================
 const ExcelJS     = require('exceljs');
 const PDFDocument = require('pdfkit');
+const fs          = require('fs');
+const path        = require('path');
 const {
     Document, Packer, Paragraph, Table, TableRow, TableCell,
-    TextRun, AlignmentType, WidthType, HeadingLevel, BorderStyle
+    TextRun, ImageRun, AlignmentType, WidthType, HeadingLevel, BorderStyle,
+    PageOrientation, TableLayoutType
 } = require('docx');
+
+// Real logo file, shared by every format below -- lives under
+// frontend/images since that's already served to the browser (sidebar,
+// login page, favicon); backend and frontend are siblings under the
+// project root, so a plain relative path reaches it directly without
+// needing a second copy anywhere.
+const LOGO_PATH = path.resolve(__dirname, '../../frontend/images/pharmatrack-logo.png');
+const LOGO_BUFFER = (() => {
+    try { return fs.readFileSync(LOGO_PATH); }
+    catch (err) { console.error('[reportExporter] Could not read logo file:', err.message); return null; }
+})();
+
+// -- Column alignment ----------------------------------------------
+// ONE rule for every report in every format (Excel, PDF, Word): text
+// columns are LEFT-aligned and number/amount columns are RIGHT-aligned, and
+// a header is aligned the same as its own data, so amounts line up under
+// their heading and are easy to compare down a column.
+// A column may force it with align: 'left' | 'right'; otherwise a column
+// counts as a number column when every filled cell in it is a number or an
+// amount ("12", "1,234.50", "\u20b1455.51", "-5", "3.5%").
+const NUMERIC_CELL = /^\s*[-+]?\s*(?:\u20b1|PHP)?\s*[-+]?\d[\d,]*(?:\.\d+)?\s*%?\s*$/;
+
+function isNumericCell(value) {
+    if (typeof value === 'number') return Number.isFinite(value);
+    if (value === null || value === undefined) return false;
+    const s = String(value).trim();
+    return s !== '' && NUMERIC_CELL.test(s);
+}
+
+function isBlankCell(value) {
+    if (value === null || value === undefined) return true;
+    const s = String(value).trim();
+    return s === '' || s === '\u2014' || s === '-';
+}
+
+function columnAligns(columns, rows) {
+    return columns.map((c, i) => {
+        if (c.align === 'left' || c.align === 'right') return c.align;
+        let filled = 0;
+        for (const row of rows) {
+            if (isBlankCell(row[i])) continue;
+            if (!isNumericCell(row[i])) return 'left';
+            filled++;
+        }
+        return filled > 0 ? 'right' : 'left';
+    });
+}
+
+// Excel column width: wide enough for the heading and for typical values,
+// capped so one very long value wraps instead of making the sheet enormous.
+function excelColumnWidth(col, i, rows) {
+    const longest = rows.reduce((m, r) => Math.max(m, String(r[i] ?? '').length), 0);
+    const want = Math.max(col.excelWidth || 0, String(col.label).length + 4, Math.min(longest, 42) + 2);
+    return Math.min(Math.max(want, 8), 60);
+}
 
 function formatManilaDateTime() {
     return new Date().toLocaleString('en-PH', {
@@ -50,39 +108,33 @@ function formatManilaDateTime() {
 // naively stringifying one produces a verbose, overflow-prone string —
 // always go through this instead.
 const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+const manila = require('./manilaTime');
+
+// Read on a MANILA clock, never the server's: a hosted server runs in UTC, which made
+// these 8 hours off (and a midnight expiry date show as the day before).
 function formatShortDate(value) {
     if (!value) return '—';
+    // a plain "2026-10-25" is a calendar date already -- no time zone to apply
+    if (typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value)) {
+        const [y, m, day] = value.split('-').map(Number);
+        return `${MONTHS[m - 1]} ${day} ${y}`;
+    }
     const d = value instanceof Date ? value : new Date(value);
     if (isNaN(d.getTime())) return String(value);
-    return `${MONTHS[d.getMonth()]} ${d.getDate()} ${d.getFullYear()}`;
+    const p = manila.parts(d);
+    return `${MONTHS[p.month - 1]} ${p.day} ${p.year}`;
 }
 
 function formatShortDateTime(value) {
     if (!value) return '—';
     const d = value instanceof Date ? value : new Date(value);
     if (isNaN(d.getTime())) return String(value);
-    const hours24 = d.getHours();
-    const hours12 = hours24 % 12 || 12;
-    const ampm    = hours24 >= 12 ? 'PM' : 'AM';
-    const minutes = String(d.getMinutes()).padStart(2, '0');
-    return `${formatShortDate(d)}, ${hours12}:${minutes} ${ampm}`;
-}
-
-// Draws a simple two-tone capsule/pill icon using plain vector shapes --
-// a stand-in for the 💊 emoji used in the Excel/Word headers. PDFKit bakes
-// text using its own bundled fonts, which have NO emoji glyphs at all, so
-// a text-based "💊" silently renders as nothing in the PDF no matter which
-// font is selected. Drawing it as shapes instead means it never depends
-// on font/glyph support, so it's always there in every generated PDF.
-function drawPillLogo(doc, x, y, w, h) {
-    const r = h / 2;
-    doc.save();
-    doc.roundedRect(x, y, w, h, r).clip();
-    doc.rect(x, y, w / 2, h).fill('#ff8fa3');
-    doc.rect(x + w / 2, y, w / 2, h).fill('#ffffff');
-    doc.restore();
-    doc.roundedRect(x, y, w, h, r).lineWidth(1).strokeColor('#495057').stroke();
-    doc.moveTo(x + w / 2, y).lineTo(x + w / 2, y + h).lineWidth(0.75).strokeColor('#495057').stroke();
+    const p = manila.parts(d);
+    const hours12 = p.hour % 12 || 12;
+    const ampm    = p.hour >= 12 ? 'PM' : 'AM';
+    const minutes = String(p.minute).padStart(2, '0');
+    const seconds = String(p.second).padStart(2, '0');
+    return `${formatShortDate(d)}, ${hours12}:${minutes}:${seconds} ${ampm}`;
 }
 
 /**
@@ -105,11 +157,21 @@ async function exportExcel({ res, title, generatedBy, filename, columns, rows, p
     const colCount      = columns.length;
     const lastColLetter = String.fromCharCode(64 + Math.min(colCount, 26));
     const colLetter     = n => String.fromCharCode(64 + n);
+    const aligns        = columnAligns(columns, rows);   // 'left' for text columns, 'right' for number columns
 
     sheet.mergeCells(`A1:${lastColLetter}1`);
-    sheet.getCell('A1').value = '💊 PharmaTrack';
+    sheet.getCell('A1').value = 'PharmaTrack';
     sheet.getCell('A1').font = { size: 18, bold: true, color: { argb: 'FF0D6EFD' } };
     sheet.getCell('A1').alignment = { horizontal: 'center' };
+    sheet.getRow(1).height = 30; // taller than default so the logo image below has room to sit without overlapping row 2
+
+    // Real logo, anchored over the merged title cell -- floats on top of
+    // (doesn't replace) the text above, small enough to sit inside row 1's
+    // own height.
+    if (LOGO_BUFFER) {
+        const imageId = workbook.addImage({ buffer: LOGO_BUFFER, extension: 'png' });
+        sheet.addImage(imageId, { tl: { col: 0, row: 0 }, ext: { width: 26, height: 26 } });
+    }
 
     sheet.mergeCells(`A2:${lastColLetter}2`);
     sheet.getCell('A2').value = title;
@@ -117,27 +179,29 @@ async function exportExcel({ res, title, generatedBy, filename, columns, rows, p
     sheet.getCell('A2').alignment = { horizontal: 'center' };
 
     sheet.mergeCells(`A3:${lastColLetter}3`);
-    sheet.getCell('A3').value = periodLabel ? `${formatManilaDateTime()} — ${periodLabel}` : formatManilaDateTime();
+    sheet.getCell('A3').value = periodLabel || '';
     sheet.getCell('A3').font = { size: 10, italic: true, color: { argb: 'FF6C757D' } };
     sheet.getCell('A3').alignment = { horizontal: 'center' };
 
     sheet.addRow([]);
 
     const headerRow = sheet.addRow(columns.map(c => c.label));
-    headerRow.eachCell(cell => {
+    headerRow.eachCell((cell, colNumber) => {
         cell.font = { bold: true, color: { argb: 'FFFFFFFF' } };
         cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF0D6EFD' } };
-        cell.alignment = { horizontal: 'center', vertical: 'middle' };
+        // Header aligned the same as its own data (text left, numbers right)
+        cell.alignment = { horizontal: aligns[colNumber - 1] || 'left', vertical: 'middle', wrapText: true };
     });
 
     if (rows.length) {
         rows.forEach(row => {
             const excelRow = sheet.addRow(row);
-            // Centered so no cell's content ever reads as clipped against
-            // the left edge -- text that's too long to fit still gets cut
-            // by column width either way, but centering means it never
-            // LOOKS like the start of the value is what's missing.
-            excelRow.eachCell(cell => { cell.alignment = { horizontal: 'center', vertical: 'middle' }; });
+            // Text columns left, number columns right. wrapText lets a long value
+            // (a name, the Details text) wrap onto more lines instead of being
+            // cut off at the column edge; Excel grows the row to fit it.
+            excelRow.eachCell({ includeEmpty: true }, (cell, colNumber) => {
+                cell.alignment = { horizontal: aligns[colNumber - 1] || 'left', vertical: 'top', wrapText: true };
+            });
         });
     } else {
         // Compute the target row number FIRST, merge that exact row, THEN
@@ -155,18 +219,28 @@ async function exportExcel({ res, title, generatedBy, filename, columns, rows, p
 
     if (totalsRow) {
         const totalsExcelRow = sheet.addRow(totalsRow);
-        totalsExcelRow.eachCell(cell => {
+        totalsExcelRow.eachCell({ includeEmpty: true }, (cell, colNumber) => {
             // Same solid-blue treatment as the header row -- makes a
             // totals row (e.g. TOTAL PROFIT) read as clearly as the
             // header does, instead of a thin divider line over otherwise
             // plain black-on-white cells.
             cell.font = { bold: true, color: { argb: 'FFFFFFFF' } };
             cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF0D6EFD' } };
-            cell.alignment = { horizontal: 'center', vertical: 'middle' };
+            cell.alignment = { horizontal: aligns[colNumber - 1] || 'left', vertical: 'middle' };
         });
     }
 
-    sheet.columns.forEach((col, i) => { col.width = columns[i]?.excelWidth || 16; });
+    sheet.columns.forEach((col, i) => { col.width = excelColumnWidth(columns[i] || {}, i, rows); });
+
+    // Generated date/time: directly below the table (and its totals row),
+    // above Prepared by / Approved by.
+    sheet.addRow([]);
+    const generatedRowNum = sheet.rowCount + 1;
+    sheet.mergeCells(`A${generatedRowNum}:${lastColLetter}${generatedRowNum}`);
+    const generatedCell = sheet.getCell(`A${generatedRowNum}`);
+    generatedCell.value     = `Generated: ${formatManilaDateTime()}`;
+    generatedCell.font      = { size: 10, italic: true, color: { argb: 'FF6C757D' } };
+    generatedCell.alignment = { horizontal: 'center' };
 
     sheet.addRow([]);
     sheet.addRow([]);
@@ -236,66 +310,94 @@ async function exportPDF({ res, title, generatedBy, filename, columns, rows, per
     res.setHeader('Content-Disposition', `attachment; filename="${filename}.pdf"`);
     doc.pipe(res);
 
-    // Brand header -- a drawn capsule icon (see drawPillLogo above) plus
-    // the wordmark, centered together as ONE group so the PDF always
-    // carries the same logo mark the Excel/Word exports show as "💊
-    // PharmaTrack", instead of silently dropping it the way plain text
-    // did.
+    // Brand header -- the real logo image plus the wordmark, centered
+    // together as ONE group, embedded directly via PDFKit's own image
+    // support (a real raster image now, not a hand-drawn vector
+    // approximation).
     const brandText   = 'PharmaTrack';
     doc.font('Helvetica-Bold').fontSize(20);
     const brandTextWidth = doc.widthOfString(brandText);
-    const logoW = 24, logoH = 14, logoGap = 8;
-    const groupWidth   = logoW + logoGap + brandTextWidth;
+    const logoW = 20, logoH = 20, logoGap = 8;
+    const groupWidth   = LOGO_BUFFER ? logoW + logoGap + brandTextWidth : brandTextWidth;
     const contentWidth = doc.page.width - doc.page.margins.left - doc.page.margins.right;
     const groupX        = doc.page.margins.left + (contentWidth - groupWidth) / 2;
     const groupY         = doc.y;
     const brandTextHeight = doc.currentLineHeight();
 
-    drawPillLogo(doc, groupX, groupY + (brandTextHeight - logoH) / 2, logoW, logoH);
-    doc.fillColor('#0d6efd').text(brandText, groupX + logoW + logoGap, groupY, { lineBreak: false });
+    let textX = groupX;
+    if (LOGO_BUFFER) {
+        doc.image(LOGO_BUFFER, groupX, groupY + (brandTextHeight - logoH) / 2, { width: logoW, height: logoH });
+        textX = groupX + logoW + logoGap;
+    }
+    doc.fillColor('#0d6efd').text(brandText, textX, groupY, { lineBreak: false });
 
     doc.x = doc.page.margins.left;
     doc.y = groupY + brandTextHeight + 4;
 
     doc.fontSize(13).font('Helvetica-Bold').fillColor('#212529').text(title, { align: 'center' });
-    doc.fontSize(9).font('Helvetica-Oblique').fillColor('#6c757d')
-       .text(periodLabel ? `${formatManilaDateTime()} — ${periodLabel}` : formatManilaDateTime(), { align: 'center' });
+    // Only the report range goes above the table now. The generated date and
+    // time is printed BELOW the table, above Prepared by / Approved by.
+    if (periodLabel) {
+        doc.fontSize(9).font('Helvetica-Oblique').fillColor('#6c757d')
+           .text(periodLabel, { align: 'center' });
+    }
     doc.moveDown(1);
 
-    const colWidths  = columns.map(c => c.pdfWidth || 70);
-    const ROW_HEIGHT = 18;
-    const tableWidth = colWidths.reduce((a, b) => a + b, 0);
-    // Centered on the page rather than flush against the left margin --
-    // report tables rarely fill the full page width (especially now that
-    // some have fewer columns), and anchoring everything at the left
-    // margin left a large, unbalanced strip of blank space on the right
-    // that made the whole page (table AND the signature block below it,
-    // which shares this same startX/tableWidth) look off-center and
-    // unfinished.
+    // Column widths: each column's pdfWidth is used as a RELATIVE weight and
+    // scaled so the table fills the page's usable width (a 3-column report is
+    // not stretched past 1.5x). Wider columns mean fewer wrapped lines.
+    // Cells WRAP and each row grows to fit its tallest cell -- nothing is cut
+    // off with "..." any more.
+    const aligns           = columnAligns(columns, rows);   // text left, numbers right
     const pageContentWidth = doc.page.width - doc.page.margins.left - doc.page.margins.right;
-    const startX = doc.page.margins.left + Math.max(0, (pageContentWidth - tableWidth) / 2);
+    const weights          = columns.map(c => c.pdfWidth || 70);
+    const weightSum        = weights.reduce((a, b) => a + b, 0);
+    const scale            = weightSum > pageContentWidth
+        ? pageContentWidth / weightSum
+        : Math.min(pageContentWidth / weightSum, 1.5);
+    const colWidths         = weights.map(w => w * scale);
+    const tableWidth        = colWidths.reduce((a, b) => a + b, 0);
+    // Centered on the page; the signature block below shares this same
+    // startX/tableWidth so it can never drift out of line with the table.
+    const startX            = doc.page.margins.left + Math.max(0, (pageContentWidth - tableWidth) / 2);
 
-    function drawHeader(y) {
-        doc.rect(startX, y, tableWidth, 20).fill('#0d6efd');
-        doc.fillColor('#fff').fontSize(8).font('Helvetica-Bold');
-        let x = startX;
-        columns.forEach((c, i) => {
-            doc.text(c.label.replace('₱', 'PHP'), x + 3, y + 6, { width: colWidths[i] - 6, height: 12, ellipsis: true, align: 'center' });
-            x += colWidths[i];
+    const CELL_PAD_X      = 3;
+    const CELL_PAD_Y      = 5;
+    const MIN_ROW_HEIGHT  = 18;
+    const pdfText          = v => String(v ?? '').replace('\u20b1', 'PHP ');
+    const bottomLimit      = () => doc.page.height - doc.page.margins.bottom - 30;
+
+    // The height a row needs: its tallest cell once the text is wrapped to
+    // that column's width, plus padding.
+    function rowHeightFor(cells, font) {
+        doc.font(font).fontSize(8);
+        let tallest = 0;
+        cells.forEach((cell, i) => {
+            const h = doc.heightOfString(pdfText(cell), { width: colWidths[i] - CELL_PAD_X * 2, align: aligns[i] });
+            if (h > tallest) tallest = h;
         });
-        return y + 20;
+        return Math.max(MIN_ROW_HEIGHT, tallest + CELL_PAD_Y * 2);
     }
 
-    // Centered so a value that's too long for its column still reads as
-    // cut off on BOTH sides rather than looking like the left edge (the
-    // start of the value) is specifically what's missing.
-    function drawRow(row, rowY, { bold = false, topBorder = false, highlight = false } = {}) {
+    function drawHeader(y) {
+        const labels = columns.map(c => c.label.replace('\u20b1', 'PHP'));
+        const h = rowHeightFor(labels, 'Helvetica-Bold') + 2;
+        doc.rect(startX, y, tableWidth, h).fill('#0d6efd');
+        doc.fillColor('#fff').fontSize(8).font('Helvetica-Bold');
+        let x = startX;
+        labels.forEach((label, i) => {
+            // header aligned the same as its own data
+            doc.text(label, x + CELL_PAD_X, y + CELL_PAD_Y + 1, { width: colWidths[i] - CELL_PAD_X * 2, align: aligns[i] });
+            x += colWidths[i];
+        });
+        return y + h;
+    }
+
+    function drawRow(row, rowY, rowH, { bold = false, topBorder = false, highlight = false } = {}) {
         if (highlight) {
-            // Same treatment as the header bar above -- solid blue fill,
-            // white bold text -- so a totals row (e.g. TOTAL PROFIT) reads
-            // just as clearly as the header does, instead of a thin line
-            // over otherwise-plain data-row styling.
-            doc.rect(startX, rowY, tableWidth, ROW_HEIGHT).fill('#0d6efd');
+            // Solid blue fill with white bold text -- the same treatment as the
+            // header bar -- so a totals row reads as clearly as the header.
+            doc.rect(startX, rowY, tableWidth, rowH).fill('#0d6efd');
             doc.fillColor('#fff').font('Helvetica-Bold').fontSize(8);
         } else {
             if (topBorder) {
@@ -306,7 +408,7 @@ async function exportPDF({ res, title, generatedBy, filename, columns, rows, per
         }
         let x = startX;
         row.forEach((cell, i) => {
-            doc.text(String(cell).replace('₱', 'PHP '), x + 3, rowY + 5, { width: colWidths[i] - 6, height: 12, ellipsis: true, align: 'center' });
+            doc.text(pdfText(cell), x + CELL_PAD_X, rowY + CELL_PAD_Y, { width: colWidths[i] - CELL_PAD_X * 2, align: aligns[i] });
             x += colWidths[i];
         });
     }
@@ -320,24 +422,26 @@ async function exportPDF({ res, title, generatedBy, filename, columns, rows, per
         y += 34;
     } else {
         rows.forEach((row, idx) => {
-            if (y > doc.page.height - doc.page.margins.bottom - 30) {
+            const rowH = rowHeightFor(row, 'Helvetica');
+            if (y + rowH > bottomLimit()) {
                 doc.addPage();
                 y = drawHeader(doc.page.margins.top);
                 doc.font('Helvetica').fontSize(8);
             }
-            if (idx % 2 === 1) doc.rect(startX, y, tableWidth, ROW_HEIGHT).fill('#f8f9fa');
-            drawRow(row, y);
-            y += ROW_HEIGHT;
+            if (idx % 2 === 1) doc.rect(startX, y, tableWidth, rowH).fill('#f8f9fa');
+            drawRow(row, y, rowH);
+            y += rowH;
         });
 
         if (totalsRow) {
-            if (y > doc.page.height - doc.page.margins.bottom - 30) {
+            const rowH = rowHeightFor(totalsRow, 'Helvetica-Bold');
+            if (y + rowH > bottomLimit()) {
                 doc.addPage();
                 y = drawHeader(doc.page.margins.top);
                 doc.font('Helvetica').fontSize(8);
             }
-            drawRow(totalsRow, y, { highlight: true });
-            y += ROW_HEIGHT;
+            drawRow(totalsRow, y, rowH, { highlight: true });
+            y += rowH;
         }
     }
 
@@ -345,7 +449,16 @@ async function exportPDF({ res, title, generatedBy, filename, columns, rows, per
     // A real drawn line (not underscores), with the caption centered
     // underneath using the exact same x-start and width as that line --
     // so it can never drift out of alignment with it.
-    y += 40;
+    // Generated date/time: directly below the table (and its totals row),
+    // above the signature block.
+    y += 14;
+    if (y > doc.page.height - doc.page.margins.bottom - 120) {
+        doc.addPage();
+        y = doc.page.margins.top;
+    }
+    doc.fontSize(9).font('Helvetica-Oblique').fillColor('#6c757d')
+       .text(`Generated: ${formatManilaDateTime()}`, startX, y, { width: tableWidth, align: 'center' });
+    y += 26;
     if (y > doc.page.height - doc.page.margins.bottom - 70) {
         doc.addPage();
         y = doc.page.margins.top;
@@ -372,20 +485,32 @@ async function exportPDF({ res, title, generatedBy, filename, columns, rows, per
 }
 
 async function exportWord({ res, title, generatedBy, filename, columns, rows, periodLabel, totalsRow }) {
-    const headerCells = columns.map(c => new TableCell({
+    // Same column rule as Excel and PDF: text left, numbers right, headers
+    // aligned with their data. Column widths are proportional (the same
+    // weights the PDF uses) in a FIXED-layout table, so a wide text column
+    // such as Details gets room and its text wraps inside the cell instead
+    // of being squeezed or cut.
+    const aligns     = columnAligns(columns, rows);
+    const wordAlign  = i => aligns[i] === 'right' ? AlignmentType.RIGHT : AlignmentType.LEFT;
+    const weightSum  = columns.reduce((s, c) => s + (c.pdfWidth || 70), 0);
+    const cellWidth  = i => ({ size: Math.round(((columns[i].pdfWidth || 70) / weightSum) * 1000) / 10, type: WidthType.PERCENTAGE });
+
+    const headerCells = columns.map((c, i) => new TableCell({
+        width: cellWidth(i),
         shading: { fill: '0D6EFD' },
         children: [new Paragraph({
-            alignment: AlignmentType.CENTER,
+            alignment: wordAlign(i),
             children: [new TextRun({ text: c.label, bold: true, color: 'FFFFFF', size: 16 })]
         })]
     }));
 
     const dataRows = rows.length
         ? rows.map(row => new TableRow({
-            children: row.map(value => new TableCell({
+            children: row.map((value, i) => new TableCell({
+                width: cellWidth(i),
                 children: [new Paragraph({
-                    alignment: AlignmentType.CENTER,
-                    children: [new TextRun({ text: String(value), size: 16 })]
+                    alignment: wordAlign(i),
+                    children: [new TextRun({ text: String(value ?? ''), size: 16 })]
                 })]
             }))
         }))
@@ -401,12 +526,13 @@ async function exportWord({ res, title, generatedBy, filename, columns, rows, pe
 
     const totalsRows = totalsRow
         ? [new TableRow({
-            children: totalsRow.map(value => new TableCell({
+            children: totalsRow.map((value, i) => new TableCell({
+                width: cellWidth(i),
                 // Same blue shading as the header row -- see the Excel/PDF
                 // versions of this same row for why.
                 shading: { fill: '0D6EFD' },
                 children: [new Paragraph({
-                    alignment: AlignmentType.CENTER,
+                    alignment: wordAlign(i),
                     children: [new TextRun({ text: String(value ?? ''), bold: true, color: 'FFFFFF', size: 16 })]
                 })]
             }))
@@ -466,22 +592,39 @@ async function exportWord({ res, title, generatedBy, filename, columns, rows, pe
 
     const doc = new Document({
         sections: [{
+            // Landscape, like the PDF, so wide reports have room for their columns
+            properties: { page: { size: { orientation: PageOrientation.LANDSCAPE } } },
             children: [
-                new Paragraph({ alignment: AlignmentType.CENTER, children: [new TextRun({ text: '💊 PharmaTrack', bold: true, size: 36, color: '0D6EFD' })] }),
+                new Paragraph({
+                    alignment: AlignmentType.CENTER,
+                    children: [
+                        ...(LOGO_BUFFER ? [new ImageRun({
+                            type: 'png',
+                            data: LOGO_BUFFER,
+                            transformation: { width: 28, height: 28 }
+                        })] : []),
+                        new TextRun({ text: (LOGO_BUFFER ? '  ' : '') + 'PharmaTrack', bold: true, size: 36, color: '0D6EFD' })
+                    ]
+                }),
                 new Paragraph({ alignment: AlignmentType.CENTER, heading: HeadingLevel.HEADING_2, children: [new TextRun({ text: title, bold: true })] }),
                 new Paragraph({
                     alignment: AlignmentType.CENTER,
                     children: [new TextRun({
-                        text: periodLabel ? `${formatManilaDateTime()} — ${periodLabel}` : formatManilaDateTime(),
+                        text: periodLabel || '',
                         italics: true, size: 18, color: '6C757D'
                     })]
                 }),
                 new Paragraph({ text: '' }),
                 new Table({
                     width: { size: 100, type: WidthType.PERCENTAGE },
+                    layout: TableLayoutType.FIXED,
                     rows: [new TableRow({ children: headerCells }), ...dataRows, ...totalsRows]
                 }),
                 new Paragraph({ text: '' }),
+                new Paragraph({
+                    alignment: AlignmentType.CENTER,
+                    children: [new TextRun({ text: `Generated: ${formatManilaDateTime()}`, italics: true, size: 18, color: '6C757D' })]
+                }),
                 new Paragraph({ text: '' }),
                 signatureBlock
             ]

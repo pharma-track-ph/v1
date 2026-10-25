@@ -5,7 +5,8 @@ const path    = require('path');
 const {
     getProducts, getProduct, createProduct, updateProduct, deleteProduct,
     addItem, updateItem, deleteItem,
-    getAlertSummary, importCSV, getImportTemplate, getBarcode
+    getAlertSummary, importCSV, getImportTemplate, getBarcode,
+    listCategories, addCategory, renameCategory, deleteCategories
 } = require('../controllers/inventoryController');
 const { exportInventory } = require('../controllers/exportController');
 const { verifyToken, requireRole } = require('../middleware/authMiddleware');
@@ -26,6 +27,13 @@ const upload = multer({
 
 router.get('/',               verifyToken, getProducts);
 router.get('/alerts/summary', verifyToken, getAlertSummary);
+
+// Manage Categories (Admin and Owner). Registered before '/:id' so "categories"
+// is never mistaken for a product id.
+router.get('/categories',          verifyToken, requireRole('admin'), listCategories);
+router.post('/categories',         verifyToken, requireRole('admin'), addCategory);
+router.post('/categories/rename',  verifyToken, requireRole('admin'), renameCategory);
+router.post('/categories/delete',  verifyToken, requireRole('admin'), deleteCategories);
 
 // Export route MUST come before '/:id' — otherwise Express would try to
 // match "export" itself as an :id parameter. :format is excel|pdf|word.

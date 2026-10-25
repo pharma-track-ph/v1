@@ -98,7 +98,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         products.forEach(p => {
             const opt = document.createElement('option');
             opt.value = p.id;
-            opt.textContent = `${p.name} (${p.category})`;
+            opt.textContent = `${p.name} (${fmtCategory(p.category)})`;
             opt.dataset.category = p.category;
             opt.dataset.name     = p.name;
             productSelect.appendChild(opt);
@@ -169,7 +169,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             dropdown.innerHTML = items.map((p, i) => `
                 <button type="button" class="search-suggest-item" data-index="${i}">
                     <span class="search-suggest-label">${esc(p.name)}</span>
-                    <span class="search-suggest-sub">${esc(p.category)}</span>
+                    <span class="search-suggest-sub">${esc(fmtCategory(p.category))}</span>
                 </button>
             `).join('');
 
@@ -243,7 +243,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             return `
                 <div class="trending-card" data-product-id="${p.id}" title="Click to forecast ${p.name}">
                     <div class="trend-name">${p.name}</div>
-                    <div class="trend-category">${p.category}</div>
+                    <div class="trend-category">${fmtCategory(p.category).replace(/[&<>"]/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[ch]))}</div>
                     <div class="trend-stats">
                         <span class="trend-badge ${trendClass}">${trendLabel}</span>
                         <span class="trend-value">${p.weekly_avg} units/wk</span>
@@ -703,7 +703,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
         // Header
         document.getElementById('forecast-product-name').textContent     = product.name;
-        document.getElementById('forecast-product-category').textContent = product.category;
+        document.getElementById('forecast-product-category').textContent = fmtCategory(product.category);
         document.getElementById('quick-stock').textContent   = (product.stock_quantity ?? '—') + ' units';
         document.getElementById('quick-reorder').textContent = (product.reorder_level  ?? '—') + ' units';
         document.getElementById('quick-price').textContent   = typeof Fmt !== 'undefined'
@@ -933,7 +933,7 @@ document.addEventListener('DOMContentLoaded', async () => {
                         spanGaps: false
                     },
                     {
-                        label: 'Model Fit',
+                        label: 'Predicted',
                         data: fittedData,
                         borderColor: '#198754',
                         borderWidth: 1.5,

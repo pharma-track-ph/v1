@@ -4,15 +4,17 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>POS – PharmaTrack</title>
+    <link rel="icon" type="image/png" href="../images/pharmatrack-logo.png">
     <link rel="stylesheet" href="../css/global.css">
     <link rel="stylesheet" href="../css/pos.css">
+    <link rel="stylesheet" href="../css/receipt.css">
 </head>
 <body class="pos-page">
 <div class="app-container">
 
     <aside class="sidebar" id="sidebar">
         <div class="sidebar-brand">
-            <div class="brand-icon">💊</div>
+            <div class="brand-icon"><img src="../images/pharmatrack-logo.png" alt="PharmaTrack"></div>
             <div class="brand-text"><h1>PharmaTrack</h1><p>Management System</p></div>
         </div>
         <nav class="sidebar-nav">
@@ -20,11 +22,11 @@
             <ul>
                 <li class="nav-item" data-roles="admin,super_admin,cashier"><a href="dashboard.html"><span class="nav-icon"></span> Dashboard</a></li>
                 <li class="nav-item active" data-roles="admin,super_admin,cashier"><a href="pos.html"><span class="nav-icon"></span> Point of Sale</a></li>
+                <li class="nav-item" data-roles="admin,super_admin,cashier"><a href="reports.html"><span class="nav-icon"></span> Reports</a></li>
             </ul>
             <p class="nav-section-label">Management</p>
             <ul>
                 <li class="nav-item" data-roles="admin,super_admin"><a href="inventory.html"><span class="nav-icon"></span> Inventory</a></li>
-                <li class="nav-item" data-roles="admin,super_admin"><a href="reports.html"><span class="nav-icon"></span> Reports</a></li>
                 <li class="nav-item" data-roles="admin,super_admin"><a href="forecasting.html"><span class="nav-icon"></span> Forecasting</a></li>
             </ul>
             <p class="nav-section-label">Admin</p>
@@ -201,7 +203,7 @@
                     <div class="payment-section">
                         <div class="form-row" style="gap:8px;align-items:end">
                             <div class="form-group" style="margin-bottom:0">
-                                <label class="form-label" style="font-size:0.75rem">Discount</label>
+                                <label class="form-label" id="discount-label" style="font-size:0.75rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">Discount: Senior/PWD</label>
                                 <button type="button" id="discount-toggle" class="discount-toggle-btn" aria-pressed="false">
                                     <span class="toggle-track"><span class="toggle-thumb"></span></span>
                                     <span class="toggle-label">20% OFF</span>
@@ -270,7 +272,7 @@
         <div class="modal-body" id="receipt-body"></div>
         <div class="modal-footer">
             <button class="btn btn-light" onclick="Modal.close('receipt-modal')">Close</button>
-            <button class="btn btn-primary" onclick="window.print()">Print</button>
+            <button class="btn btn-primary" onclick="Receipt.printCurrent()">Print</button>
         </div>
     </div>
 </div>
@@ -282,6 +284,20 @@
             <div class="form-group">
                 <label class="form-label">Opening Cash (₱)</label>
                 <input type="number" id="open-register-amount" class="form-control" min="0" step="0.01" placeholder="0.00" autocomplete="off">
+            </div>
+            <!-- Quick-cash buttons: each tap ADDS its amount to the field above
+                 (see pos.js). Typing a number by hand still works the same. -->
+            <div class="quick-cash" id="open-register-quick-cash">
+                <div class="quick-cash-label">Quick add</div>
+                <div class="quick-cash-grid">
+                    <button type="button" class="quick-cash-btn" data-amount="100">+₱100</button>
+                    <button type="button" class="quick-cash-btn" data-amount="200">+₱200</button>
+                    <button type="button" class="quick-cash-btn" data-amount="500">+₱500</button>
+                    <button type="button" class="quick-cash-btn" data-amount="1000">+₱1,000</button>
+                    <button type="button" class="quick-cash-btn" data-amount="2000">+₱2,000</button>
+                    <button type="button" class="quick-cash-btn" data-amount="5000">+₱5,000</button>
+                </div>
+                <button type="button" class="quick-cash-clear" id="open-register-clear">Clear</button>
             </div>
             <p style="font-size:0.8rem;color:var(--secondary)">Count the cash currently in your drawer and enter the total starting amount.</p>
         </div>
@@ -397,7 +413,9 @@
 <div id="toast-container" class="toast-container"></div>
 <script src="https://unpkg.com/@zxing/library@latest"></script>
 <script src="https://unpkg.com/@zxing/browser@latest"></script>
+<script src="../js/passwordToggle.js"></script>
 <script src="../js/main.js"></script>
+<script src="../js/receipt.js"></script>
 <script src="../js/offlineSync.js"></script>
 <script src="../js/pos.js"></script>
 

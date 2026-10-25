@@ -98,13 +98,16 @@ img { max-width: 100%; display: block; }
 .sidebar-brand .brand-icon {
     width:           38px;
     height:          38px;
-    background:      rgba(255,255,255,0.18);
-    border-radius:   10px;
     display:         flex;
     align-items:     center;
     justify-content: center;
-    font-size:       1.2rem;
     flex-shrink:     0;
+}
+
+.sidebar-brand .brand-icon img {
+    width:      100%;
+    height:     100%;
+    object-fit: contain;
 }
 
 .sidebar-brand .brand-text h1 {
@@ -727,7 +730,6 @@ select.form-control { appearance: none; background-image: url("data:image/svg+xm
 .toast.warning { border-color: var(--warning); }
 .toast.info    { border-color: var(--info);    }
 
-.toast-icon { font-size: 1.1rem; flex-shrink: 0; margin-top: 1px; }
 .toast-title { font-weight: 600; margin-bottom: 2px; }
 .toast-message { color: var(--secondary); font-size: 0.83rem; }
 
@@ -740,6 +742,396 @@ select.form-control { appearance: none; background-image: url("data:image/svg+xm
     from { opacity: 1; }
     to   { opacity: 0; transform: translateX(30px); }
 }
+
+/* ============================================================
+   Data Table Enhancements: Alignment, Sticky, Sort, Row Actions
+   ============================================================
+   Shared, reusable utility classes for the "advanced data table"
+   pattern -- applied per-table by adding these classes to the specific
+   <th>/<td> elements that need them. Nothing here assumes any
+   particular table's column layout, so the same system works across
+   Reports, Inventory, User Management, Audit Logs, etc. */
+
+/* ── Alignment ─────────────────────────────────────────────
+   Numeric columns right-align with tabular (fixed-width) numerals so
+   digits stack cleanly for at-a-glance comparison down a column; text
+   columns stay left-aligned. Header alignment always matches its
+   column's body alignment -- apply the SAME class to both <th> and <td>
+   in a numeric/text column, never center either as a compromise. */
+.col-num {
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+}
+
+.col-text {
+    text-align: left;
+}
+
+/* A header must sit over its data. The base rule `.table thead th { text-align: left }`
+   is MORE specific than `.col-num` above, so it won and every numeric header stayed at
+   the left of its right-aligned numbers (SUBTOTAL, STOCK, PRICE, QTY...). These are
+   more specific than the base rule, so numeric headers now align right, text headers
+   left -- in every table. (main.js TableAlign also gives unclassed headers the same
+   alignment as their column's cells.) */
+.table thead th.col-num,
+thead th.col-num,
+table th.col-num {
+    text-align: right;
+}
+
+.table thead th.col-text,
+thead th.col-text,
+table th.col-text {
+    text-align: left;
+}
+
+/* ── Sticky identity column ──────────────────────────────────
+   Pins one column (customer name, invoice/order #, etc.) to the left
+   edge during horizontal scroll, so identifying context is never lost
+   mid-scroll. Must be applied to EVERY cell in that column (header +
+   body) individually -- CSS sticky has no <col>-level equivalent. The
+   solid background is required, not decorative: without it, scrolled
+   content visibly shows through underneath as it passes behind the
+   pinned column. thead's version sits at a higher z-index so the
+   top-left corner (where the sticky column and sticky header overlap)
+   renders correctly above both scrolling axes. */
+.sticky-col {
+    position:   sticky;
+    left:       0;
+    z-index:    5;
+    background: var(--white);
+}
+
+/* Element+class form (thead th.sticky-col), not a plain descendant class
+   selector (thead .sticky-col) -- and duplicated with the
+   .table-container-tall prefix for a belt-and-suspenders specificity win
+   -- because a bare "thead .sticky-col { z-index:15 }" here used to tie
+   or lose against .table-container-tall thead th's z-index:10 below for
+   THIS specific cell (the one matching both selectors), collapsing it to
+   the same stacking level as every other header cell. That was the
+   reported bug: the sticky column's own header (e.g. "Brand Name")
+   sliding underneath the other headers ("Category", "Stock", etc.)
+   during horizontal scroll instead of staying pinned on top of them.
+   z-index:20 here is deliberately higher than .table-container-tall
+   thead th's 10, so the top-left corner cell -- where the sticky column
+   and sticky header intersect -- always wins regardless of which rule
+   happens to be declared later in this file. */
+thead th.sticky-col,
+.table-container-tall thead th.sticky-col,
+.confined-scroll-area thead th.sticky-col {
+    z-index:    20;
+    background: var(--light-blue);
+}
+
+/* Trailing-edge separator -- keeps the boundary between the pinned
+   column and scrolling content visually distinct rather than blending
+   together as content passes underneath. */
+.sticky-col::after {
+    content:    '';
+    position:   absolute;
+    top:        0;
+    right:      0;
+    bottom:     0;
+    width:      1px;
+    box-shadow: 2px 0 4px rgba(0,0,0,0.06);
+}
+
+/* ── Sticky header row ────────────────────────────────────────
+   Opt-in variant of .table-container for tables long enough to need
+   their OWN internal vertical scroll (rather than the whole page
+   scrolling) -- position:sticky on the header only has something to
+   stick WITHIN if its container actually scrolls. */
+.table-container-tall {
+    max-height: 520px;
+    overflow-y: auto;
+}
+
+.table-container-tall thead th {
+    position:   sticky;
+    top:        0;
+    z-index:    10;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.06); /* trailing-edge separator under the pinned header */
+}
+
+/* Generic page confinement -- reusable version of the "confine the
+   page, scroll only what needs to scroll" pattern already proven on
+   the POS page (see the Responsive CSS Standard doc): a fixed-height
+   ancestor chain, min-height:0 on every flex link, overflow:hidden
+   everywhere except the ONE region that should actually scroll.
+   Supersedes .table-container-tall's fixed 520px max-height on any page
+   that opts in with body.confined-page -- that max-height approach
+   capped the table at an arbitrary number regardless of how much (or
+   little) room the viewport actually had; this version gives the table
+   exactly whatever's left after the page's own toolbar/stat-cards/
+   filters take their natural height, right up to filling the screen,
+   and never taller than that (so it can never push the PAGE itself
+   into needing to scroll).
+
+   Scoped to body.confined-page rather than applied unconditionally, so
+   it never affects a page that genuinely wants normal document scroll
+   and hasn't opted in. Usage: add confined-page to <body>, leave the
+   page's title/toolbar/stat-cards/filters as plain normal-flow children
+   of .page-content (no extra class needed -- they just take their
+   natural height), and add .confined-scroll-area to the ONE wrapper
+   that directly holds the scrollable table content (usually the
+   .table-container itself, or a tab panel's own wrapper on a page with
+   multiple tabs like Reports). */
+body.confined-page {
+    height:   100dvh;
+    overflow: hidden;
+}
+
+body.confined-page .app-container {
+    height:   100dvh;
+    overflow: hidden;
+}
+
+body.confined-page .main-wrapper {
+    height:     100dvh;
+    min-height: 0;
+    overflow:   hidden;
+}
+
+body.confined-page .page-content {
+    /* NOT height:100dvh -- .main-wrapper reserves padding-top for the
+       fixed header (see its own comment), so its actual AVAILABLE
+       content box is already less than 100dvh. An explicit 100dvh here
+       would ignore that reservation and overflow past it by exactly the
+       header's height. flex:1 (already true from the base .page-content
+       rule above, repeated here for clarity) lets this correctly size to
+       whatever .main-wrapper actually has left instead. */
+    min-height:     0;
+    overflow:       hidden;
+    display:        flex;
+    flex-direction: column;
+}
+
+/* The one region that actually scrolls. flex:1 lets it claim whatever
+   space the toolbar/stat-cards/filters above it don't need; min-height:0
+   overrides flex's default "never shrink below my content's natural
+   size" behavior, which is what would otherwise silently defeat the
+   overflow-y below (see Pattern 2 in the Responsive CSS Standard --
+   this is the single most common cause of "I set overflow but it's
+   being ignored" bugs in this codebase). */
+.confined-scroll-area {
+    flex:       1;
+    min-height: 0;
+    overflow-y: auto;
+}
+
+/* Sticky header row within a confined scroll area -- this is the exact
+   thing .table-container-tall's own "thead th" rule provides, and
+   .confined-scroll-area supersedes .table-container-tall's fixed-height
+   approach in the SAME role (the ONE region that scrolls), so it needs
+   the identical treatment repeated here. Missing this entirely (which
+   happened on the first pass through this fix) meant the header
+   silently stopped sticking at all the moment a page switched from
+   .table-container-tall to .confined-scroll-area -- caught during
+   self-review, not by a live report, so worth calling out. */
+.confined-scroll-area thead th {
+    position:   sticky;
+    top:        0;
+    z-index:    10;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.06);
+}
+
+/* A .card directly wrapping a .confined-scroll-area needs to become a
+   flex column too, so it passes down whatever space .page-content has
+   left to its scrolling child -- without this, the card would just size
+   to its child's full NATURAL height (every row, unbounded), and the
+   overflow-y on the child would have nothing to actually clip against.
+   Scoped to this specific combination rather than changing .card's own
+   definition globally, since plenty of other cards on other pages
+   aren't wrapping a scroll area and shouldn't become flex containers. */
+.confined-card-wrapper {
+    display:        flex;
+    flex-direction: column;
+    flex:           1;
+    min-height:     0;
+    overflow:       hidden;
+}
+
+/* For pages with MULTIPLE swappable panels within .page-content (only
+   one visible at a time via display:none -- Reports' tabs are the only
+   current example) -- each panel needs to play the SAME "flex column
+   filling available space" role .page-content itself plays for a
+   simpler single-panel page, since .page-content's own flex:1 only
+   reaches its DIRECT children, and a tab panel sits one level deeper.
+   Apply to EVERY panel uniformly, not just the initially-active one -- a
+   display:none panel is removed from layout entirely regardless of this
+   class, so only whichever one is actually visible ever participates. */
+.confined-tab-panel {
+    flex:           1;
+    min-height:     0;
+    overflow:       hidden;
+    display:        flex;
+    flex-direction: column;
+}
+
+/* Pagination -- moved here from audit.css. Audit Logs was the first
+   table to have pagination, but the whole point of main.js's Paginate
+   helper is that every table sharing this UI needs the SAME styling,
+   not just Audit Logs, so this needed to stop being page-specific CSS. */
+.pagination {
+    display:         flex;
+    align-items:     center;
+    justify-content: center;
+    gap:             8px;
+    margin-top:      12px;
+    flex-wrap:       wrap;
+    flex-shrink:     0; /* never compressed/scrolled away -- sits below .confined-scroll-area as a normal-flow sibling, always visible */
+}
+
+.page-btn {
+    padding:       6px 14px;
+    border:        1px solid var(--gray-300);
+    background:    var(--white);
+    border-radius: 6px;
+    font-size:     0.83rem;
+    cursor:        pointer;
+    transition:    var(--transition);
+}
+
+.page-btn:hover    { background: var(--gray-100); }
+.page-btn.active   { background: var(--primary); color: #fff; border-color: var(--primary); }
+.page-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.page-info         { font-size: 0.83rem; color: var(--secondary); }
+
+/* ── Sortable columns ─────────────────────────────────────────
+   A column header opts in with .sortable-col and a data-sort-key
+   attribute (read by main.js's TableSort helper). The arrow stays
+   invisible until the column is either hovered/focused (a faint hint
+   that sorting is available) or is the ACTIVE sort column (fully
+   visible, direction-specific). */
+.sortable-col {
+    cursor:        pointer;
+    user-select:   none;
+    position:      relative;
+    padding-right: 22px !important;
+}
+
+.sortable-col .sort-arrow {
+    position:   absolute;
+    right:      6px;
+    top:        50%;
+    transform:  translateY(-50%);
+    font-size:  0.7rem;
+    opacity:    0;
+    transition: opacity 0.15s ease;
+}
+
+.sortable-col:hover .sort-arrow,
+.sortable-col:focus-visible .sort-arrow {
+    opacity: 0.35;
+}
+
+.sortable-col.sort-active .sort-arrow {
+    opacity: 1;
+}
+
+/* Right-aligned (number) columns: the arrow goes on the LEFT and the right
+   padding matches the body cells (16px). The base rule above pads every
+   sortable header 22px on the RIGHT for the arrow, which pushed a
+   right-aligned header's text 6px left of the numbers under it. Now the
+   header text and the numbers end at the same right edge. */
+.sortable-col.col-num {
+    padding-left:  22px !important;
+    padding-right: 16px !important;
+}
+
+.sortable-col.col-num .sort-arrow {
+    right: auto;
+    left:  6px;
+}
+
+/* Persistent tint across the WHOLE active-sort column (header + every
+   body cell) so it stays identifiable even after scrolling away from
+   the header itself. !important wins over row-hover and the expiry/
+   stock row-tint rules elsewhere, which would otherwise mask this on a
+   hovered or status-tinted row. */
+.sort-col-tint {
+    background: var(--light-blue) !important;
+}
+
+thead .sort-col-tint {
+    background: var(--gray-100) !important;
+}
+
+/* ── Row actions: always visible ─────────────────
+   Reverted from an earlier hover/focus-reveal pattern -- action buttons
+   now render at full visibility at all times on desktop, per explicit
+   direction. The touch-device kebab menu below is unrelated to that
+   reverted behavior (it's not a hover-hide mechanism, it's a separate,
+   device-targeted replacement for the whole button group where hovering
+   isn't possible at all) and stays exactly as it was. */
+.row-actions {
+    /* intentionally no opacity/pointer-events rules here anymore */
+}
+
+/* Touch devices (hover:none) get a single kebab trigger instead of the
+   full row-actions group -- a coarse pointer can't hover, and a row of
+   small icons is genuinely hard to tap precisely. Targets touch
+   specifically rather than guessing from screen width, so a touch
+   laptop or mouse-equipped tablet isn't forced into either pattern
+   based on size alone. */
+.kebab-trigger { display: none; }
+
+@media (hover: none) {
+    .row-actions   { display: none; }
+    .kebab-trigger { display: inline-flex; opacity: 1; pointer-events: auto; }
+}
+
+/* 48x48 minimum touch target on the kebab trigger and every action
+   inside its menu (WCAG/Material guidance) -- achieved by padding the
+   CLICKABLE area, never by enlarging the visible icon/text itself. */
+.kebab-wrap { position: relative; display: inline-block; }
+
+.kebab-trigger {
+    align-items:     center;
+    justify-content: center;
+    width:           48px;
+    height:          48px;
+    background:      none;
+    border:          none;
+    font-size:       1.2rem;
+    color:           var(--gray-700);
+    border-radius:   50%;
+    cursor:          pointer;
+}
+
+.kebab-trigger:hover, .kebab-trigger:focus-visible { background: var(--gray-100); }
+
+.kebab-menu {
+    position:      absolute;
+    right:         0;
+    top:           calc(100% + 4px);
+    background:    var(--white);
+    border:        1px solid var(--gray-200);
+    border-radius: var(--border-radius);
+    box-shadow:    var(--shadow-lg);
+    z-index:       50;
+    min-width:     160px;
+    padding:       6px;
+}
+
+.kebab-menu-item {
+    display:         flex;
+    align-items:     center;
+    width:           100%;
+    min-height:      48px;
+    padding:         0 14px;
+    background:      none;
+    border:          none;
+    border-radius:   6px;
+    font-size:       0.88rem;
+    font-family:     var(--font-family);
+    text-align:      left;
+    color:           var(--dark);
+    cursor:          pointer;
+}
+
+.kebab-menu-item:hover { background: var(--gray-100); }
+.kebab-menu-item.danger { color: var(--danger); }
 
 /* ── Alert Banners ─────────────────────────────────────────── */
 .alert {
@@ -806,6 +1198,56 @@ tr.row-soldout   td { background: #f4f4f5 !important; }
 .mb-16        { margin-bottom: 16px; }
 .hidden       { display: none !important; }
 
+/* -- Show/hide password eye (main.js PasswordToggle) --
+   Every <input type="password"> in the app is wrapped in .password-field and
+   gets the same eye button, so all of them behave identically. */
+.password-field {
+    position: relative;
+    display:  block;
+    width:    100%;
+}
+
+.password-field > input {
+    width:         100%;
+    padding-right: 42px;
+}
+
+.password-toggle {
+    position:        absolute;
+    top:             50%;
+    right:           6px;
+    transform:       translateY(-50%);
+    width:           30px;
+    height:          30px;
+    display:         flex;
+    align-items:     center;
+    justify-content: center;
+    padding:         0;
+    background:      transparent;
+    border:          none;
+    border-radius:   6px;
+    color:           var(--gray-700);
+    cursor:          pointer;
+}
+
+.password-toggle:hover       { background: var(--gray-100); color: var(--primary); }
+.password-toggle:focus-visible { outline: 2px solid var(--primary); outline-offset: 1px; }
+.password-toggle svg         { width: 18px; height: 18px; display: block; }
+
+/* -- Edit Profile: the Change Password / Change Email buttons -- */
+.profile-change-actions {
+    display:       flex;
+    gap:           8px;
+    flex-wrap:     wrap;
+    margin-bottom: 14px;
+}
+
+.profile-change-actions .btn.active {
+    background:   var(--primary);
+    border-color: var(--primary);
+    color:        #fff;
+}
+
 /* ── Login Page (no sidebar) ───────────────────────────────── */
 .login-page {
     min-height:      100vh;
@@ -833,13 +1275,16 @@ tr.row-soldout   td { background: #f4f4f5 !important; }
 .login-logo .logo-icon {
     width:           64px;
     height:          64px;
-    background:      var(--primary-light);
-    border-radius:   16px;
     display:         flex;
     align-items:     center;
     justify-content: center;
-    font-size:       2rem;
     margin:          0 auto 12px;
+}
+
+.login-logo .logo-icon img {
+    width:      100%;
+    height:     100%;
+    object-fit: contain;
 }
 
 .login-logo h1 { font-size: 1.6rem; font-weight: 800; color: var(--primary); }
@@ -1131,13 +1576,19 @@ tr.row-soldout   td { background: #f4f4f5 !important; }
 .export-menu {
     position:      absolute;
     top:           calc(100% + 6px);
-    left:          0;
+    /* Anchored to the button's RIGHT edge so the menu opens toward the left. It used
+       to be pinned to the left edge, which pushed it past the right side of the page
+       (cut off) wherever the Export button sits at the far right (Reports, Audit Logs). */
+    right:         0;
+    left:          auto;
     z-index:       50;
     background:    var(--white);
     border:        1px solid var(--gray-200);
     border-radius: var(--border-radius);
     box-shadow:    var(--shadow);
     min-width:     170px;
+    max-width:     calc(100vw - 24px);
+    white-space:   nowrap;
     padding:       6px;
 }
 
@@ -1156,6 +1607,235 @@ tr.row-soldout   td { background: #f4f4f5 !important; }
 }
 
 .export-menu-item:hover { background: var(--gray-100); }
+
+/* -- Structured confirmation dialogs (Confirm Checkout, Void) --
+   An item list, a totals card and soft alert boxes in place of one block of
+   plain text. Deliberately understated: light borders, one emphasised figure. */
+.dlg-lead {
+    display:         flex;
+    justify-content: space-between;
+    align-items:     flex-end;
+    gap:             12px;
+    margin-bottom:   14px;
+}
+
+.dlg-label {
+    font-size:      0.72rem;
+    font-weight:    600;
+    color:          var(--secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+}
+
+.dlg-big {
+    font-size:   1.6rem;
+    font-weight: 700;
+    line-height: 1.2;
+    color:       var(--dark);
+    font-variant-numeric: tabular-nums;
+}
+
+.dlg-items {
+    border:        1px solid var(--gray-200);
+    border-radius: 10px;
+    overflow:      hidden;
+    margin-bottom: 12px;
+    max-height:    210px;
+    overflow-y:    auto;
+}
+
+.dlg-item {
+    display:         flex;
+    justify-content: space-between;
+    align-items:     flex-start;
+    gap:             12px;
+    padding:         9px 12px;
+    font-size:       0.86rem;
+    color:           var(--dark);
+    border-bottom:   1px solid var(--gray-100);
+}
+
+.dlg-item:last-child { border-bottom: none; }
+
+.dlg-item small {
+    display:    block;
+    margin-top: 1px;
+    font-size:  0.75rem;
+    color:      var(--secondary);
+}
+
+.dlg-amt {
+    white-space: nowrap;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+}
+
+.dlg-totals {
+    background:    var(--gray-100);
+    border-radius: 10px;
+    padding:       10px 12px;
+}
+
+.dlg-total-row {
+    display:         flex;
+    justify-content: space-between;
+    gap:             12px;
+    padding:         3px 0;
+    font-size:       0.86rem;
+    color:           var(--gray-700);
+    font-variant-numeric: tabular-nums;
+}
+
+.dlg-change { color: var(--success); font-weight: 600; }
+
+.dlg-tag {
+    display:        inline-block;
+    margin-left:    6px;
+    padding:        1px 7px;
+    border-radius:  999px;
+    font-size:      0.66rem;
+    font-weight:    700;
+    vertical-align: middle;
+    background:     var(--primary-light, #e7f1ff);
+    color:          var(--primary);
+}
+
+.dlg-alert {
+    margin-top:    8px;
+    padding:       9px 12px;
+    border-radius: 8px;
+    font-size:     0.8rem;
+    line-height:   1.45;
+}
+
+.dlg-alert.warn   { background: var(--warning-light, #fff3cd); color: #8a6d00; }
+.dlg-alert.info   { background: var(--primary-light, #e7f1ff); color: var(--primary); }
+.dlg-alert.danger { background: var(--danger-light, #fde8e8);  color: var(--danger); }
+
+/* -- Changes that were not saved (the shared panel on the POS and Inventory pages) --
+   The pill sits bottom-left; the window explains each item in plain words. */
+.failed-sync-banner {
+    position:      fixed;
+    left:          16px;
+    bottom:        20px;
+    z-index:       1200;
+    background:    var(--danger);
+    color:         #fff;
+    border:        none;
+    border-radius: 999px;
+    padding:       10px 18px;
+    font-size:     0.82rem;
+    font-weight:   600;
+    cursor:        pointer;
+    box-shadow:    var(--shadow);
+    max-width:     calc(100vw - 32px);
+}
+
+.failed-sync-banner:hover { filter: brightness(1.08); }
+
+@media (max-width: 900px) {
+    .failed-sync-banner { left: 12px; font-size: 0.75rem; padding: 8px 14px; }
+}
+
+.sync-issue-intro {
+    margin-bottom: 14px;
+    font-size:     0.84rem;
+    line-height:   1.5;
+    color:         var(--gray-700);
+}
+
+/* three classes on purpose: the older POS-only .failed-sync-item rule (padding and a
+   bottom line only) must not override the card look on the POS page */
+.modal-body .failed-sync-item.sync-issue {
+    padding:       14px;
+    margin-bottom: 12px;
+    border:        1px solid var(--gray-200);
+    border-radius: 10px;
+    background:    var(--white);
+}
+
+.sync-issue-top {
+    display:         flex;
+    justify-content: space-between;
+    align-items:     center;
+    gap:             12px;
+    margin-bottom:   6px;
+}
+
+.sync-issue-what {
+    padding:        2px 9px;
+    border-radius:  999px;
+    font-size:      0.68rem;
+    font-weight:    700;
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+    background:     var(--primary-light, #e7f1ff);
+    color:          var(--primary);
+}
+
+.sync-issue-when { font-size: 0.74rem; color: var(--secondary); }
+
+.sync-issue-subject {
+    font-size:   1rem;
+    font-weight: 700;
+    color:       var(--dark);
+}
+
+.sync-issue-detail {
+    margin-top: 2px;
+    font-size:  0.8rem;
+    color:      var(--secondary);
+}
+
+.sync-issue-block {
+    margin-top:    10px;
+    padding:       9px 12px;
+    border-radius: 8px;
+    font-size:     0.82rem;
+    line-height:   1.45;
+}
+
+.sync-issue-block b {
+    display:        block;
+    margin-bottom:  2px;
+    font-size:      0.68rem;
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+}
+
+.sync-issue-why  { background: var(--danger-light, #fde8e8); color: var(--danger); }
+.sync-issue-todo { background: var(--gray-100);              color: var(--gray-700); }
+
+.sync-issue .btn-dismiss-failed { margin-top: 12px; }
+
+/* -- Changes waiting to be sent (Inventory page): a soft amber pill, clearly different
+   from the red "not saved" one. When both show, the red one sits above it. -- */
+.waiting-sync-banner {
+    position:      fixed;
+    left:          16px;
+    bottom:        20px;
+    z-index:       1200;
+    background:    #fef3c7;
+    color:         #92400e;
+    border:        1px solid #fcd34d;
+    border-radius: 999px;
+    padding:       10px 18px;
+    font-size:     0.82rem;
+    font-weight:   600;
+    cursor:        pointer;
+    box-shadow:    var(--shadow);
+    max-width:     calc(100vw - 32px);
+}
+
+.waiting-sync-banner:hover { filter: brightness(0.97); }
+
+body.has-waiting-sync .failed-sync-banner { bottom: 64px; }
+
+@media (max-width: 900px) {
+    .waiting-sync-banner { left: 12px; font-size: 0.75rem; padding: 8px 14px; }
+}
+
+.sync-issue-wait { background: #fef3c7; color: #92400e; }
 
 /* -- Profile dropdown (avatar, top-right) -- */
 .profile-wrap { position: relative; }

@@ -519,11 +519,41 @@ body.pos-page .main-wrapper {
 
 .qty-btn:hover { background: var(--primary); color: #fff; border-color: var(--primary); }
 
-.qty-display {
-    width:      24px;
-    text-align: center;
-    font-size:  0.8rem;
-    font-weight:700;
+/* Directly editable now (was a plain non-interactive <span> before) --
+   styled to look like a small input rather than a bare number, with a
+   visible border/focus state as the affordance that it's actually
+   clickable/typeable, same visual language as the barcode-scan quantity
+   stepper's input elsewhere on this page. Native spin buttons are hidden
+   for the same reason as the barcode/camera qty steppers above -- the
+   dedicated +/- buttons already cover that, so the browser's own tiny
+   arrows would just be redundant clutter here too. */
+.qty-input {
+    width:         30px;
+    height:        22px;
+    text-align:    center;
+    font-size:     0.8rem;
+    font-weight:   700;
+    font-family:   var(--font-family);
+    color:         var(--dark);
+    border:        1px solid var(--gray-300);
+    border-radius: 6px;
+    background:    var(--white);
+    padding:       0 2px;
+}
+
+.qty-input:focus {
+    outline:      none;
+    border-color: var(--primary);
+}
+
+.qty-input::-webkit-outer-spin-button,
+.qty-input::-webkit-inner-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+}
+
+.qty-input[type=number] {
+    -moz-appearance: textfield;
 }
 
 .cart-item-total {
@@ -589,13 +619,19 @@ body.pos-page .main-wrapper {
     display:         flex;
     justify-content: space-between;
     align-items:     center;
-    font-size:       0.78rem;
-    padding:         3px 0;
+    /* Sized from the viewport HEIGHT (vh), not width: the cart panel's
+       vertical space is what is scarce, so these grow on a tall monitor
+       and stay compact on a short one. About 0.87rem at 805px tall,
+       0.96rem at 1080px tall. */
+    font-size:       clamp(0.86rem, 0.62rem + 0.5vh, 1rem);
+    padding:         4px 0;
     color:           var(--secondary);
 }
 
 .totals-row.total-final {
-    font-size:   1rem;
+    /* TOTAL is the largest figure in the cart: about 1.3rem at 805px
+       tall, 1.5rem at 1080px tall. */
+    font-size:   clamp(1.25rem, 0.7rem + 1.2vh, 1.75rem);
     font-weight: 700;
     color:       var(--dark);
     margin-top:  6px;
@@ -1145,16 +1181,18 @@ body.pos-page .main-wrapper {
     }
 
     .cart-totals {
-        padding: 8px 12px;
+        padding: 6px 12px;
     }
 
+    /* The bigger totals (see the base rules) cost about 9px of height on a
+       short monitor; this gives it back so .cart-items keeps its space. */
     .totals-row {
-        padding: 2px 0;
+        padding: 1px 0;
     }
 
     .totals-row.total-final {
-        margin-top:  4px;
-        padding-top: 6px;
+        margin-top:  2px;
+        padding-top: 4px;
     }
 
     .cart-actions {
@@ -1177,7 +1215,7 @@ body.pos-page .main-wrapper {
 .failed-sync-banner {
     position:      fixed;
     left:          16px;
-    bottom:        16px;
+    bottom:        64px;   /* sits just above the Pending Sales pill (bottom-left) */
     z-index:       1200;
     background:    var(--danger);
     color:         #fff;
@@ -1196,7 +1234,7 @@ body.pos-page .main-wrapper {
 @media (max-width: 900px) {
     .failed-sync-banner {
         left:     12px;
-        bottom:   calc(var(--cart-peek-height) + var(--jotform-margin) + 8px);
+        bottom:   calc(var(--cart-peek-height) + var(--jotform-margin) + 56px);
         font-size: 0.75rem;
         padding:   8px 14px;
     }
@@ -1228,24 +1266,359 @@ body.pos-page .main-wrapper {
     margin-bottom: 8px;
 }
 
-/* Void: list of recent transactions to pick from */
-.void-list-item {
+/* Partial Void window: pick items and quantities from a sale */
+.void-list-item-actions {
+    display:   flex;
+    gap:       8px;
+    flex-wrap: wrap;
+    margin-top: 6px;
+}
+
+.pv-info {
+    font-size:     0.8rem;
+    color:         var(--secondary);
+    margin-bottom: 10px;
+}
+
+.pv-warning {
+    font-size:     0.78rem;
+    color:         #8a6d00;
+    background:    var(--warning-light, #fff3cd);
+    border-radius: 6px;
+    padding:       8px 10px;
+    margin-bottom: 8px;
+}
+
+.pv-rows { margin-bottom: 12px; }
+
+.pv-row {
+    display:         flex;
+    align-items:     center;
+    justify-content: space-between;
+    gap:             10px;
+    padding:         10px 8px;
+    border-bottom:   1px solid var(--gray-200);
+    border-radius:   6px;
+}
+
+.pv-row.selected { background: var(--danger-light); }
+
+.pv-name {
+    min-width:   0;
+    font-size:   0.88rem;
+    font-weight: 600;
+    word-break:  break-word;
+}
+
+.pv-batch { font-weight: 400; color: var(--secondary); font-size: 0.78rem; }
+
+.pv-meta {
+    font-size:   0.75rem;
+    font-weight: 400;
+    color:       var(--secondary);
+}
+
+.pv-stepper {
+    display:     flex;
+    align-items: center;
+    gap:         8px;
+    flex-shrink: 0;
+}
+
+.pv-stepper button {
+    width:         32px;
+    height:        32px;
+    border:        1px solid var(--gray-300);
+    border-radius: 6px;
+    background:    var(--white);
+    font-size:     1.1rem;
+    line-height:   1;
+    cursor:        pointer;
+}
+
+.pv-stepper button:disabled { opacity: 0.4; cursor: not-allowed; }
+.pv-stepper button:not(:disabled):hover { background: var(--gray-100); }
+
+.pv-qty {
+    min-width:  22px;
+    text-align: center;
+    font-weight: 700;
+}
+
+.pv-summary {
+    border-top: 2px solid var(--gray-200);
+    padding-top: 10px;
+}
+
+.pv-summary-row {
+    display:         flex;
+    justify-content: space-between;
+    font-size:       0.92rem;
+    margin-bottom:   4px;
+}
+
+.pv-note {
+    font-size:  0.76rem;
+    color:      var(--secondary);
+    margin-top: 6px;
+}
+
+/* Pending Sales: a floating pill (bottom-left, the same corner as the
+   sync-issue banner, which sits just above it) that opens the list of
+   offline sales waiting to reach the server. Red when any of them failed. */
+.pending-sales-banner {
+    position:      fixed;
+    left:          16px;
+    bottom:        16px;
+    z-index:       1200;
+    background:    var(--primary);
+    color:         #fff;
+    border:        none;
+    border-radius: 999px;
+    padding:       10px 18px;
+    font-size:     0.82rem;
+    font-weight:   600;
+    cursor:        pointer;
+    box-shadow:    var(--shadow);
+    max-width:     calc(100vw - 32px);
+}
+
+.pending-sales-banner.has-failed { background: var(--danger); }
+.pending-sales-banner:hover      { filter: brightness(1.08); }
+
+@media (max-width: 900px) {
+    .pending-sales-banner {
+        left:      12px;
+        bottom:    calc(var(--cart-peek-height) + var(--jotform-margin) + 8px);
+        font-size: 0.75rem;
+        padding:   8px 14px;
+    }
+}
+
+/* Rows inside the Pending Sales window */
+.pending-item {
     padding:       12px 0;
     border-bottom: 1px solid var(--gray-200);
 }
 
-.void-list-item:last-child { border-bottom: none; }
+.pending-item:last-child { border-bottom: none; }
+.pending-item.synced     { opacity: 0.85; }
+
+.pending-item-head {
+    display:         flex;
+    justify-content: space-between;
+    align-items:     center;
+    gap:             8px;
+    margin-bottom:   4px;
+    font-size:       0.85rem;
+}
+
+.pending-badge {
+    font-size:     0.7rem;
+    font-weight:   700;
+    padding:       2px 9px;
+    border-radius: 999px;
+    white-space:   nowrap;
+}
+
+.pending-badge.pending { background: var(--warning-light, #fff3cd); color: #8a6d00; }
+.pending-badge.failed  { background: var(--danger-light);           color: var(--danger); }
+.pending-badge.synced  { background: var(--success-light, #d1e7dd); color: var(--success); }
+
+.pending-item-lines {
+    font-size:     0.82rem;
+    color:         var(--dark);
+    margin-bottom: 2px;
+    word-break:    break-word;
+}
+
+.pending-item-total {
+    font-size:     0.8rem;
+    color:         var(--secondary);
+    margin-bottom: 4px;
+}
+
+.pending-item-note {
+    font-size:     0.78rem;
+    color:         var(--secondary);
+    margin-bottom: 6px;
+}
+
+.pending-item-note.failed { color: var(--danger); }
+.pending-item-note.synced { color: var(--success); font-weight: 600; }
+
+.pending-item-actions {
+    display:   flex;
+    gap:       8px;
+    flex-wrap: wrap;
+}
+
+.pending-sales-footer {
+    display:     flex;
+    align-items: center;
+    gap:         8px;
+    flex-wrap:   wrap;
+}
+
+.pending-sales-status {
+    margin-right: auto;
+    min-width:    0;
+    font-size:    0.78rem;
+    color:        var(--danger);
+}
+
+/* Senior/PWD tick on a single cart line. Sits under the "each" price inside
+   .cart-item-info, so it adds one small line per item without touching the
+   cart's row layout (the item list scrolls on its own). */
+.cart-item-sp {
+    display:     inline-flex;
+    align-items: center;
+    gap:         5px;
+    margin-top:  3px;
+    font-size:   0.68rem;
+    font-weight: 600;
+    color:       var(--secondary);
+    cursor:      pointer;
+    user-select: none;
+}
+
+.cart-item-sp input[type=checkbox] {
+    width:        13px;
+    height:       13px;
+    margin:       0;
+    cursor:       pointer;
+    accent-color: var(--success);
+}
+
+.cart-item-sp.active { color: var(--success); }
+
+/* Locked while the 20% OFF toggle covers every item */
+.cart-item-sp.locked,
+.cart-item-sp.locked input { cursor: not-allowed; }
+.cart-item-sp.locked { opacity: 0.75; }
+
+/* Quick-cash buttons in the Open Register modal. auto-fit/minmax (same
+   technique as the product grid) gives 3 columns at the modal's normal
+   width and drops to 2 on a narrow phone, with no media query needed. */
+.quick-cash {
+    margin:     2px 0 14px;
+    min-width:  0;
+}
+
+.quick-cash-label {
+    font-size:     0.73rem;
+    font-weight:   600;
+    color:         var(--gray-700);
+    margin-bottom: 6px;
+}
+
+.quick-cash-grid {
+    display:               grid;
+    grid-template-columns: repeat(auto-fit, minmax(84px, 1fr));
+    gap:                   8px;
+}
+
+.quick-cash-btn {
+    height:        40px;
+    min-width:     0;
+    border:        1px solid var(--gray-300);
+    border-radius: var(--border-radius);
+    background:    var(--white);
+    color:         var(--dark);
+    font-family:   var(--font-family);
+    font-size:     0.88rem;
+    font-weight:   700;
+    cursor:        pointer;
+    transition:    var(--transition);
+    white-space:   nowrap;
+}
+
+.quick-cash-btn:hover {
+    background:   var(--primary);
+    border-color: var(--primary);
+    color:        #fff;
+}
+
+.quick-cash-btn:active { transform: scale(0.97); }
+
+.quick-cash-clear {
+    width:         100%;
+    height:        34px;
+    margin-top:    8px;
+    border:        1px solid var(--gray-300);
+    border-radius: var(--border-radius);
+    background:    var(--gray-100);
+    color:         var(--gray-700);
+    font-family:   var(--font-family);
+    font-size:     0.8rem;
+    font-weight:   600;
+    cursor:        pointer;
+    transition:    var(--transition);
+}
+
+.quick-cash-clear:hover {
+    background:   var(--danger-light);
+    border-color: var(--danger);
+    color:        var(--danger);
+}
+
+/* Void: list of recent transactions to pick from */
+.void-list-item {
+    padding:       14px;
+    margin-bottom: 10px;
+    border:        1px solid var(--gray-200);
+    border-radius: 10px;
+    background:    var(--white);
+    transition:    border-color 0.15s, box-shadow 0.15s;
+}
+
+.void-list-item:hover {
+    border-color: var(--gray-300);
+    box-shadow:   0 2px 8px rgba(0, 0, 0, 0.06);
+}
 
 .void-list-item-header {
     display:         flex;
     justify-content: space-between;
-    align-items:     center;
-    margin-bottom:   4px;
+    align-items:     flex-start;
+    gap:             12px;
+    margin-bottom:   8px;
+}
+
+.void-order-no { font-size: 0.95rem; }
+
+.void-list-item-meta {
+    margin-top: 2px;
+    font-size:  0.75rem;
+    color:      var(--secondary);
+}
+
+.void-amount {
+    font-size:   1.05rem;
+    font-weight: 700;
+    white-space: nowrap;
+    font-variant-numeric: tabular-nums;
 }
 
 .void-list-item-items {
-    font-size:     0.78rem;
-    color:         var(--secondary);
-    margin-bottom: 8px;
-    line-height:   1.5;
+    display:       flex;
+    flex-wrap:     wrap;
+    gap:           6px;
+    margin-bottom: 10px;
+}
+
+.void-chip {
+    padding:       2px 9px;
+    border-radius: 999px;
+    font-size:     0.74rem;
+    background:    var(--gray-100);
+    color:         var(--gray-700);
+}
+
+.void-chip b { font-weight: 700; }
+
+.void-chip-more {
+    background: transparent;
+    border:     1px dashed var(--gray-300);
+    color:      var(--secondary);
 }

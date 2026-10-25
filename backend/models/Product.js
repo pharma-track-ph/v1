@@ -3,6 +3,8 @@
 // Core inventory entity. Includes expiry, batch, supplier.
 // ============================================================
 const db = require('../config/db');
+const AppSetting = require('./AppSetting');
+const manilaTime = require('../utils/manilaTime');
 
 const Product = {
     findAll: async ({ search = '', category = '', status = '' } = {}) => {
@@ -29,8 +31,7 @@ const Product = {
         }
 
         if (category) {
-            sql += ' AND category = ?';
-            params.push(category);
+            sql += Product._categoryClause(category, params);
         }
 
         if (status) {
@@ -121,16 +122,20 @@ const Product = {
         const {
             batch_number, name, generic_name = null, category, supplier = null,
             description = null, barcode = null, price, cost, stock_quantity,
-            low_stock_threshold = 10, expiry_date
+            low_stock_threshold = 10, expiry_date, is_tax_exempt = 0
         } = data;
 
         const [result] = await db.query(
             `INSERT INTO products
              (batch_number, name, generic_name, category, supplier, description,
-              barcode, price, cost, stock_quantity, low_stock_threshold, expiry_date)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-            [batch_number, name, generic_name, category, supplier, description,
-             barcode, price, cost, stock_quantity, low_stock_threshold, expiry_date]
+              barcode, price, cost, stock_quantity, low_stock_threshold, expiry_date, is_tax_exempt)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            // batch_number is a legacy column (Item Nos. replaced it). It is stored as an
+            // EMPTY string, not NULL, so the insert works whether the live column is
+            // nullable or NOT NULL (a NULL into a NOT NULL column made EVERY Add Product
+            // and Add Item No. fail with "Column 'batch_number' cannot be null").
+            [batch_number ?? '', name, generic_name, category, supplier, description,
+             barcode, price, cost, stock_quantity, low_stock_threshold, expiry_date, is_tax_exempt ? 1 : 0]
         );
         return result.insertId;
     },
@@ -244,13 +249,18 @@ const Product = {
     // ── POS-specific fetch: only active, non-expired batches ──
     // Used by /api/pos/products so the POS never has to know about
     // expired stock at all — filtering happens once, here.
+    // Only batches that can actually be SOLD right now: active, NOT expired
+    // (a batch is not sellable on its expiry date itself, matching checkout),
+    // and with stock left. A brand whose batches are all sold out or expired
+    // therefore has no rows here and does not appear as a POS card at all.
     findAllForPOS: async (search = '') => {
         let sql = `
             SELECT *,
                    DATEDIFF(expiry_date, CURDATE()) AS days_until_expiry
             FROM products
             WHERE is_active = 1
-              AND expiry_date >= CURDATE()
+              AND expiry_date > CURDATE()
+              AND stock_quantity > 0
         `;
         const params = [];
         if (search) {
@@ -289,18 +299,284 @@ const Product = {
             `SELECT *,
                     DATEDIFF(expiry_date, CURDATE()) AS days_until_expiry
              FROM products
-             WHERE is_active = 1 AND expiry_date >= CURDATE() AND name = ?
+             WHERE is_active = 1 AND expiry_date > CURDATE() AND stock_quantity > 0 AND name = ?
              ORDER BY expiry_date ASC`,
             [name]
         );
         return rows;
     },
 
-    getCategories: async () => {
+    // ============================================================
+    // Categories (several per product)
+    // ============================================================
+    // A product's categories live in the SAME `category` column, as a list
+    // joined with '|' (e.g. "Analgesic|Antipyretic"). '|' is refused inside a
+    // category NAME, so a name can never be mistaken for the separator. A
+    // product with ONE category is stored exactly as it always was, so every
+    // existing row keeps working untouched.
+    // The longest a product's combined category list may be. This is NOT a fixed
+    // number: it is read from the real `category` column (refreshCategoryLimit),
+    // so it is 80 until the column is widened with
+    //     ALTER TABLE products MODIFY category VARCHAR(255) NOT NULL;
+    // and 255 right after -- no code change and no restart needed (it re-checks
+    // the column at most every 30 seconds). 80 is only the safe starting value.
+    MAX_CATEGORY_LENGTH: 80,
+    _limitCheckedAt: 0,
+
+    refreshCategoryLimit: async () => {
+        if (Date.now() - Product._limitCheckedAt < 30000) return Product.MAX_CATEGORY_LENGTH;
+        try {
+            const [rows] = await db.query(
+                `SELECT CHARACTER_MAXIMUM_LENGTH AS len FROM information_schema.columns
+                 WHERE table_schema = DATABASE() AND table_name = 'products' AND column_name = 'category'`
+            );
+            const len = Number(rows[0]?.len);
+            if (Number.isFinite(len) && len > 0) Product.MAX_CATEGORY_LENGTH = len;
+            Product._limitCheckedAt = Date.now();
+        } catch (e) { /* keep the last known limit */ }
+        return Product.MAX_CATEGORY_LENGTH;
+    },
+
+    _invalid: (message) => {
+        const err = new Error(message);
+        err.code = 'INVALID_INPUT';
+        return err;
+    },
+
+    splitCategories: (value) =>
+        String(value ?? '').split('|').map(s => s.trim()).filter(Boolean),
+
+    // Accepts an array, or a string (one name, or an already-joined list), and
+    // returns the canonical stored string. Throws INVALID_INPUT on bad input.
+    normalizeCategories: (input) => {
+        const raw = Array.isArray(input) ? input : Product.splitCategories(input);
+        const seen = new Set();
+        const out  = [];
+        for (const item of raw) {
+            const name = String(item ?? '').trim().replace(/\s+/g, ' ');
+            if (!name) continue;
+            if (name.includes('|'))  throw Product._invalid('Category names cannot contain the | character.');
+            if (name.length > 60)    throw Product._invalid(`"${name.slice(0, 20)}..." is too long for a category name (60 characters max).`);
+            const key = name.toLowerCase();
+            if (seen.has(key)) continue;
+            seen.add(key);
+            out.push(name);
+        }
+        if (!out.length) throw Product._invalid('Choose at least one category.');
+        const joined = out.join('|');
+        if (joined.length > Product.MAX_CATEGORY_LENGTH) {
+            throw Product._invalid(`Too many categories for one product: their names add up to ${joined.length} characters and the limit is ${Product.MAX_CATEGORY_LENGTH}. Remove one, or use shorter names.`);
+        }
+        return joined;
+    },
+
+    // SQL for "has this category" -- an exact match on one entry of the list,
+    // so a product shows under EACH of its categories and "Pain" never matches
+    // "Pain Relief". Appends its parameter to `params`.
+    _categoryClause: (category, params) => {
+        const escaped = String(category).replace(/[\\%_]/g, ch => '\\' + ch);
+        params.push(`%|${escaped}|%`);
+        return " AND CONCAT('|', category, '|') LIKE ? ESCAPE '\\\\'";
+    },
+
+    // The barcode is shared by every Item No. of ONE brand (that is how scanning
+    // finds the brand), but must never be shared between two DIFFERENT brands.
+    // The database used to enforce this with a UNIQUE index; that index had to
+    // go so "Add Item No." could copy the brand's barcode, so it is checked here.
+    assertBarcodeFree: async (barcode, brandName) => {
+        if (!barcode) return;
         const [rows] = await db.query(
-            'SELECT DISTINCT category FROM products WHERE is_active = 1 ORDER BY category'
+            'SELECT name FROM products WHERE barcode = ? AND is_active = 1 AND LOWER(name) <> LOWER(?) LIMIT 1',
+            [barcode, brandName]
         );
-        return rows.map(r => r.category);
+        if (rows.length) {
+            const err = new Error(`Barcode "${barcode}" is already used by "${rows[0].name}". Each product needs its own barcode.`);
+            err.code = 'DUPLICATE_BARCODE';
+            throw err;
+        }
+    },
+
+    // "Extra" categories: names added in Manage Categories BEFORE any product uses
+    // them (a category is otherwise only stored on products, so an unused one would
+    // not exist anywhere). They are kept in the EXISTING app_settings table under
+    // this key -- no new table or column.
+    EXTRA_CATEGORIES_KEY: 'inventory_extra_categories',
+
+    getExtraCategories: async () => {
+        const raw = await AppSetting.get(Product.EXTRA_CATEGORIES_KEY, '[]');
+        try {
+            const list = JSON.parse(raw);
+            return Array.isArray(list) ? list.filter(x => typeof x === 'string' && x.trim()) : [];
+        } catch (e) { return []; }
+    },
+
+    _saveExtraCategories: async (list) => {
+        await AppSetting.set(Product.EXTRA_CATEGORIES_KEY, JSON.stringify(list));
+    },
+
+    // Every distinct category: each entry of each product's list, plus the extra
+    // (not-yet-used) ones, sorted
+    getCategories: async () => {
+        const [rows] = await db.query('SELECT DISTINCT category FROM products WHERE is_active = 1');
+        const byKey = new Map();
+        rows.forEach(r => Product.splitCategories(r.category).forEach(c => {
+            if (!byKey.has(c.toLowerCase())) byKey.set(c.toLowerCase(), c);
+        }));
+        (await Product.getExtraCategories()).forEach(c => {
+            if (!byKey.has(c.toLowerCase())) byKey.set(c.toLowerCase(), c);
+        });
+        return [...byKey.values()].sort((a, b) => a.localeCompare(b));
+    },
+
+    // For the Manage Categories window: each category with how many BRANDS use it
+    // (0 for one that was added but is not used yet)
+    getCategorySummary: async () => {
+        const [rows] = await db.query('SELECT name, category FROM products WHERE is_active = 1 ORDER BY id ASC');
+        const seenBrand = new Set();
+        const byKey = new Map();
+        rows.forEach(r => {
+            const brandKey = r.name.toLowerCase();
+            if (seenBrand.has(brandKey)) return;           // a brand's rows all share the same categories
+            seenBrand.add(brandKey);
+            Product.splitCategories(r.category).forEach(c => {
+                const e = byKey.get(c.toLowerCase()) || { name: c, brands: 0 };
+                e.brands++;
+                byKey.set(c.toLowerCase(), e);
+            });
+        });
+        (await Product.getExtraCategories()).forEach(c => {
+            if (!byKey.has(c.toLowerCase())) byKey.set(c.toLowerCase(), { name: c, brands: 0 });
+        });
+        return [...byKey.values()].sort((a, b) => a.name.localeCompare(b.name));
+    },
+
+    // Adds a category name to the list without attaching it to any product yet
+    addCategoryName: async (name) => {
+        await Product.refreshCategoryLimit();
+        const clean = Product.splitCategories(Product.normalizeCategories([name]))[0];   // validates: not empty, no '|', 60 chars max
+        const existing = await Product.getCategories();
+        if (existing.some(c => c.toLowerCase() === clean.toLowerCase())) {
+            throw Product._invalid(`"${clean}" already exists.`);
+        }
+        const extras = await Product.getExtraCategories();
+        extras.push(clean);
+        await Product._saveExtraCategories(extras);
+        return clean;
+    },
+
+    // Deletes categories: removes each from every product that has it, and from
+    // the extra list. A product must always keep AT LEAST ONE category, so if
+    // any product would be left with none, NOTHING is deleted and the message
+    // names those products. One transaction.
+    deleteCategories: async (names) => {
+        const keys = new Set(names.map(n => String(n).trim().toLowerCase()).filter(Boolean));
+        if (!keys.size) throw Product._invalid('Choose the categories to delete.');
+
+        const [rows] = await db.query('SELECT id, name, category FROM products WHERE is_active = 1');
+        const changes = [];
+        const blocked = new Map();      // product name -> the categories it has (all of them are being deleted)
+        for (const r of rows) {
+            const tokens = Product.splitCategories(r.category);
+            if (!tokens.some(t => keys.has(t.toLowerCase()))) continue;
+            const rest = tokens.filter(t => !keys.has(t.toLowerCase()));
+            if (!rest.length) { blocked.set(r.name, tokens); continue; }
+            changes.push({ id: r.id, category: rest.join('|') });
+        }
+        if (blocked.size) {
+            const list = [...blocked.entries()].map(([product, categories]) => ({ product, categories }));
+            const shown = list.slice(0, 5).map(b => b.product).join(', ') + (list.length > 5 ? ', ...' : '');
+            const asked = names.map(n => String(n).trim()).filter(Boolean);
+            const message = asked.length === 1
+                ? `Cannot delete "${asked[0]}": ${list.length} product${list.length === 1 ? ' uses' : 's use'} it as ${list.length === 1 ? 'its' : 'their'} ONLY category (${shown}). ` +
+                  `Give ${list.length === 1 ? 'that product' : 'those products'} another category first, or rename the category instead.`
+                : `Cannot delete: ${list.length} product${list.length === 1 ? '' : 's'} would be left with no category (${shown}). ` +
+                  `Give ${list.length === 1 ? 'it' : 'them'} another category first, or rename the category instead.`;
+            const err = Product._invalid(message);
+            err.details = { blocked: list };       // the page lists these in its warning window
+            throw err;
+        }
+
+        const connection = await db.getConnection();
+        try {
+            await connection.beginTransaction();
+            for (const c of changes) {
+                await connection.query('UPDATE products SET category = ? WHERE id = ?', [c.category, c.id]);
+            }
+            await connection.commit();
+        } catch (e) {
+            await connection.rollback();
+            throw e;
+        } finally {
+            connection.release();
+        }
+
+        const extras = await Product.getExtraCategories();
+        const kept = extras.filter(e => !keys.has(e.toLowerCase()));
+        if (kept.length !== extras.length) await Product._saveExtraCategories(kept);
+
+        return { rows: changes.length };
+    },
+
+    // Rename / Merge / Split in ONE operation: every active product that has any
+    // category in `from` loses them and gets the categories in `to` instead (no
+    // duplicates; the new ones take the place of the first removed one).
+    //   Rename: from [X]    to [Y]       Merge: from [X, Y] to [Z]
+    //   Split:  from [X]    to [A, B]
+    // Runs in one transaction. Returns how many rows were changed.
+    replaceCategories: async (from, to) => {
+        await Product.refreshCategoryLimit();
+        const fromKeys = new Set(from.map(x => String(x).trim().toLowerCase()));
+        const toList   = Product.splitCategories(Product.normalizeCategories(to));
+
+        const [rows] = await db.query('SELECT id, category FROM products WHERE is_active = 1');
+        const changes = [];
+        for (const r of rows) {
+            const tokens = Product.splitCategories(r.category);
+            if (!tokens.some(t => fromKeys.has(t.toLowerCase()))) continue;
+
+            const out = []; const seen = new Set(); let inserted = false;
+            const push = (t) => { const k = t.toLowerCase(); if (!seen.has(k)) { seen.add(k); out.push(t); } };
+            for (const t of tokens) {
+                if (fromKeys.has(t.toLowerCase())) {
+                    if (!inserted) { toList.forEach(push); inserted = true; }
+                } else {
+                    push(t);
+                }
+            }
+            const joined = out.join('|');
+            if (joined.length > Product.MAX_CATEGORY_LENGTH) {
+                throw Product._invalid(`That change would give a product too many categories (${joined.length} characters; the limit is ${Product.MAX_CATEGORY_LENGTH}).`);
+            }
+            if (joined !== r.category) changes.push({ id: r.id, category: joined });
+        }
+
+        const connection = await db.getConnection();
+        try {
+            await connection.beginTransaction();
+            for (const c of changes) {
+                await connection.query('UPDATE products SET category = ? WHERE id = ?', [c.category, c.id]);
+            }
+            await connection.commit();
+        } catch (e) {
+            await connection.rollback();
+            throw e;
+        } finally {
+            connection.release();
+        }
+
+        // A renamed category that was only on the extra list (no product uses it
+        // yet) is renamed there too, with no duplicates.
+        const extras = await Product.getExtraCategories();
+        if (extras.some(e => fromKeys.has(e.toLowerCase()))) {
+            const seen = new Set(); const next = []; let placed = false;
+            const push = (n) => { const k = n.toLowerCase(); if (!seen.has(k)) { seen.add(k); next.push(n); } };
+            extras.forEach(e => {
+                if (fromKeys.has(e.toLowerCase())) { if (!placed) { toList.forEach(push); placed = true; } }
+                else push(e);
+            });
+            await Product._saveExtraCategories(next);
+        }
+        return changes.length;
     },
 
     // Bulk upsert from CSV import.
@@ -452,7 +728,9 @@ const Product = {
     //     while one specific item is individually flagged for FEFO
     //     attention, exactly as specified.
     _rollUpGroup: (rows) => {
-        const today = new Date(); today.setHours(0, 0, 0, 0);
+        // "Today" is Manila's today (its midnight), on ANY server -- a hosted server in UTC
+        // used to flip an Item No. to expired at 8 AM Manila time instead of at midnight.
+        const today = manilaTime.midnight();
 
         const nonExpired = rows.filter(r => new Date(r.expiry_date) >= today);
         const allItemsExpired = nonExpired.length === 0;
@@ -504,6 +782,7 @@ const Product = {
             price:               first.price,
             cost:                first.cost,
             low_stock_threshold: threshold,
+            is_tax_exempt:       first.is_tax_exempt ? 1 : 0,
             description:         first.description,
             stock_quantity:      combinedStock,
             stock_status,
@@ -543,7 +822,7 @@ const Product = {
             const like = `%${search}%`;
             params.push(like, like, search);
         }
-        if (category) { sql += ' AND category = ?'; params.push(category); }
+        if (category) { sql += Product._categoryClause(category, params); }
         sql += ' ORDER BY id ASC';
 
         const [rows] = await db.query(sql, params);
@@ -638,7 +917,13 @@ const Product = {
             throw err;
         }
 
-        return Product.create({ batch_number: null, ...data });
+        // Several categories per product, validated here -- the one place
+        // every create goes through.
+        await Product.refreshCategoryLimit();
+        const category = Product.normalizeCategories(data.categories ?? data.category);
+        await Product.assertBarcodeFree(data.barcode, data.name);
+
+        return Product.create({ batch_number: null, ...data, category });
     },
 
     // Cascades a shared/top-level field edit across EVERY row in the
@@ -674,16 +959,30 @@ const Product = {
         const currentBarcode = rows[0]?.barcode ?? null;
 
         const {
-            name = oldName, generic_name = null, category, supplier = null,
-            description = null, barcode = currentBarcode, price, cost, low_stock_threshold = 10
+            name = oldName, generic_name = null, category: categoryInput, supplier = null,
+            description = null, barcode = currentBarcode, price, cost, low_stock_threshold = 10,
+            is_tax_exempt
         } = data;
+
+        // Categories: validated when sent, left exactly as stored when not.
+        await Product.refreshCategoryLimit();
+        const category = (data.categories === undefined && categoryInput === undefined)
+            ? rows[0].category
+            : Product.normalizeCategories(data.categories ?? categoryInput);
+        await Product.assertBarcodeFree(barcode, name);
+
+        // Tax Exempt applies to EVERY Item No. row of the brand, like the other
+        // shared fields. If the caller doesn't send it, keep what's stored now.
+        const taxExemptFlag = is_tax_exempt === undefined
+            ? (rows[0]?.is_tax_exempt ? 1 : 0)
+            : ((is_tax_exempt === true || is_tax_exempt === 1 || is_tax_exempt === '1') ? 1 : 0);
 
         const [result] = await db.query(
             `UPDATE products SET
                 name = ?, generic_name = ?, category = ?, supplier = ?,
-                description = ?, barcode = ?, price = ?, cost = ?, low_stock_threshold = ?
+                description = ?, barcode = ?, price = ?, cost = ?, low_stock_threshold = ?, is_tax_exempt = ?
              WHERE name = ? AND is_active = 1`,
-            [name, generic_name, category, supplier, description, barcode, price, cost, low_stock_threshold, oldName]
+            [name, generic_name, category, supplier, description, barcode, price, cost, low_stock_threshold, taxExemptFlag, oldName]
         );
         return result.affectedRows;
     },
@@ -727,8 +1026,33 @@ const Product = {
             cost:                first.cost,
             stock_quantity,
             low_stock_threshold: first.low_stock_threshold,
+            is_tax_exempt:       first.is_tax_exempt ? 1 : 0,
             expiry_date
         });
+    },
+
+    // The Item No. of a brand that already has EXACTLY this expiry date, if any.
+    // A restock whose expiry date matches an existing Item No. tops THAT one up
+    // instead of creating a second Item No. for the same shipment date.
+    // Returns { id, itemNo, stock_quantity } or null. itemNo is the 1-based
+    // position in the brand's Item No. list (same numbering the screens show).
+    findItemByBrandAndExpiry: async (name, expiryDate) => {
+        const ymd = (d) => d instanceof Date
+            ? new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Manila', year: 'numeric', month: '2-digit', day: '2-digit' }).format(d)
+            : String(d).slice(0, 10);
+        const rows = await Product._fetchGroupRowsByName(name);
+        const target = ymd(expiryDate);
+        const idx = rows.findIndex(r => ymd(r.expiry_date) === target);
+        return idx === -1 ? null : { id: rows[idx].id, itemNo: idx + 1, stock_quantity: rows[idx].stock_quantity };
+    },
+
+    // Adds `quantity` to one Item No.'s current stock (a top-up, not a replace)
+    addStockToItem: async (itemId, quantity) => {
+        const [result] = await db.query(
+            'UPDATE products SET stock_quantity = stock_quantity + ? WHERE id = ? AND is_active = 1',
+            [quantity, itemId]
+        );
+        return result.affectedRows;
     },
 
     // Edits just the stock_quantity/expiry_date of ONE existing Item No.
@@ -816,6 +1140,38 @@ const Product = {
         });
 
         return orderedRows;
+    },
+
+    // Broader search than the Inventory page's own findAllGrouped -- also
+    // checks Category and Description, not just Brand/Generic Name/
+    // Barcode. Used ONLY by the public JotForm agent endpoint
+    // (publicController.js), deliberately kept separate from
+    // findAllGrouped rather than widening that one, since the search
+    // TERM here is very different in nature: JotForm translates a
+    // symptom/condition into a medical term first (e.g. "headache" ->
+    // "pain relief"), which is far more likely to match a CATEGORY
+    // ("Fever and Pain Relief") than a specific product's brand or
+    // generic name -- the Inventory page's own search box doesn't have
+    // that same need, and widening it too could surface unexpected
+    // results for a staff member typing a normal product search.
+    findAllGroupedBroadSearch: async (search) => {
+        const like = `%${search}%`;
+        const [rows] = await db.query(
+            `SELECT *, DATEDIFF(expiry_date, CURDATE()) AS days_until_expiry
+             FROM products
+             WHERE is_active = 1
+               AND (name LIKE ? OR generic_name LIKE ? OR category LIKE ? OR description LIKE ? OR barcode = ?)
+             ORDER BY id ASC`,
+            [like, like, like, like, search]
+        );
+
+        const groups = new Map();
+        rows.forEach(r => {
+            if (!groups.has(r.name)) groups.set(r.name, []);
+            groups.get(r.name).push(r);
+        });
+
+        return Array.from(groups.values()).map(Product._rollUpGroup);
     }
 };
 

@@ -4,15 +4,16 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Users – PharmaTrack</title>
+    <link rel="icon" type="image/png" href="../images/pharmatrack-logo.png">
     <link rel="stylesheet" href="../css/global.css">
     <link rel="stylesheet" href="../css/users.css">
 </head>
-<body>
+<body class="confined-page">
 <div class="app-container">
 
     <aside class="sidebar" id="sidebar">
         <div class="sidebar-brand">
-            <div class="brand-icon">💊</div>
+            <div class="brand-icon"><img src="../images/pharmatrack-logo.png" alt="PharmaTrack"></div>
             <div class="brand-text"><h1>PharmaTrack</h1><p>Management System</p></div>
         </div>
         <nav class="sidebar-nav">
@@ -20,11 +21,11 @@
             <ul>
                 <li class="nav-item" data-roles="admin,super_admin,cashier"><a href="dashboard.html"><span class="nav-icon"></span> Dashboard</a></li>
                 <li class="nav-item" data-roles="admin,super_admin,cashier"><a href="pos.html"><span class="nav-icon"></span> Point of Sale</a></li>
+                <li class="nav-item" data-roles="admin,super_admin,cashier"><a href="reports.html"><span class="nav-icon"></span> Reports</a></li>
             </ul>
             <p class="nav-section-label">Management</p>
             <ul>
                 <li class="nav-item" data-roles="admin,super_admin"><a href="inventory.html"><span class="nav-icon"></span> Inventory</a></li>
-                <li class="nav-item" data-roles="admin,super_admin"><a href="reports.html"><span class="nav-icon"></span> Reports</a></li>
                 <li class="nav-item" data-roles="admin,super_admin"><a href="forecasting.html"><span class="nav-icon"></span> Forecasting</a></li>
             </ul>
             <p class="nav-section-label">Admin</p>
@@ -68,13 +69,13 @@
                 </div>
                 <div class="user-stat-card">
                     <div>
-                        <div class="user-stat-label">Owners</div>
+                        <div class="user-stat-label">Admins</div>
                         <div class="user-stat-value" id="stat-owners">—</div>
                     </div>
                 </div>
                 <div class="user-stat-card">
                     <div>
-                        <div class="user-stat-label">Admins</div>
+                        <div class="user-stat-label">Owners</div>
                         <div class="user-stat-value" id="stat-admins">—</div>
                     </div>
                 </div>
@@ -95,8 +96,8 @@
                 </div>
                 <select id="filter-role" class="form-control" style="width:auto">
                     <option value="">All Roles</option>
-                    <option value="super_admin">Owner</option>
-                    <option value="admin">Admin</option>
+                    <option value="super_admin">Admin</option>
+                    <option value="admin">Owner</option>
                     <option value="cashier">Pharmacy Assistant</option>
                 </select>
                 <select id="filter-status" class="form-control" style="width:auto">
@@ -113,16 +114,16 @@
             </div>
 
             <!-- Users Table -->
-            <div class="card" style="padding:0">
-                <div class="table-container">
-                    <table class="table">
+            <div class="card confined-card-wrapper" style="padding:0">
+                <div class="table-container confined-scroll-area">
+                    <table class="table" id="users-table">
                         <thead>
                             <tr>
-                                <th>Name</th>
-                                <th>Email</th>
-                                <th>Role</th>
-                                <th>Status</th>
-                                <th>Created</th>
+                                <th class="col-text sticky-col sortable-col" data-sort-key="name">Name</th>
+                                <th class="col-text sortable-col" data-sort-key="email">Email</th>
+                                <th class="col-text sortable-col" data-sort-key="role">Role</th>
+                                <th class="col-text sortable-col" data-sort-key="is_active">Status</th>
+                                <th class="col-text sortable-col" data-sort-key="created_at">Created</th>
                                 <th class="action-cell">Actions</th>
                             </tr>
                         </thead>
@@ -134,6 +135,9 @@
                     </table>
                 </div>
             </div>
+
+            <!-- Pagination -->
+            <div class="pagination" id="users-pagination"></div>
         </main>
     </div>
 </div>
@@ -147,12 +151,12 @@
         </div>
         <div class="modal-body">
             <form id="user-form" autocomplete="off">
-                <div class="form-group">
+                <div class="form-group" id="name-group">
                     <label class="form-label">Full Name *</label>
                     <input type="text" id="field-name" name="name" class="form-control"
                            required placeholder="e.g. Maria Santos">
                 </div>
-                <div class="form-group">
+                <div class="form-group" id="email-group">
                     <label class="form-label">Email Address *</label>
                     <input type="email" id="field-email" name="email" class="form-control"
                            required placeholder="staff@pharmatrack.ph">
@@ -162,11 +166,11 @@
                     <select id="field-role" name="role" class="form-control" required>
                         <option value="">— Select role —</option>
                         <option value="cashier">Pharmacy Assistant</option>
-                        <option value="admin">Admin</option>
-                        <option value="super_admin" id="opt-super-admin">Owner</option>
+                        <option value="admin">Owner</option>
+                        <option value="super_admin" id="opt-super-admin">Admin</option>
                     </select>
                     <div style="font-size:0.72rem;color:var(--secondary);margin-top:4px" id="role-hint">
-                        Pharmacy Assistants can only use POS. Admins manage inventory & reports. Owners have full access.
+                        Pharmacy Assistants can only use POS. Owners manage inventory & reports. Admins have full access.
                     </div>
                 </div>
 
@@ -177,6 +181,10 @@
                            placeholder="Min. 8 characters" autocomplete="new-password">
                     <div class="pw-strength-bar"><div class="bar-fill" id="pw-bar"></div></div>
                     <div class="pw-strength-hint" id="pw-hint"></div>
+
+                    <label class="form-label" style="margin-top:12px">Confirm Password *</label>
+                    <input type="password" id="field-password-confirm" class="form-control"
+                           placeholder="Re-enter password" autocomplete="new-password">
                 </div>
 
                 <!-- Status (edit mode only) -->
@@ -192,7 +200,11 @@
                      Role/Status above are greyed out (see users.js's
                      openEditModal) -->
                 <p class="hidden" id="self-edit-note" style="font-size:0.78rem;color:var(--secondary);margin-top:8px">
-                    Role and Account Status can't be changed on your own account, to prevent accidentally locking yourself out.
+                    You are editing your own account. Changing your role or deactivating it signs you out and removes your Admin access. This is only allowed while at least one other Admin is active.
+                </p>
+                <!-- Shown only when reactivating ANOTHER Admin's deactivated account -->
+                <p class="hidden" id="reactivate-note" style="font-size:0.78rem;color:var(--secondary);margin-top:8px">
+                    This Admin account is deactivated. You can set it back to Active here. Nothing else about another Admin's account can be changed.
                 </p>
             </form>
         </div>
@@ -263,7 +275,38 @@
     </div>
 </div>
 
+<!-- Action Verification (OTP) Modal -- generic, reused for Add User,
+     Change Password, and Delete/Deactivate. Description text is set from
+     JS per action (see users.js's startActionOtp). -->
+<div class="modal-overlay" id="action-otp-modal">
+    <div class="modal" style="max-width:400px">
+        <div class="modal-header">
+            <h3>Verify This Action</h3>
+            <button class="btn-close btn-close-action-otp">✕</button>
+        </div>
+        <div class="modal-body">
+            <p style="font-size:0.85rem;color:var(--secondary);margin-bottom:6px">
+                You requested to <span id="action-otp-description">—</span>.
+            </p>
+            <p id="action-otp-status" style="font-size:0.8rem;color:var(--secondary);margin-bottom:16px">Sending verification code…</p>
+            <div class="form-group">
+                <label class="form-label">6-Digit Code *</label>
+                <input type="text" id="action-otp-code" class="form-control" inputmode="numeric" maxlength="6"
+                       placeholder="000000" autocomplete="one-time-code" style="letter-spacing:6px;text-align:center;font-size:1.2rem">
+            </div>
+            <p style="font-size:0.78rem;color:var(--secondary);margin-top:10px">
+                Didn't get a code? <button type="button" class="btn-link-inline" id="btn-resend-action-otp" style="background:none;border:none;color:var(--primary);cursor:pointer;padding:0;font-size:0.78rem;text-decoration:underline">Resend code</button>
+            </p>
+        </div>
+        <div class="modal-footer">
+            <button class="btn btn-light btn-close-action-otp">Cancel</button>
+            <button class="btn btn-primary" id="btn-confirm-action-otp">Confirm</button>
+        </div>
+    </div>
+</div>
+
 <div id="toast-container" class="toast-container"></div>
+<script src="../js/passwordToggle.js"></script>
 <script src="../js/main.js"></script>
 <script src="../js/users.js"></script>
 </body>

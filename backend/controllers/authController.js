@@ -8,9 +8,10 @@ const bcrypt  = require('bcryptjs');
 const User    = require('../models/User');
 const db      = require('../config/db');           // ← FIX: was missing, causes ReferenceError in getAuditLogs
 const { logAudit } = require('../middleware/authMiddleware');
-const { sendOtpEmail, sendEmailChangeOtp } = require('../utils/mailer');
+const { sendOtpEmail, sendEmailChangeOtp, sendActionOtp } = require('../utils/mailer');
 const { exportReport, formatShortDateTime } = require('../utils/reportExporter');
 const EmailChangeOtpStore = require('../utils/emailChangeOtpStore');
+const ActionOtpStore      = require('../utils/actionOtpStore');
 
 /**
  * POST /api/auth/login
@@ -90,38 +91,11 @@ const getAllUsers = async (req, res, next) => {
 };
 
 /**
- * POST /api/auth/users  [Admin+]
- * Super Admin can create any role; Admin can only create Cashier accounts.
- */
-const createUser = async (req, res, next) => {
-    try {
-        const { name, email, password, role } = req.body;
-
-        if (!name || !email || !password || !role) {
-            return res.status(400).json({ success: false, message: 'All fields are required.' });
-        }
-
-        if (req.user.role === 'admin' && role !== 'cashier') {
-            return res.status(403).json({ success: false, message: 'Admins can only create Pharmacy Assistant accounts.' });
-        }
-
-        const existing = await User.findByEmail(email.toLowerCase().trim());
-        if (existing) {
-            return res.status(409).json({ success: false, message: 'Email already in use.' });
-        }
-
-        const id = await User.create({ name, email: email.toLowerCase().trim(), password, role });
-        await logAudit(req.user.id, 'CREATE_USER', 'users', id, { name, email, role }, req.ip);
-
-        res.status(201).json({ success: true, message: 'User created successfully.', id });
-
-    } catch (err) { next(err); }
-};
-
-/**
  * PUT /api/auth/users/:id  [Admin+]
  *
- * Self-edit: allowed for Name/Email/Password, but NOT Role or Active-status
+ * Manages Role and Active-status ONLY -- name, email and password are not
+ * editable through this endpoint. Self-edit: you cannot change your own Role
+ * or Active-status
  * -- letting someone change their own role or deactivate their own account
  * risks locking themselves out with no one else able to undo it in the
  * moment. This mirrors the frontend's users.js, which disables those two
@@ -133,7 +107,21 @@ const createUser = async (req, res, next) => {
 const updateUser = async (req, res, next) => {
     try {
         const { id } = req.params;
-        const { name, role, is_active, password } = req.body;
+        const { role, is_active } = req.body;
+
+        // Name, email and password are NOT editable through this endpoint any
+        // more: an admin only manages Role and Account Status here. Passwords
+        // change only through the OTP-verified flows, and each person changes
+        // their own email from Edit Profile. Anything else sent in the body
+        // is ignored.
+        const VALID_ROLES = ['super_admin', 'admin', 'cashier'];
+        if (!VALID_ROLES.includes(role)) {
+            return res.status(400).json({ success: false, message: 'A valid role is required.' });
+        }
+        const activeFlag = parseInt(is_active);
+        if (activeFlag !== 0 && activeFlag !== 1) {
+            return res.status(400).json({ success: false, message: 'Account status must be Active or Inactive.' });
+        }
         const isSelf = parseInt(id) === req.user.id;
 
         // Always fetched -- needed below regardless of isSelf, since email
@@ -144,18 +132,31 @@ const updateUser = async (req, res, next) => {
             return res.status(404).json({ success: false, message: 'User not found.' });
         }
 
-        if (isSelf) {
-            if (role !== req.user.role) {
-                return res.status(400).json({ success: false, message: 'You cannot change your own role.' });
-            }
-            if (parseInt(is_active) !== 1) {
-                return res.status(400).json({ success: false, message: 'You cannot deactivate your own account.' });
-            }
-        } else {
+        // Self-edit: an Admin may change their OWN role or status only while at
+        // least 2 Admin accounts are active (enforced atomically below, so it
+        // cannot be bypassed by an API call or by two Admins acting at once).
+        // Every update that would take an active Admin out of the Admin role
+        // or deactivate them goes through the same guard.
+        if (!isSelf) {
             // Owner (super_admin) accounts can only be managed by the account
-            // holder themselves, never by another owner.
+            // holder themselves, never by another owner. NOTE: as of the
+            // Owner/Admin label swap, the super_admin DB value now displays
+            // as "Admin" -- this message's WORDING was updated to match,
+            // even though the underlying check (role === 'super_admin')
+            // and who it applies to are completely unchanged.
             if (target.role === 'super_admin') {
-                return res.status(403).json({ success: false, message: 'Owner accounts can only be managed by the account holder.' });
+                // The ONE thing another Admin may do to an Admin account: reactivate
+                // a DEACTIVATED one (role stays Admin, status goes back to Active).
+                // Without this, an Admin who deactivated themselves -- which is
+                // allowed while another Admin exists -- would be locked out for
+                // good. Everything else about an Admin account stays with its holder.
+                const isReactivation = !target.is_active && role === 'super_admin' && activeFlag === 1;
+                if (!isReactivation) {
+                    return res.status(403).json({
+                        success: false,
+                        message: 'Admin accounts can only be managed by the account holder. The only change another Admin can make is reactivating a deactivated Admin account.'
+                    });
+                }
             }
         }
 
@@ -165,18 +166,68 @@ const updateUser = async (req, res, next) => {
         // to the PERSON MAKING THE CHANGE before it takes effect. Even if a
         // client sends a different email in this request body, the target's
         // existing email is kept untouched here.
-        const affected = await User.update(id, { name, email: target.email, role, is_active });
+        const roleChanged   = role !== target.role;
+        const statusChanged = activeFlag !== (target.is_active ? 1 : 0);
 
-        if (!affected) {
-            return res.status(404).json({ success: false, message: 'User not found.' });
+        if (!roleChanged && !statusChanged) {
+            return res.json({ success: true, message: 'No changes to save.' });
         }
 
-        // Optional password change in the same request
-        if (password && password.length >= 8) {
-            await User.updatePassword(id, password);
+        // Would this update take an ACTIVE Admin out of the Admin role, or
+        // deactivate them? If so the system must still have another active
+        // Admin afterwards. The count and the update run inside ONE
+        // transaction that locks every active Admin row (FOR UPDATE), so two
+        // Admins demoting themselves at the same moment are serialized: the
+        // second one sees only one Admin left and is refused.
+        const removesAdmin = target.role === 'super_admin' && !!target.is_active
+            && (role !== 'super_admin' || activeFlag !== 1);
+
+        const connection = await db.getConnection();
+        try {
+            await connection.beginTransaction();
+
+            if (removesAdmin) {
+                const [activeAdmins] = await connection.query(
+                    "SELECT id FROM users WHERE role = 'super_admin' AND is_active = 1 FOR UPDATE"
+                );
+                if (activeAdmins.length < 2) {
+                    await connection.rollback();
+                    return res.status(409).json({
+                        success: false,
+                        message: 'You are the only active Admin. Create or activate another Admin first, or the system would be left with no Admin.'
+                    });
+                }
+            }
+
+            // name and email are never touched here
+            const [updated] = await connection.query(
+                'UPDATE users SET role = ?, is_active = ? WHERE id = ?',
+                [role, activeFlag, id]
+            );
+
+            if (!updated.affectedRows) {
+                await connection.rollback();
+                return res.status(404).json({ success: false, message: 'User not found.' });
+            }
+
+            await connection.commit();
+        } catch (txErr) {
+            await connection.rollback();
+            throw txErr;
+        } finally {
+            connection.release();
         }
 
-        await logAudit(req.user.id, 'UPDATE_USER', 'users', id, { name, role, is_active }, req.ip);
+        // One audit entry per thing that actually changed, with before/after
+        if (roleChanged) {
+            await logAudit(req.user.id, 'CHANGE_USER_ROLE', 'users', id,
+                { user: target.name, from_role: target.role, to_role: role }, req.ip);
+        }
+        if (statusChanged) {
+            await logAudit(req.user.id, 'CHANGE_USER_STATUS', 'users', id,
+                { user: target.name, from_status: target.is_active ? 'active' : 'inactive', to_status: activeFlag ? 'active' : 'inactive' }, req.ip);
+        }
+
         res.json({ success: true, message: 'User updated.' });
 
     } catch (err) { next(err); }
@@ -210,9 +261,11 @@ const requestEmailChangeOtp = async (req, res, next) => {
             return res.status(404).json({ success: false, message: 'User not found.' });
         }
 
-        // Same owner-protection rule as updateUser above.
+        // Same owner-protection rule as updateUser above. Wording updated
+        // to "Admin accounts" to match the super_admin DB value's new label
+        // -- see the Owner/Admin label swap note in updateUser above.
         if (parseInt(id) !== req.user.id && target.role === 'super_admin') {
-            return res.status(403).json({ success: false, message: 'Owner accounts can only be managed by the account holder.' });
+            return res.status(403).json({ success: false, message: 'Admin accounts can only be managed by the account holder.' });
         }
 
         if (normalizedEmail === target.email.toLowerCase()) {
@@ -239,7 +292,10 @@ const requestEmailChangeOtp = async (req, res, next) => {
         try {
             await sendEmailChangeOtp(requester.email, otp, requester.name, target.name, normalizedEmail);
         } catch (mailErr) {
-            console.error('[requestEmailChangeOtp] Failed to send OTP email:', mailErr.message);
+            // See forgotPassword's comment above -- EmailJS rejects with
+            // {status, text}, not a standard Error, so .message alone
+            // logs nothing useful.
+            console.error('[requestEmailChangeOtp] Failed to send OTP email:', mailErr?.text || mailErr?.message || mailErr);
             EmailChangeOtpStore.clear(req.user.id);
             return res.status(500).json({ success: false, message: 'Could not send the verification email. Please try again later.' });
         }
@@ -318,29 +374,292 @@ const confirmEmailChangeOtp = async (req, res, next) => {
 };
 
 /**
- * DELETE /api/auth/users/:id  [Super Admin only]
+ * POST /api/auth/action-otp/request  [Super Admin only]
+ * Body: { action: 'create_user'|'update_password'|'delete_user', payload }
+ *
+ * Generic first step for the three OTP-gated User Management actions
+ * below (Add User, Change Password, Delete/Deactivate) -- same "confirm
+ * it's really you" pattern as requestEmailChangeOtp above: a code is
+ * emailed to the OWNER PERFORMING the action, and NOTHING is written to
+ * the database until confirmActionOtp verifies it. All the validation
+ * the direct create/update-password/delete logic normally does is
+ * duplicated here too, so a code is never sent for a request that was
+ * always going to fail anyway.
  */
-const deleteUser = async (req, res, next) => {
+const requestActionOtp = async (req, res, next) => {
     try {
-        const { id } = req.params;
+        const { action, payload = {} } = req.body;
+        const validActions = ['create_user', 'update_password', 'delete_user'];
 
-        if (parseInt(id) === req.user.id) {
-            return res.status(400).json({ success: false, message: 'Cannot delete your own account.' });
+        if (!validActions.includes(action)) {
+            return res.status(400).json({ success: false, message: 'Invalid action.' });
         }
 
-        // Same owner-protection rule as updateUser above.
-        const target = await User.findById(id);
-        if (!target) {
-            return res.status(404).json({ success: false, message: 'User not found.' });
-        }
-        if (target.role === 'super_admin') {
-            return res.status(403).json({ success: false, message: 'Owner accounts can only be managed by the account holder.' });
+        let actionDescription;
+        // Owner/Admin label swap: super_admin now displays as "Admin", admin
+        // now displays as "Owner" -- the DB values and every permission
+        // check throughout this file are completely unchanged, only this
+        // display mapping (and the handful of messages below that name one
+        // specific role) reflect the new labels.
+        const roleLabels = { super_admin: 'Admin', admin: 'Owner', cashier: 'Pharmacy Assistant' };
+
+        if (action === 'create_user') {
+            const { name, email, password, role } = payload;
+            if (!name || !email || !password || !role) {
+                return res.status(400).json({ success: false, message: 'All fields are required.' });
+            }
+            if (password.length < 8) {
+                return res.status(400).json({ success: false, message: 'Password must be at least 8 characters.' });
+            }
+
+            const normalizedEmail = email.toLowerCase().trim();
+            // Checked WITHOUT the is_active filter findByEmail normally
+            // applies -- this needs to see a DEACTIVATED match too, so it
+            // can be offered as a reactivation below instead of either
+            // silently hitting the database's unique constraint on email
+            // (findByEmail alone never finds a deactivated row) or creating
+            // a confusing duplicate.
+            const existingAny = await User.findByEmailIncludingInactive(normalizedEmail);
+
+            if (existingAny && existingAny.is_active) {
+                return res.status(409).json({ success: false, message: 'Email already in use.' });
+            }
+
+            if (existingAny && !existingAny.is_active) {
+                // Reactivation instead of a fresh account -- this email
+                // belongs to a DEACTIVATED user. Restores their ORIGINAL
+                // name/role, not whatever was typed into this form, since
+                // it's the same person's existing account being restored,
+                // not a new one (see User.reactivate). The
+                // admin-can-only-manage-Pharmacy-Assistant restriction below
+                // is checked against the role being RESTORED, since that's
+                // the role that will actually be back in effect -- not the
+                // form's now-irrelevant role field.
+                if (req.user.role === 'admin' && existingAny.role !== 'cashier') {
+                    return res.status(403).json({ success: false, message: 'Owners can only reactivate Pharmacy Assistant accounts.' });
+                }
+                payload.reactivateUserId = existingAny.id;
+                const oldRoleLabel = roleLabels[existingAny.role] || existingAny.role;
+                actionDescription = `reactivate the deactivated ${oldRoleLabel} account for ${existingAny.name}, restoring their previous role and access`;
+            } else {
+                if (req.user.role === 'admin' && role !== 'cashier') {
+                    return res.status(403).json({ success: false, message: 'Owners can only create Pharmacy Assistant accounts.' });
+                }
+                actionDescription = `create a new ${roleLabels[role] || role} account for ${name}`;
+            }
+
+        } else if (action === 'update_password') {
+            const { targetId, newPassword } = payload;
+            if (!targetId || !newPassword) {
+                return res.status(400).json({ success: false, message: 'Target user and new password are required.' });
+            }
+            if (newPassword.length < 8) {
+                return res.status(400).json({ success: false, message: 'Password must be at least 8 characters.' });
+            }
+            const target = await User.findById(targetId);
+            if (!target) {
+                return res.status(404).json({ success: false, message: 'User not found.' });
+            }
+            // Same owner-protection rule as updateUser above.
+            // Wording updated to "Admin accounts" -- see the Owner/Admin
+            // label swap note in updateUser above.
+            if (parseInt(targetId) !== req.user.id && target.role === 'super_admin') {
+                return res.status(403).json({ success: false, message: 'Admin accounts can only be managed by the account holder.' });
+            }
+            actionDescription = `change the password for ${target.name}'s account`;
+
+        } else if (action === 'delete_user') {
+            const { targetId } = payload;
+            if (!targetId) {
+                return res.status(400).json({ success: false, message: 'Target user is required.' });
+            }
+
+            const isSelfDelete = parseInt(targetId) === req.user.id;
+
+            if (isSelfDelete) {
+                // Self-delete is allowed ONLY for a super_admin, and ONLY
+                // when at least one OTHER active owner exists -- otherwise
+                // the system would be left with zero owners able to manage
+                // it at all. Admins/cashiers still can't delete themselves
+                // under any circumstance (they'd just be locking themselves
+                // out with an owner having to fix it anyway).
+                if (req.user.role !== 'super_admin') {
+                    return res.status(400).json({ success: false, message: 'Cannot delete your own account.' });
+                }
+                const allUsersForCount = await User.findAll();
+                const activeOwnerCount = allUsersForCount.filter(u => u.role === 'super_admin' && u.is_active).length;
+                if (activeOwnerCount < 2) {
+                    return res.status(400).json({ success: false, message: 'At least one Admin must remain in the system. You cannot delete your own account while you are the only active Admin.' });
+                }
+                actionDescription = 'deactivate your own account';
+            } else {
+                const target = await User.findById(targetId);
+                if (!target) {
+                    return res.status(404).json({ success: false, message: 'User not found.' });
+                }
+                if (target.role === 'super_admin') {
+                    return res.status(403).json({ success: false, message: 'Admin accounts can only be managed by the account holder.' });
+                }
+                actionDescription = `deactivate ${target.name}'s account`;
+            }
         }
 
-        await User.softDelete(id);
-        await logAudit(req.user.id, 'DELETE_USER', 'users', id, {}, req.ip);
+        const requester = await User.findById(req.user.id);
 
-        res.json({ success: true, message: 'User deactivated.' });
+        const otp       = String(crypto.randomInt(100000, 1000000));
+        const otpHash   = await bcrypt.hash(otp, 10);
+        const expiresAt = new Date(Date.now() + OTP_EXPIRY_MINUTES * 60 * 1000);
+
+        // In-memory only -- see utils/actionOtpStore.js for why. The
+        // plaintext password briefly held in `payload` for create_user (or
+        // update_password) lives only here, for up to 10 minutes, until
+        // confirmActionOtp hashes it via User.create/updatePassword (both
+        // hash internally) and this entry is cleared.
+        ActionOtpStore.set(req.user.id, { otpHash, expiresAt, action, payload });
+
+        try {
+            await sendActionOtp(requester.email, otp, requester.name, actionDescription);
+        } catch (mailErr) {
+            // See forgotPassword's comment above -- EmailJS rejects with
+            // {status, text}, not a standard Error, so .message alone
+            // logs nothing useful.
+            console.error('[requestActionOtp] Failed to send OTP email:', mailErr?.text || mailErr?.message || mailErr);
+            ActionOtpStore.clear(req.user.id);
+            return res.status(500).json({ success: false, message: 'Could not send the verification email. Please try again later.' });
+        }
+
+        // description included so the frontend can correct its own
+        // on-screen wording if it guessed wrong -- it can't know in
+        // advance whether an Add User submission will turn out to be a
+        // fresh account or a reactivation (only the check above knows
+        // that), so it initially shows a generic "create" message that
+        // may need to become "reactivate" once this response comes back.
+        res.json({
+            success: true,
+            message: `A verification code has been sent to ${requester.email}.`,
+            data: { description: actionDescription }
+        });
+
+    } catch (err) { next(err); }
+};
+
+/**
+ * POST /api/auth/action-otp/confirm  [Super Admin only]
+ * Body: { otp }
+ *
+ * Step 2 -- verifies the code against the requester's stored hash, then
+ * actually performs whichever action was pending (create_user /
+ * update_password / delete_user), same expiry/attempt-limit logic as
+ * confirmEmailChangeOtp above.
+ */
+const confirmActionOtp = async (req, res, next) => {
+    try {
+        const { otp } = req.body;
+        if (!otp) {
+            return res.status(400).json({ success: false, message: 'Verification code is required.' });
+        }
+
+        const pending = ActionOtpStore.get(req.user.id);
+        if (!pending || !['create_user', 'update_password', 'delete_user'].includes(pending.action)) {
+            return res.status(400).json({ success: false, message: 'No pending action found. Please start again.' });
+        }
+
+        if (new Date(pending.expiresAt) < new Date()) {
+            ActionOtpStore.clear(req.user.id);
+            return res.status(400).json({ success: false, message: 'This code has expired. Please request a new one.' });
+        }
+
+        if (pending.attempts >= MAX_OTP_ATTEMPTS) {
+            ActionOtpStore.clear(req.user.id);
+            return res.status(429).json({ success: false, message: 'Too many incorrect attempts. Please request a new code.' });
+        }
+
+        const matches = await bcrypt.compare(otp, pending.otpHash);
+        if (!matches) {
+            ActionOtpStore.incrementAttempts(req.user.id);
+            const remaining = MAX_OTP_ATTEMPTS - (pending.attempts + 1);
+            return res.status(400).json({
+                success: false,
+                message: remaining > 0 ? `Incorrect code. ${remaining} attempt(s) left.` : 'Too many incorrect attempts. Please request a new code.'
+            });
+        }
+
+        const { action, payload } = pending;
+        let responseMessage;
+
+        if (action === 'create_user') {
+            const { name, email, password, role, reactivateUserId } = payload;
+
+            if (reactivateUserId) {
+                // Reactivation -- re-verify the account is STILL
+                // deactivated (it could have been reactivated some other
+                // way in the time between request and this confirm), then
+                // restore it. Original name/role are kept untouched (see
+                // User.reactivate); only is_active flips back on, plus a
+                // fresh password since the returning person may not
+                // remember their old one.
+                const target = await User.findById(reactivateUserId);
+                if (!target) {
+                    ActionOtpStore.clear(req.user.id);
+                    return res.status(404).json({ success: false, message: 'That account no longer exists.' });
+                }
+                if (target.is_active) {
+                    ActionOtpStore.clear(req.user.id);
+                    return res.status(409).json({ success: false, message: 'That account has already been reactivated.' });
+                }
+                await User.reactivate(reactivateUserId, password);
+                await logAudit(req.user.id, 'REACTIVATE_USER', 'users', reactivateUserId, { email }, req.ip);
+                responseMessage = `Account reactivated -- ${target.name}'s previous role and access have been restored.`;
+            } else {
+                // Re-check email uniqueness -- a race condition (another admin
+                // created the same email) while this code was pending.
+                const stillAvailable = await User.findByEmail(email.toLowerCase().trim());
+                if (stillAvailable) {
+                    ActionOtpStore.clear(req.user.id);
+                    return res.status(409).json({ success: false, message: 'That email was taken by another account while this code was pending. Please start again.' });
+                }
+                const id = await User.create({ name, email: email.toLowerCase().trim(), password, role });
+                await logAudit(req.user.id, 'CREATE_USER', 'users', id, { name, email, role }, req.ip);
+                responseMessage = 'User created successfully.';
+            }
+
+        } else if (action === 'update_password') {
+            const { targetId, newPassword } = payload;
+            const target = await User.findById(targetId);
+            if (!target) {
+                ActionOtpStore.clear(req.user.id);
+                return res.status(404).json({ success: false, message: 'User not found.' });
+            }
+            await User.updatePassword(targetId, newPassword);
+            await logAudit(req.user.id, 'RESET_USER_PASSWORD', 'users', targetId, {}, req.ip);
+            responseMessage = 'Password updated successfully.';
+
+        } else if (action === 'delete_user') {
+            const { targetId } = payload;
+            const target = await User.findById(targetId);
+            if (!target) {
+                ActionOtpStore.clear(req.user.id);
+                return res.status(404).json({ success: false, message: 'User not found.' });
+            }
+            // Re-check the active-owner count for a self-delete -- another
+            // owner could have been deactivated in the time between request
+            // and this confirm, and this must never be allowed to leave
+            // the system with zero active owners.
+            if (parseInt(targetId) === req.user.id) {
+                const allUsersForCount = await User.findAll();
+                const activeOwnerCount = allUsersForCount.filter(u => u.role === 'super_admin' && u.is_active).length;
+                if (activeOwnerCount < 2) {
+                    ActionOtpStore.clear(req.user.id);
+                    return res.status(400).json({ success: false, message: 'At least one Admin must remain in the system. You cannot delete your own account while you are the only active Admin.' });
+                }
+            }
+            await User.softDelete(targetId);
+            await logAudit(req.user.id, 'DELETE_USER', 'users', targetId, {}, req.ip);
+            responseMessage = 'User deactivated.';
+        }
+
+        ActionOtpStore.clear(req.user.id);
+        res.json({ success: true, message: responseMessage });
 
     } catch (err) { next(err); }
 };
@@ -401,7 +720,7 @@ const getAuditLogs = async (req, res, next) => {
 };
 
 const AUDIT_COLUMNS = [
-    { label: 'Date/Time',  excelWidth: 20, pdfWidth: 95  },
+    { label: 'Date/Time',  excelWidth: 26, pdfWidth: 108 },
     { label: 'User',        excelWidth: 18, pdfWidth: 85  },
     { label: 'Role',        excelWidth: 10, pdfWidth: 50  },
     { label: 'Action',      excelWidth: 16, pdfWidth: 80  },
@@ -409,7 +728,13 @@ const AUDIT_COLUMNS = [
     { label: 'Entity ID',   excelWidth: 10, pdfWidth: 50  }
 ];
 
-const AUDIT_ROLE_LABELS   = { super_admin: 'Owner', admin: 'Admin', cashier: 'Pharmacy Assistant' };
+// Owner/Admin label swap: super_admin now displays as "Admin", admin now
+// displays as "Owner" throughout this app -- see requestActionOtp's
+// roleLabels for the full explanation. Audit Logs show whatever role the
+// user held AT THE TIME of each action (from the users table's CURRENT
+// role, not a historical snapshot), so a past log entry now reads with
+// today's labels, not whatever was displayed when it was originally logged.
+const AUDIT_ROLE_LABELS   = { super_admin: 'Admin', admin: 'Owner', cashier: 'Pharmacy Assistant' };
 const AUDIT_ENTITY_LABELS = {
     products: 'Product', users: 'User', orders: 'Order', order_items: 'Order Item',
     cash_sessions: 'Cash Session', cash_movements: 'Cash Movement', audit_logs: 'Audit Log',
@@ -476,11 +801,11 @@ const exportAuditLogs = async (req, res, next) => {
  * returns the same generic success message whether or not the email is
  * actually registered, so this can't be used to check which emails exist
  * in the system. If the email IS registered, a 6-digit code is emailed
- * to it, valid for 10 minutes. Only a bcrypt HASH of the code is ever
+ * to it, valid for 15 minutes. Only a bcrypt HASH of the code is ever
  * stored -- never the plain code itself.
  */
 const GENERIC_OTP_MESSAGE = 'If that email is registered, a reset code has been sent to it.';
-const OTP_EXPIRY_MINUTES  = 10;
+const OTP_EXPIRY_MINUTES  = 15; // matches the EmailJS template's own wording ("valid for 15 minutes")
 const MAX_OTP_ATTEMPTS    = 5;
 
 const forgotPassword = async (req, res, next) => {
@@ -513,7 +838,13 @@ const forgotPassword = async (req, res, next) => {
             // return the same generic message", since silently failing
             // here would just leave someone waiting forever for a code
             // that was never going to arrive.
-            console.error('[forgotPassword] Failed to send OTP email:', mailErr.message);
+            //
+            // EmailJS's SDK rejects with a plain {status, text} object, not
+            // a standard Error -- mailErr.message is always undefined for
+            // it, which is why this used to log nothing useful. .text is
+            // where the actual reason (bad template variable, invalid
+            // keys, etc.) actually lives.
+            console.error('[forgotPassword] Failed to send OTP email:', mailErr?.text || mailErr?.message || mailErr);
             return res.status(500).json({ success: false, message: 'Could not send the reset email. Please try again later.' });
         }
 
@@ -657,8 +988,254 @@ const updateProfile = async (req, res, next) => {
     } catch (err) { next(err); }
 };
 
+/**
+ * POST /api/auth/change-password-otp/request  [Any authenticated role]
+ * Body: { currentPassword, newPassword }
+ *
+ * Self-service password change, available to EVERY role -- this only
+ * ever touches the REQUESTER'S OWN account, unlike the generic
+ * action-otp flow above (create_user/update_password-for-others/
+ * delete_user), which is super_admin-only since those act on OTHER
+ * accounts. Current password is verified immediately here -- fails fast
+ * with no OTP sent if it's wrong -- and the OTP step that follows adds
+ * a second factor beyond just knowing the current password, meaningful
+ * if a session were ever left open/hijacked while the real owner still
+ * knows their own password.
+ */
+const requestChangePasswordOtp = async (req, res, next) => {
+    try {
+        const { currentPassword, newPassword } = req.body;
+
+        if (!currentPassword || !newPassword) {
+            return res.status(400).json({ success: false, message: 'Current and new password are required.' });
+        }
+        if (newPassword.length < 8) {
+            return res.status(400).json({ success: false, message: 'New password must be at least 8 characters.' });
+        }
+
+        const requester = await User.findByIdWithPassword(req.user.id);
+        if (!requester) return res.status(404).json({ success: false, message: 'User not found.' });
+
+        const matches = await User.comparePassword(currentPassword, requester.password);
+        if (!matches) {
+            // 400, not 401 -- this is a wrong FORM FIELD (the password they
+            // just typed doesn't match), not an invalid/expired SESSION.
+            // The frontend's shared API client treats any 401 as "log out
+            // and redirect to login" (see main.js's API.request), which
+            // would incorrectly kick someone back to login just for
+            // mistyping their current password -- 401 is reserved for
+            // actual session/token problems (see authMiddleware.js's
+            // verifyToken), not "a value in this request was wrong".
+            return res.status(400).json({ success: false, message: 'Current password is incorrect.' });
+        }
+
+        const otp       = String(crypto.randomInt(100000, 1000000));
+        const otpHash   = await bcrypt.hash(otp, 10);
+        const expiresAt = new Date(Date.now() + OTP_EXPIRY_MINUTES * 60 * 1000);
+
+        // Reuses the same generic in-memory store as the Add User/Change
+        // Password(-for-others)/Delete flows in requestActionOtp -- same
+        // "only one pending thing per requester at a time" limitation
+        // applies here too (starting this while one of THOSE is also
+        // pending silently replaces whichever was there). action is
+        // tagged distinctly ('self_change_password') so confirm below can
+        // tell it apart from the other three. Only newPassword needs to
+        // persist until confirm -- currentPassword was already verified
+        // above, no reason to keep a second plaintext password sitting in
+        // memory.
+        ActionOtpStore.set(req.user.id, {
+            otpHash, expiresAt, action: 'self_change_password', payload: { newPassword }
+        });
+
+        try {
+            await sendActionOtp(requester.email, otp, requester.name, 'change your own account password');
+        } catch (mailErr) {
+            console.error('[requestChangePasswordOtp] Failed to send OTP email:', mailErr?.text || mailErr?.message || mailErr);
+            ActionOtpStore.clear(req.user.id);
+            return res.status(500).json({ success: false, message: 'Could not send the verification email. Please try again later.' });
+        }
+
+        res.json({ success: true, message: `A verification code has been sent to ${requester.email}.` });
+
+    } catch (err) { next(err); }
+};
+
+/**
+ * POST /api/auth/change-password-otp/confirm  [Any authenticated role]
+ * Body: { otp }
+ */
+const confirmChangePasswordOtp = async (req, res, next) => {
+    try {
+        const { otp } = req.body;
+        if (!otp) {
+            return res.status(400).json({ success: false, message: 'Verification code is required.' });
+        }
+
+        const pending = ActionOtpStore.get(req.user.id);
+        if (!pending || pending.action !== 'self_change_password') {
+            return res.status(400).json({ success: false, message: 'No pending password change found. Please start again.' });
+        }
+
+        if (new Date(pending.expiresAt) < new Date()) {
+            ActionOtpStore.clear(req.user.id);
+            return res.status(400).json({ success: false, message: 'This code has expired. Please request a new one.' });
+        }
+
+        if (pending.attempts >= MAX_OTP_ATTEMPTS) {
+            ActionOtpStore.clear(req.user.id);
+            return res.status(429).json({ success: false, message: 'Too many incorrect attempts. Please request a new code.' });
+        }
+
+        const matches = await bcrypt.compare(otp, pending.otpHash);
+        if (!matches) {
+            ActionOtpStore.incrementAttempts(req.user.id);
+            const remaining = MAX_OTP_ATTEMPTS - (pending.attempts + 1);
+            return res.status(400).json({
+                success: false,
+                message: remaining > 0 ? `Incorrect code. ${remaining} attempt(s) left.` : 'Too many incorrect attempts. Please request a new code.'
+            });
+        }
+
+        await User.updatePassword(req.user.id, pending.payload.newPassword);
+        ActionOtpStore.clear(req.user.id);
+        await logAudit(req.user.id, 'CHANGE_OWN_PASSWORD', 'users', req.user.id, {}, req.ip);
+
+        res.json({ success: true, message: 'Password updated successfully.' });
+
+    } catch (err) { next(err); }
+};
+
+// -- Self-service email change (any authenticated role) --
+// Each person changes THEIR OWN email from Edit Profile. The 6-digit code is
+// emailed to their CURRENT address (not the new one), and nothing is written
+// to the database until it is confirmed. Reuses the in-memory ActionOtpStore
+// (one pending item per person, tagged 'self_change_email' so it can't be
+// confirmed through any other endpoint). users.email is UNIQUE across ALL
+// accounts including deactivated ones, so availability is checked without
+// the is_active filter.
+const EMAIL_FORMAT = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+/**
+ * POST /api/auth/change-email-otp/request  [Any authenticated role]
+ * Body: { newEmail }
+ */
+const requestChangeEmailOtp = async (req, res, next) => {
+    try {
+        const { newEmail } = req.body;
+        if (!newEmail || typeof newEmail !== 'string') {
+            return res.status(400).json({ success: false, message: 'New email is required.' });
+        }
+
+        const normalizedEmail = newEmail.toLowerCase().trim();
+        if (!EMAIL_FORMAT.test(normalizedEmail) || normalizedEmail.length > 150) {
+            return res.status(400).json({ success: false, message: 'Enter a valid email address.' });
+        }
+
+        const requester = await User.findById(req.user.id);
+        if (!requester) return res.status(404).json({ success: false, message: 'User not found.' });
+
+        if (normalizedEmail === requester.email.toLowerCase()) {
+            return res.status(400).json({ success: false, message: 'That is already your email address.' });
+        }
+
+        const existing = await User.findByEmailIncludingInactive(normalizedEmail);
+        if (existing && parseInt(existing.id) !== req.user.id) {
+            return res.status(409).json({ success: false, message: 'That email is already used by another account.' });
+        }
+
+        const otp       = String(crypto.randomInt(100000, 1000000));
+        const otpHash   = await bcrypt.hash(otp, 10);
+        const expiresAt = new Date(Date.now() + OTP_EXPIRY_MINUTES * 60 * 1000);
+
+        ActionOtpStore.set(req.user.id, {
+            otpHash, expiresAt, action: 'self_change_email', payload: { newEmail: normalizedEmail }
+        });
+
+        try {
+            await sendActionOtp(requester.email, otp, requester.name, 'change your own account email');
+        } catch (mailErr) {
+            console.error('[requestChangeEmailOtp] Failed to send OTP email:', mailErr?.text || mailErr?.message || mailErr);
+            ActionOtpStore.clear(req.user.id);
+            return res.status(500).json({ success: false, message: 'Could not send the verification email. Please try again later.' });
+        }
+
+        res.json({ success: true, message: `A verification code has been sent to ${requester.email}.` });
+
+    } catch (err) { next(err); }
+};
+
+/**
+ * POST /api/auth/change-email-otp/confirm  [Any authenticated role]
+ * Body: { otp }
+ */
+const confirmChangeEmailOtp = async (req, res, next) => {
+    try {
+        const { otp } = req.body;
+        if (!otp) {
+            return res.status(400).json({ success: false, message: 'Verification code is required.' });
+        }
+
+        const pending = ActionOtpStore.get(req.user.id);
+        if (!pending || pending.action !== 'self_change_email') {
+            return res.status(400).json({ success: false, message: 'No pending email change found. Please start again.' });
+        }
+
+        if (new Date(pending.expiresAt) < new Date()) {
+            ActionOtpStore.clear(req.user.id);
+            return res.status(400).json({ success: false, message: 'This code has expired. Please request a new one.' });
+        }
+
+        if (pending.attempts >= MAX_OTP_ATTEMPTS) {
+            ActionOtpStore.clear(req.user.id);
+            return res.status(429).json({ success: false, message: 'Too many incorrect attempts. Please request a new code.' });
+        }
+
+        const matches = await bcrypt.compare(otp, pending.otpHash);
+        if (!matches) {
+            ActionOtpStore.incrementAttempts(req.user.id);
+            const remaining = MAX_OTP_ATTEMPTS - (pending.attempts + 1);
+            return res.status(400).json({
+                success: false,
+                message: remaining > 0 ? `Incorrect code. ${remaining} attempt(s) left.` : 'Too many incorrect attempts. Please request a new code.'
+            });
+        }
+
+        const newEmail = pending.payload.newEmail;
+
+        // Re-check at confirm time -- someone else may have claimed this
+        // address while the code was pending.
+        const existing = await User.findByEmailIncludingInactive(newEmail);
+        if (existing && parseInt(existing.id) !== req.user.id) {
+            ActionOtpStore.clear(req.user.id);
+            return res.status(409).json({ success: false, message: 'That email was taken by another account while this code was pending. Please start again.' });
+        }
+
+        const current  = await User.findById(req.user.id);
+        const oldEmail = current?.email || null;
+
+        try {
+            await User.updateEmail(req.user.id, newEmail);
+        } catch (dbErr) {
+            if (dbErr.code === 'ER_DUP_ENTRY') {
+                ActionOtpStore.clear(req.user.id);
+                return res.status(409).json({ success: false, message: 'That email is already used by another account.' });
+            }
+            throw dbErr;
+        }
+
+        ActionOtpStore.clear(req.user.id);
+        await logAudit(req.user.id, 'CHANGE_OWN_EMAIL', 'users', req.user.id, { old_email: oldEmail, new_email: newEmail }, req.ip);
+
+        res.json({ success: true, message: 'Email updated successfully.', email: newEmail });
+
+    } catch (err) { next(err); }
+};
+
 module.exports = {
-    login, getMe, getAllUsers, createUser, updateUser, deleteUser, getAuditLogs, exportAuditLogs,
+    login, getMe, getAllUsers, updateUser, getAuditLogs, exportAuditLogs,
     forgotPassword, verifyOtp, resetPassword, updateProfile,
-    requestEmailChangeOtp, confirmEmailChangeOtp
+    requestEmailChangeOtp, confirmEmailChangeOtp,
+    requestActionOtp, confirmActionOtp,
+    requestChangePasswordOtp, confirmChangePasswordOtp,
+    requestChangeEmailOtp, confirmChangeEmailOtp
 };

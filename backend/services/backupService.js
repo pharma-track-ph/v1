@@ -24,8 +24,11 @@
 // ============================================================
 const mysql = require('mysql2/promise');
 const db    = require('../config/db');
+const manilaTime = require('../utils/manilaTime');
 
-const FILENAME_PATTERN = /^backup-(manual|scheduled|pre-restore-safety)-[0-9T-]+Z\.sql$/;
+// Two accepted shapes: the original UTC stamp (2026-10-24T08-03-12-345Z) and the Manila stamp
+// now used for new backups (2026-10-24_16-03-12-345). Still strictly digits and - _ only.
+const FILENAME_PATTERN = /^backup-(manual|scheduled|pre-restore-safety)-(?:[0-9T-]+Z|\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}-\d{3})\.sql$/;
 
 // Every generated file starts with this exact line — a cheap sanity check
 // before restoreBackup() ever executes stored content as SQL.
@@ -137,7 +140,12 @@ async function buildSqlDump(triggeredBy) {
 async function runBackup(triggeredBy = 'manual') {
     const { sqlContent, tableCount } = await buildSqlDump(triggeredBy);
 
-    const filename = `backup-${triggeredBy}-${new Date().toISOString().replace(/[:.]/g, '-')}.sql`;
+    // Named in MANILA time (a UTC stamp looked 8 hours behind). Only digits and - _ are used,
+    // so it stays safe in a URL; the milliseconds keep two backups made in the same second apart.
+    const mp = manilaTime.parts();
+    const two = (n) => String(n).padStart(2, '0');
+    const stamp = `${mp.year}-${two(mp.month)}-${two(mp.day)}_${two(mp.hour)}-${two(mp.minute)}-${two(mp.second)}-${String(Date.now() % 1000).padStart(3, '0')}`;
+    const filename = `backup-${triggeredBy}-${stamp}.sql`;
     const size = Buffer.byteLength(sqlContent);
 
     await db.query(

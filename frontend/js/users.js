@@ -11,6 +11,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // ── State ────────────────────────────────────────────────
     let allUsers  = [];
+    let usersSort  = null; // set once the table's sortable headers are wired up (see loadUsers)
+    let usersPaginate = null; // set once, alongside usersSort (see loadUsers)
     let editingId = null;
     let pwTargetId = null;
 
@@ -41,7 +43,12 @@ document.addEventListener('DOMContentLoaded', () => {
         getSubLabel: u => u.email
     });
 
-    function debounceFilter() { renderTable(filterUsers()); }
+    function debounceFilter() {
+        // A NEW filter/search value has no obvious meaning for whatever
+        // page you were previously on -- resetToFirstPage() re-derives
+        // filterUsers()'s result and renders from page 1 against it.
+        usersPaginate.resetToFirstPage();
+    }
 
     function filterUsers() {
         const term   = searchInput?.value.toLowerCase().trim() || '';
@@ -51,6 +58,9 @@ document.addEventListener('DOMContentLoaded', () => {
         return allUsers.filter(u => {
             const matchText   = !term   || u.name.toLowerCase().includes(term) || u.email.toLowerCase().includes(term);
             const matchRole   = !role   || u.role === role;
+            // "All Status" shows EVERY account, active and inactive. Inactive
+            // ones are labelled and muted in the table (see renderTable) so
+            // they can be found and set back to Active via Edit.
             const matchStatus = status === '' || String(u.is_active) === status;
             return matchText && matchRole && matchStatus;
         });
@@ -63,7 +73,56 @@ document.addEventListener('DOMContentLoaded', () => {
 
         allUsers = data.data;
         renderStats();
-        renderTable(allUsers);
+
+        // Sorting operates on allUsers ITSELF (not the filtered view
+        // rendered below) -- Array.filter() preserves source order, so
+        // sorting the underlying array once means every subsequent
+        // search/role/status filter change automatically inherits
+        // whatever order is currently active, with no need to re-sort the
+        // filtered subset separately. getData (not a plain array) keeps
+        // this correct even though `allUsers` gets REASSIGNED on every
+        // reload above -- see TableSort's own comment for why a plain
+        // array reference would go stale here.
+        if (!usersSort) {
+            const roleLabels = { super_admin: 'Admin', admin: 'Owner', cashier: 'Pharmacy Assistant' };
+            usersSort = TableSort.attach(document.querySelector('#users-table thead'), {
+                getData: () => allUsers,
+                getValue: (row, key) => {
+                    if (key === 'role') return (roleLabels[row.role] || row.role).toLowerCase();
+                    if (key === 'is_active') return row.is_active ? 1 : 0;
+                    if (key === 'created_at') return new Date(row.created_at).getTime();
+                    return (row[key] || '').toString().toLowerCase();
+                },
+                // Goes through Paginate now, not straight to renderTable --
+                // sorting changes ORDER, and pagination needs to reslice
+                // against that new order, not just redraw whatever page
+                // was already showing against the OLD order.
+                onSorted: () => usersPaginate.resetToFirstPage()
+            });
+        }
+
+        // Same one-time-attach guard as usersSort above. getData calls
+        // filterUsers() itself -- a fresh function call every time
+        // Paginate needs the current data, so it always reflects whatever
+        // the search/role/status inputs currently are, not a stale
+        // snapshot from whenever Paginate was first attached.
+        if (!usersPaginate) {
+            usersPaginate = Paginate.attach(document.getElementById('users-pagination'), {
+                getData:  () => filterUsers(),
+                onRender: (pageItems) => renderTable(pageItems),
+                pageSize: 25
+            });
+        }
+
+        // Always -- TableSort's resort() unconditionally triggers onSorted
+        // at the end regardless of whether a sort is currently active,
+        // which is exactly what's needed here either way: on the very
+        // first load, this produces the FIRST render at all (attach()
+        // alone doesn't render without a defaultKey, which this doesn't
+        // use); on every later load (Refresh, or after an action
+        // completes), this re-sorts the new data (a no-op if nothing's
+        // sorted) and resets to page 1 against it.
+        usersSort.resort();
     }
 
     function renderStats() {
@@ -82,9 +141,15 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
 
+        const activeKey = usersSort?.getCurrentSort().key;
+        const tint = (key) => key === activeKey ? ' sort-col-tint' : '';
+
         tbody.innerHTML = users.map(u => {
             const isSelf    = u.id === currentUser?.id;
-            const roleLabel = { super_admin: 'Owner', admin: 'Admin', cashier: 'Pharmacy Assistant' }[u.role] || u.role;
+            // Owner/Admin label swap: super_admin now displays as "Admin",
+            // admin now displays as "Owner" -- DB values and every
+            // permission check are unchanged, only this display mapping.
+            const roleLabel = { super_admin: 'Admin', admin: 'Owner', cashier: 'Pharmacy Assistant' }[u.role] || u.role;
             const roleClass = u.role;
             const activeLabel = u.is_active
                 ? '<span class="status-dot active"></span>Active'
@@ -98,29 +163,35 @@ document.addEventListener('DOMContentLoaded', () => {
             // openEditModal for what stays locked even then: role/status).
             const isOtherOwner = u.role === 'super_admin' && !isSelf;
             const canEdit   = !isOtherOwner && (isSuperAdmin || u.role === 'cashier');
-            const canDelete = !isOtherOwner && isSuperAdmin && !isSelf;
+            // Another Admin's DEACTIVATED account can be reactivated (nothing else
+            // about an Admin account can be changed by another Admin).
+            const canReactivateAdmin = isOtherOwner && !u.is_active;
+            // Editing your OWN account (Role / Account Status) is offered only
+            // while there are at least 2 active Admins -- with just one, changing
+            // it would leave the system with no Admin (the server enforces this
+            // too). Password and your own profile stay reachable via the
+            // Password button and Edit Profile either way.
+            const canEditFields = (canEdit && (!isSelf || activeAdminCount() >= 2)) || canReactivateAdmin;
 
             return `
-            <tr class="${isSelf ? 'self-row' : ''}">
-                <td>
+            <tr class="${isSelf ? 'self-row' : ''}${u.is_active ? '' : ' row-inactive'}">
+                <td class="col-text sticky-col${tint('name')}">
                     <div class="fw-600">${escHtml(u.name)}${isSelf ? '<span class="self-badge">You</span>' : ''}</div>
                 </td>
-                <td style="color:var(--secondary);font-size:0.85rem">${escHtml(u.email)}</td>
-                <td><span class="role-badge ${roleClass}">${roleLabel}</span></td>
-                <td style="font-size:0.83rem">${activeLabel}</td>
-                <td style="font-size:0.83rem;color:var(--secondary)">${Fmt.date(u.created_at)}</td>
+                <td class="col-text${tint('email')}" style="color:var(--secondary);font-size:0.85rem">${escHtml(u.email)}</td>
+                <td class="col-text${tint('role')}"><span class="role-badge ${roleClass}">${roleLabel}</span></td>
+                <td class="col-text${tint('is_active')}" style="font-size:0.83rem">${activeLabel}</td>
+                <td class="col-text${tint('created_at')}" style="font-size:0.83rem;color:var(--secondary)">${Fmt.date(u.created_at)}</td>
                 <td class="action-cell">
-                    <div class="d-flex gap-8">
+                    <div class="d-flex gap-8 row-actions">
+                        ${canEditFields ? `<button class="btn btn-light btn-sm btn-edit" data-id="${u.id}" title="Edit">Edit</button>` : ''}
                         ${canEdit ? `
-                            <button class="btn btn-light btn-sm btn-edit" data-id="${u.id}" title="Edit">Edit</button>
                             <button class="btn btn-light btn-sm btn-pw" data-id="${u.id}" data-name="${escHtml(u.name)}" title="Change Password">Password</button>
                         ` : ''}
-                        ${canDelete ? `
-                            <button class="btn btn-danger btn-sm btn-delete" data-id="${u.id}" data-name="${escHtml(u.name)}" title="Deactivate">Delete</button>
-                        ` : ''}
-                        ${isOtherOwner ? `<span class="text-muted" style="font-size:0.78rem" title="Owner accounts can only be managed by the account holder.">Protected</span>` : ''}
-                        ${!canEdit && !canDelete && !isOtherOwner ? `<span class="text-muted" style="font-size:0.78rem">—</span>` : ''}
+                        ${(isOtherOwner && !canReactivateAdmin) ? `<span class="text-muted" style="font-size:0.78rem" title="Admin accounts can only be managed by the account holder.">Protected</span>` : ''}
+                        ${!canEdit && !isOtherOwner ? `<span class="text-muted" style="font-size:0.78rem">—</span>` : ''}
                     </div>
+                    ${(canEdit || canReactivateAdmin) ? `<button class="kebab-trigger" data-id="${u.id}" title="More actions" aria-label="More actions">⋮</button>` : ''}
                 </td>
             </tr>`;
         }).join('');
@@ -132,8 +203,31 @@ document.addEventListener('DOMContentLoaded', () => {
         tbody.querySelectorAll('.btn-pw').forEach(btn =>
             btn.addEventListener('click', () => openPwModal(parseInt(btn.dataset.id), btn.dataset.name)));
 
-        tbody.querySelectorAll('.btn-delete').forEach(btn =>
-            btn.addEventListener('click', () => confirmDelete(parseInt(btn.dataset.id), btn.dataset.name)));
+
+        // Touch-device equivalent of the buttons above -- see
+        // .kebab-trigger in global.css, only ever visible where hover isn't
+        // available. Re-derives the same canEdit/canDelete conditions used
+        // above (rather than stashing them as extra data attributes) since
+        // the source user record is already right here in allUsers.
+        tbody.querySelectorAll('.kebab-trigger').forEach(btn => {
+            const id = parseInt(btn.dataset.id);
+            const u  = allUsers.find(x => x.id === id);
+            if (!u) return;
+            const isSelf    = u.id === currentUser?.id;
+            const isOtherOwner = u.role === 'super_admin' && !isSelf;
+            const canEdit   = !isOtherOwner && (isSuperAdmin || u.role === 'cashier');
+            const canReactivateAdmin = isOtherOwner && !u.is_active;
+            const canEditFields = (canEdit && (!isSelf || activeAdminCount() >= 2)) || canReactivateAdmin;
+
+            const actions = [];
+            if (canEditFields) {
+                actions.push({ label: 'Edit', onClick: () => openEditModal(id) });
+            }
+            if (canEdit) {
+                actions.push({ label: 'Change Password', onClick: () => openPwModal(id, u.name) });
+            }
+            attachKebabMenu(btn, actions);
+        });
     }
 
     // ── Add Modal ─────────────────────────────────────────────
@@ -144,6 +238,17 @@ document.addEventListener('DOMContentLoaded', () => {
         document.getElementById('pw-label').textContent = 'Password *';
         document.getElementById('field-password').required = true;
         document.getElementById('field-password').placeholder = 'Min. 8 characters';
+        // Undoes openEditModal's hiding of this field below -- without
+        // this, the password INPUT stayed hidden on every Add User after
+        // the first time you'd ever opened Edit on any user, while
+        // handleSubmit()'s validation still correctly demanded a
+        // password for new users -- a real deadlock (required, but no
+        // visible way to enter it).
+        document.getElementById('pw-group')?.classList.remove('hidden');
+        // Name and Email only exist in Add mode -- Edit hides them (see
+        // openEditModal), so make sure they are visible again here.
+        document.getElementById('name-group')?.classList.remove('hidden');
+        document.getElementById('email-group')?.classList.remove('hidden');
         document.getElementById('status-group')?.classList.add('hidden');
         document.getElementById('pw-bar').style.width = '0';
         document.getElementById('pw-hint').textContent = '';
@@ -154,6 +259,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const statusField = document.getElementById('field-is_active');
         if (roleField)   roleField.disabled   = false;
         if (statusField) statusField.disabled = false;
+        document.getElementById('reactivate-note')?.classList.add('hidden');
         document.getElementById('self-edit-note')?.classList.add('hidden');
 
         if (submitBtn) submitBtn.textContent = 'Add User';
@@ -161,6 +267,13 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     // ── Edit Modal ────────────────────────────────────────────
+    // How many Admin accounts are active right now. An Admin may edit their
+    // OWN account (role / status) only while there are at least 2; otherwise
+    // the change would leave the system with no Admin at all.
+    function activeAdminCount() {
+        return allUsers.filter(u => u.role === 'super_admin' && u.is_active).length;
+    }
+
     function openEditModal(id) {
         editingId = id;
         const u = allUsers.find(x => x.id === id);
@@ -169,20 +282,28 @@ document.addEventListener('DOMContentLoaded', () => {
         const isEditingSelf = id === currentUser?.id;
 
         document.getElementById('user-modal-title').textContent = isEditingSelf ? 'Edit My Account' : `Edit: ${u.name}`;
-        document.getElementById('field-name').value      = u.name;
-        document.getElementById('field-email').value     = u.email;
+        // Admins can no longer edit a person's name or email -- Edit only
+        // manages Role and Account Status. Each person changes their own
+        // name/email from Edit Profile instead.
+        document.getElementById('name-group')?.classList.add('hidden');
+        document.getElementById('email-group')?.classList.add('hidden');
         document.getElementById('field-role').value      = u.role;
         document.getElementById('field-is_active').value = String(u.is_active);
 
-        // Editing your OWN account: Role and Active-status stay locked
-        // (still visible, not editable) so you can't accidentally demote or
-        // deactivate yourself with no one else able to undo it in the
-        // moment. Name/email are still editable, and password has its own
-        // separate Change Password modal below.
+        // Editing your OWN account: Role and Account Status are editable only
+        // because there are 2+ active Admins (the Edit button is hidden
+        // otherwise -- see canEditFields). Changing them removes your own
+        // Admin access, so Save asks for a typed confirmation first.
         const roleField   = document.getElementById('field-role');
         const statusField = document.getElementById('field-is_active');
-        if (roleField)   roleField.disabled   = isEditingSelf;
-        if (statusField) statusField.disabled = isEditingSelf;
+        if (roleField)   roleField.disabled   = false;
+        if (statusField) statusField.disabled = false;
+
+        // Another Admin's deactivated account: the only change allowed is turning
+        // it back on, so the role stays locked as Admin.
+        const reactivatingAdmin = !isEditingSelf && u.role === 'super_admin';
+        if (roleField) roleField.disabled = reactivatingAdmin;
+        document.getElementById('reactivate-note')?.classList.toggle('hidden', !reactivatingAdmin);
         document.getElementById('self-edit-note')?.classList.toggle('hidden', !isEditingSelf);
 
         // Password field lives in the modal only for the Add-New-User flow
@@ -208,58 +329,93 @@ document.addEventListener('DOMContentLoaded', () => {
         const email    = document.getElementById('field-email')?.value.trim();
         const role     = document.getElementById('field-role')?.value;
         const password = document.getElementById('field-password')?.value;
+        const passwordConfirm = document.getElementById('field-password-confirm')?.value;
         const is_active= document.getElementById('field-is_active')?.value;
 
         // Validation
-        if (!name)  { Toast.show('Name is required.', 'error'); return; }
-        if (!email) { Toast.show('Email is required.', 'error'); return; }
+        if (!editingId && !name)  { Toast.show('Name is required.', 'error'); return; }
+        if (!editingId && !email) { Toast.show('Email is required.', 'error'); return; }
         if (!role)  { Toast.show('Role is required.', 'error'); return; }
         if (!editingId && !password) { Toast.show('Password is required for new users.', 'error'); return; }
         if (password && password.length < 8) { Toast.show('Password must be at least 8 characters.', 'error'); return; }
+        // Confirm Password only exists/matters in Add mode -- the Edit
+        // modal never shows the password field at all (see openEditModal),
+        // so this only ever needs checking when creating a new user.
+        if (!editingId && password !== passwordConfirm) { Toast.show('Passwords do not match.', 'error'); return; }
 
         // Admin role restriction check
         if (!isSuperAdmin && role !== 'cashier') {
-            Toast.show('Admins can only create Pharmacy Assistant accounts.', 'error');
+            Toast.show('Owners can only create Pharmacy Assistant accounts.', 'error');
             return;
         }
 
-        // Email changes on an EXISTING account go through the dedicated
-        // OTP-verified flow below (startEmailChangeOtp) instead of being
-        // applied directly here -- the backend ignores the email field on
-        // this same PUT entirely (see authController.js's updateUser), so
-        // name/role/status/password below still save normally either way.
-        const originalUser = editingId ? allUsers.find(x => x.id === editingId) : null;
-        const emailChanged = !!(editingId && originalUser && email.toLowerCase() !== originalUser.email.toLowerCase());
+        // ── Add User: OTP-gated -- nothing is created until the code sent
+        // to YOU (the owner performing this) is confirmed. See
+        // startActionOtp below; the account is created server-side only
+        // inside confirmActionOtp. ──
+        if (!editingId) {
+            const roleLabels = { super_admin: 'Admin', admin: 'Owner', cashier: 'Pharmacy Assistant' };
+            submitBtn.disabled    = true;
+            submitBtn.textContent = 'Sending code…';
+            const otpResult = await startActionOtp('create_user', { name, email, role, password },
+                `create a new ${roleLabels[role] || role} account for ${name}`);
+            submitBtn.disabled    = false;
+            submitBtn.textContent = 'Add User';
+            if (!otpResult.success) {
+                Toast.show(otpResult.message, 'error');
+                return;
+            }
+            Modal.close('user-modal');
+            return;
+        }
+
+        // ── Edit (existing user): unchanged, still direct -- only Add
+        // User, Change Password, and Delete are OTP-gated per the spec;
+        // ordinary profile edits (name/role/status) and Email Change stay
+        // exactly as they were. ──
+
+        // Edit only sends Role and Account Status -- name, email and
+        // password are not editable by an admin (see authController.js's
+        // updateUser).
+
+        // An Admin changing their OWN role or status loses Admin access the
+        // moment it is saved, so it needs a typed confirmation, and they are
+        // signed out right after (the server reads the role fresh on every
+        // request, so their old session would stop working anyway).
+        const removesOwnAdmin = editingId === currentUser?.id
+            && (role !== 'super_admin' || parseInt(is_active) !== 1);
+
+        if (removesOwnAdmin) {
+            const deactivating = parseInt(is_active) !== 1;
+            const confirmedSelf = await TypedConfirm.show({
+                title:        'Change Your Own Access?',
+                message:      deactivating
+                    ? 'You are about to DEACTIVATE your own account.\n\nYou will be signed out right away. Another Admin can reactivate your account from User Management.'
+                    : 'You are about to change your own role.\n\nYou will be signed out right away and will no longer have Admin access to User Management. Another Admin can restore your access.',
+                confirmText:  'Change My Access',
+                finalMessage: 'You will be signed out as soon as this is saved.'
+            });
+            if (!confirmedSelf) return;
+        }
 
         submitBtn.disabled    = true;
-        submitBtn.textContent = editingId ? 'Saving…' : 'Adding…';
+        submitBtn.textContent = 'Saving…';
 
         let result;
         try {
-            if (editingId) {
-                const body = { name, email, role, is_active: parseInt(is_active) };
-                if (password) body.password = password;
-                result = await API.put(`/auth/users/${editingId}`, body);
-            } else {
-                result = await API.post('/auth/users', { name, email, role, password });
-            }
+            const body = { role, is_active: parseInt(is_active) };
+            result = await API.put(`/auth/users/${editingId}`, body);
         } finally {
             submitBtn.disabled    = false;
-            submitBtn.textContent = editingId ? 'Save Changes' : 'Add User';
+            submitBtn.textContent = 'Save Changes';
         }
 
         if (result?.success) {
-            if (emailChanged) {
-                // Other fields are already saved at this point -- only the
-                // email is still pending, gated behind a code sent to the
-                // OWNER PERFORMING THE CHANGE (see startEmailChangeOtp).
-                Modal.close('user-modal');
-                Toast.show('Other changes saved. Verify the email change to finish.', 'info');
-                startEmailChangeOtp(editingId, originalUser.name, email);
-            } else {
-                Toast.show(result.message, 'success');
-                Modal.close('user-modal');
-                loadUsers();
+            Toast.show(result.message, 'success');
+            Modal.close('user-modal');
+            loadUsers();
+            if (removesOwnAdmin) {
+                setTimeout(() => Auth.logout('Your access was changed. Please sign in again.'), 900);
             }
         } else {
             Toast.show(result?.message || 'Save failed.', 'error');
@@ -267,18 +423,20 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // ── Delete / Deactivate ───────────────────────────────────
-    function confirmDelete(id, name) {
-        if (!confirm(`Deactivate "${name}"?\n\nThey will no longer be able to log in. This action can be reversed by editing the account.`)) return;
-        doDelete(id);
-    }
-
-    async function doDelete(id) {
-        const result = await API.delete(`/auth/users/${id}`);
-        if (result?.success) {
-            Toast.show('User deactivated.', 'success');
-            loadUsers();
-        } else {
-            Toast.show(result?.message || 'Delete failed.', 'error');
+    async function confirmDelete(id, name) {
+        const confirmedDelete = await TypedConfirm.show({
+            title:       `Deactivate ${name}?`,
+            message:     'They will no longer be able to log in. This can be reversed by editing the account.',
+            confirmText: 'Deactivate'
+        });
+        if (!confirmedDelete) return;
+        // OTP-gated -- nothing is deactivated until the code sent to you
+        // (the owner) is confirmed. If it can't even be sent (e.g. "At
+        // least one Owner must remain"), that shows as a toast and nothing
+        // else happens -- doDelete() is gone, this call replaces it.
+        const otpResult = await startActionOtp('delete_user', { targetId: id }, `deactivate ${name}'s account`);
+        if (!otpResult.success) {
+            Toast.show(otpResult.message, 'error');
         }
     }
 
@@ -303,28 +461,25 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!newPw || newPw.length < 8) { Toast.show('Password must be at least 8 characters.', 'error'); return; }
         if (newPw !== confPw)           { Toast.show('Passwords do not match.', 'error'); return; }
 
+        const u = allUsers.find(x => x.id === pwTargetId);
+        if (!u) return;
+
+        // OTP-gated -- nothing is changed until the code sent to you (the
+        // owner) is confirmed. Modal stays open until the code has
+        // actually been sent -- see startActionOtp above.
         const btn = document.getElementById('btn-save-pw');
         btn.disabled    = true;
-        btn.textContent = 'Updating…';
-
-        // Use the edit endpoint — send just the password
-        const u = allUsers.find(x => x.id === pwTargetId);
-        if (!u) { btn.disabled = false; btn.textContent = 'Update Password'; return; }
-
-        const result = await API.put(`/auth/users/${pwTargetId}`, {
-            name: u.name, email: u.email, role: u.role,
-            is_active: u.is_active, password: newPw
-        });
-
+        btn.textContent = 'Sending code…';
+        const otpResult = await startActionOtp('update_password', { targetId: pwTargetId, newPassword: newPw },
+            `change the password for ${u.name}'s account`);
         btn.disabled    = false;
         btn.textContent = 'Update Password';
 
-        if (result?.success) {
-            Toast.show('Password updated successfully.', 'success');
-            Modal.close('pw-modal');
-        } else {
-            Toast.show(result?.message || 'Update failed.', 'error');
+        if (!otpResult.success) {
+            Toast.show(otpResult.message, 'error');
+            return;
         }
+        Modal.close('pw-modal');
     });
 
     // ── Email Change Verification (OTP) ───────────────
@@ -339,24 +494,30 @@ document.addEventListener('DOMContentLoaded', () => {
     let emailOtpResendCooldown = null;
 
     async function startEmailChangeOtp(targetId, targetName, newEmail) {
+        // Request the code FIRST -- if the email is already in use (or some
+        // other server-side check fails), that error is shown, and the
+        // Email Change modal never opens for a code that was never sent.
+        // The ORIGINAL Save (handleSubmit above) already committed
+        // name/role/status/password before calling this, so those stay
+        // saved regardless -- only the email itself is still pending.
+        const result = await API.post(`/auth/users/${targetId}/email-otp/request`, { newEmail });
+
+        if (!result?.success) {
+            Toast.show(result?.message || 'Could not send the verification email.', 'error');
+            loadUsers(); // reflect the already-saved fields even though the email change itself didn't proceed
+            return;
+        }
+
         pendingEmailOtp = { targetId, targetName, newEmail };
 
         document.getElementById('email-otp-target-name').textContent = targetName;
         document.getElementById('email-otp-new-email').textContent   = newEmail;
         const codeInput = document.getElementById('email-otp-code');
         if (codeInput) codeInput.value = '';
-        setEmailOtpStatus('Sending verification code…');
         Modal.open('email-otp-modal');
-
-        const result = await API.post(`/auth/users/${targetId}/email-otp/request`, { newEmail });
-
-        if (result?.success) {
-            setEmailOtpStatus(result.message || 'A verification code has been sent.');
-            startEmailOtpResendCooldown();
-            codeInput?.focus();
-        } else {
-            setEmailOtpStatus(result?.message || 'Could not send the verification email.', true);
-        }
+        setEmailOtpStatus(result.message || 'A verification code has been sent.');
+        startEmailOtpResendCooldown();
+        codeInput?.focus();
     }
 
     function setEmailOtpStatus(message, isError = false) {
@@ -441,6 +602,131 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('btn-confirm-email-otp')?.addEventListener('click', confirmEmailOtp);
     document.getElementById('email-otp-code')?.addEventListener('keydown', (e) => {
         if (e.key === 'Enter') confirmEmailOtp();
+    });
+
+    // ── Action Verification (OTP) ─────────────────
+    // Generic version of the Email Change OTP flow above, reused for Add
+    // User, Change Password, and Delete/Deactivate -- same "confirm it's
+    // really you" pattern, code emailed to the OWNER PERFORMING the
+    // action. Nothing is written to the database for any of these three
+    // actions until the code is confirmed (see authController.js's
+    // requestActionOtp/confirmActionOtp).
+    let pendingAction           = null; // { action, payload }
+    let actionOtpResendCooldown = null;
+
+    async function startActionOtp(action, payload, descriptionText) {
+        // Request the code FIRST -- if a server-side check fails (e.g.
+        // "Email already in use", "At least one Owner must remain"), the
+        // caller shows that error in place and the OTP modal never opens
+        // at all, rather than briefly showing a code-entry screen for a
+        // code that was never sent.
+        const result = await API.post('/auth/action-otp/request', { action, payload });
+
+        if (!result?.success) {
+            return { success: false, message: result?.message || 'Could not send the verification email.' };
+        }
+
+        pendingAction = { action, payload };
+
+        // For Add User specifically, the backend only knows AFTER checking
+        // whether this will actually be a reactivation (email matches a
+        // deactivated account) rather than a fresh account -- the caller's
+        // descriptionText was a generic guess made before this response
+        // came back; prefer the backend's real answer when it's given one.
+        const descEl = document.getElementById('action-otp-description');
+        if (descEl) descEl.textContent = result.data?.description || descriptionText;
+
+        const codeInput = document.getElementById('action-otp-code');
+        if (codeInput) codeInput.value = '';
+        Modal.open('action-otp-modal');
+        setActionOtpStatus(result.message || 'A verification code has been sent.');
+        startActionOtpResendCooldown();
+        codeInput?.focus();
+
+        return { success: true };
+    }
+
+    function setActionOtpStatus(message, isError = false) {
+        const el = document.getElementById('action-otp-status');
+        if (!el) return;
+        el.textContent = message;
+        el.style.color = isError ? 'var(--danger)' : 'var(--secondary)';
+    }
+
+    function startActionOtpResendCooldown() {
+        const btn = document.getElementById('btn-resend-action-otp');
+        if (!btn) return;
+        let seconds = 30;
+        btn.disabled    = true;
+        btn.textContent = `Resend code (${seconds}s)`;
+        if (actionOtpResendCooldown) clearInterval(actionOtpResendCooldown);
+        actionOtpResendCooldown = setInterval(() => {
+            seconds--;
+            if (seconds <= 0) {
+                clearInterval(actionOtpResendCooldown);
+                btn.disabled    = false;
+                btn.textContent = 'Resend code';
+            } else {
+                btn.textContent = `Resend code (${seconds}s)`;
+            }
+        }, 1000);
+    }
+
+    // Closing without confirming just abandons the pending action entirely
+    // -- nothing was ever written to the database for it (unlike the
+    // Email Change flow, where OTHER fields might already be saved --
+    // these three actions have nothing partially applied to undo).
+    function closeActionOtpModal() {
+        Modal.close('action-otp-modal');
+        if (actionOtpResendCooldown) clearInterval(actionOtpResendCooldown);
+        pendingAction = null;
+    }
+
+    document.querySelectorAll('.btn-close-action-otp').forEach(btn =>
+        btn.addEventListener('click', closeActionOtpModal));
+
+    document.getElementById('btn-resend-action-otp')?.addEventListener('click', async () => {
+        if (!pendingAction) return;
+        const result = await API.post('/auth/action-otp/request', pendingAction);
+        if (result?.success) {
+            const descEl = document.getElementById('action-otp-description');
+            if (descEl && result.data?.description) descEl.textContent = result.data.description;
+            setActionOtpStatus(result.message || 'A new code has been sent.');
+            startActionOtpResendCooldown();
+        } else {
+            setActionOtpStatus(result?.message || 'Could not resend code.', true);
+        }
+    });
+
+    async function confirmActionOtp() {
+        if (!pendingAction) return;
+        const otp = document.getElementById('action-otp-code')?.value.trim();
+        if (!/^\d{6}$/.test(otp)) {
+            setActionOtpStatus('Enter the 6-digit code.', true);
+            return;
+        }
+
+        const btn = document.getElementById('btn-confirm-action-otp');
+        btn.disabled    = true;
+        btn.textContent = 'Verifying…';
+        const result = await API.post('/auth/action-otp/confirm', { otp });
+        btn.disabled    = false;
+        btn.textContent = 'Confirm';
+
+        if (result?.success) {
+            if (actionOtpResendCooldown) clearInterval(actionOtpResendCooldown);
+            pendingAction = null;
+            Modal.close('action-otp-modal');
+            Toast.show(result.message || 'Action completed.', 'success');
+            loadUsers();
+        } else {
+            setActionOtpStatus(result?.message || 'Incorrect code.', true);
+        }
+    }
+
+    document.getElementById('btn-confirm-action-otp')?.addEventListener('click', confirmActionOtp);
+    document.getElementById('action-otp-code')?.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') confirmActionOtp();
     });
 
     // ── Password strength meters ──────────────────────────────

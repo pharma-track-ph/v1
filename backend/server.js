@@ -152,13 +152,21 @@ app.use((err, req, res, next) => {
     // details (hostnames, SQL, stack info) that should never reach the
     // client. Those get a generic message instead; the real detail is
     // already in the server log line above for debugging.
+    // A short error CODE (e.g. ER_BAD_NULL_ERROR, ECONNRESET) is safe to show and
+    // lets whoever sees the message name the problem; the full detail (SQL, stack)
+    // still only goes to the server log above.
+    const reason = (statusCode >= 500 && typeof err.code === 'string' && /^[A-Z0-9_]{3,40}$/.test(err.code))
+        ? err.code
+        : null;
+
     const safeMessage = (statusCode < 500 && err.message)
         ? err.message
-        : 'Something went wrong. Please try again.';
+        : `Something went wrong. Please try again.${reason ? ` (${reason})` : ''}`;
 
     res.status(statusCode).json({
         success: false,
         message: safeMessage,
+        ...(reason && { code: reason }),
         ...(process.env.NODE_ENV === 'development' && { stack: err.stack })
     });
 });

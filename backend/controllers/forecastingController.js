@@ -320,16 +320,28 @@ const compareForecasts = async (req, res, next) => {
 // HELPERS
 // ─────────────────────────────────────────────────────────────
 
-/** Fill missing weeks so the time series is continuous */
-function fillMissingWeeks(dbRows, totalWeeks) {
+const manilaTime = require('../utils/manilaTime');
+
+/** Fill missing weeks so the time series is continuous.
+ *  Weeks are MANILA's (Monday first), worked out from Manila's calendar date with plain
+ *  day arithmetic -- never from the server's own clock, which on a hosted server (UTC)
+ *  is a different day for 8 hours of every day. On a SUNDAY the current week used to be
+ *  calculated as the NEXT Monday (Sunday counted as day 0), leaving an empty future week
+ *  at the end of the series; Sunday is now day 7, the last day of its week.
+ *  `now` exists only so this can be tested. */
+function fillMissingWeeks(dbRows, totalWeeks, now = new Date()) {
     const result = [];
-    const today  = new Date();
+    const [y, m, d] = manilaTime.dateString(now).split('-').map(Number);
+    const todayDay   = Date.UTC(y, m - 1, d);                 // Manila's date, as a UTC calendar day
+    const dayOfWeek = new Date(todayDay).getUTCDay() || 7;    // Mon=1 ... Sun=7
 
     for (let i = totalWeeks - 1; i >= 0; i--) {
-        const weekStart = new Date(today);
-        weekStart.setDate(today.getDate() - today.getDay() - i * 7 + 1);
+        const weekStart = new Date(todayDay + (1 - dayOfWeek - i * 7) * 86400000);   // that week's Monday
 
-        const label    = `Week of ${weekStart.toLocaleDateString('en-PH', { month: 'short', day: 'numeric', timeZone: 'Asia/Manila' })}`;
+        // Includes the YEAR, so it is always clear which year a week belongs to
+        // (e.g. "Week of Oct 6, 2026") -- otherwise a 24-week history that
+        // crosses New Year looks like the same dates repeating.
+        const label    = `Week of ${weekStart.toLocaleDateString('en-PH', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' })}`;
         const yearWeek = getYearWeek(weekStart);
         const found    = dbRows.find(r => r.year_week == yearWeek);
 
@@ -344,14 +356,15 @@ function fillMissingWeeks(dbRows, totalWeeks) {
     return result;
 }
 
-/** ISO week number → YYYYWW integer */
+/** ISO week number -> YYYYWW integer. Identical, for every day, to MySQL's YEARWEEK(date, 1),
+ *  which is what the weekly sales query groups by (Order.js).
+ *  Takes a Date that stands for a calendar day in UTC terms. */
 function getYearWeek(date) {
-    const d = new Date(date);
-    d.setHours(0, 0, 0, 0);
-    d.setDate(d.getDate() + 3 - (d.getDay() + 6) % 7);
-    const week1 = new Date(d.getFullYear(), 0, 4);
-    return d.getFullYear() * 100 +
-        Math.round(((d - week1) / 86400000 - 3 + (week1.getDay() + 6) % 7) / 7) + 1;
+    const d = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()));
+    d.setUTCDate(d.getUTCDate() + 3 - (d.getUTCDay() + 6) % 7);
+    const week1 = new Date(Date.UTC(d.getUTCFullYear(), 0, 4));
+    return d.getUTCFullYear() * 100 +
+        Math.round(((d - week1) / 86400000 - 3 + (week1.getUTCDay() + 6) % 7) / 7) + 1;
 }
 
 /** Simple Moving Average — fitted values */

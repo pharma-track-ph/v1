@@ -18,9 +18,38 @@ const User = {
         return rows[0] || null;
     },
 
+    // Same as findByEmail, but does NOT filter by is_active -- used
+    // specifically by Add User to detect when the email being entered
+    // already belongs to a DEACTIVATED account, so that can be offered as
+    // a reactivation instead of either silently colliding with the
+    // database's unique constraint on email (the previous behavior, since
+    // findByEmail alone would never find a deactivated match) or creating
+    // a confusing duplicate.
+    findByEmailIncludingInactive: async (email) => {
+        const [rows] = await db.query(
+            'SELECT * FROM users WHERE email = ? LIMIT 1',
+            [email]
+        );
+        return rows[0] || null;
+    },
+
     findById: async (id) => {
         const [rows] = await db.query(
             'SELECT id, name, email, role, is_active, avatar, created_at FROM users WHERE id = ? LIMIT 1',
+            [id]
+        );
+        return rows[0] || null;
+    },
+
+    // Same as findById, but INCLUDES the password hash -- findById
+    // deliberately excludes it (it's used broadly, including sending user
+    // data straight to the frontend), so anywhere that actually needs to
+    // verify a password against an id rather than an email (e.g. the
+    // self-service Change Password flow, which already knows the
+    // requester's id from their JWT, not their email) needs this instead.
+    findByIdWithPassword: async (id) => {
+        const [rows] = await db.query(
+            'SELECT * FROM users WHERE id = ? LIMIT 1',
             [id]
         );
         return rows[0] || null;
@@ -64,6 +93,27 @@ const User = {
             'UPDATE users SET is_active = 0 WHERE id = ?',
             [id]
         );
+        return result.affectedRows;
+    },
+
+    // Restores a deactivated account. Deliberately does NOT touch
+    // name/role -- restoring "its previous role and access" means keeping
+    // exactly what the account already had, not whatever was freshly
+    // typed into the Add User form that triggered this (see
+    // authController.js's requestActionOtp/confirmActionOtp). A new
+    // password is optional -- set if the returning person shouldn't be
+    // expected to remember their old one, left alone if newPassword isn't
+    // provided.
+    reactivate: async (id, newPassword) => {
+        if (newPassword) {
+            const hash = await bcrypt.hash(newPassword, 12);
+            const [result] = await db.query(
+                'UPDATE users SET is_active = 1, password = ? WHERE id = ?',
+                [hash, id]
+            );
+            return result.affectedRows;
+        }
+        const [result] = await db.query('UPDATE users SET is_active = 1 WHERE id = ?', [id]);
         return result.affectedRows;
     },
 
