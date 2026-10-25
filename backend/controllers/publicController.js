@@ -2,11 +2,33 @@
 // Public Controller
 // Endpoints reachable WITHOUT a logged-in PharmaTrack user's JWT --
 // currently just the JotForm AI agent's inventory search below. Gated by
-// a shared secret (JOTFORM_API_KEY in .env) instead of a login, since the
-// caller here is JotForm's own server calling in from the internet, not
-// a PharmaTrack user with a session.
+// a shared secret (JOTFORM_API_KEY in .env) instead of a login.
 // ============================================================
 const Product = require('../models/Product');
+
+const PAGE_SIZE = 25;
+
+// Products the public chatbot must never see. Matched as lowercase
+// substrings. Prescription-only medicines and non-health items are hidden
+// completely, so the agent treats them as "not carried" and refers the
+// customer to a pharmacist in person. Add to these lists whenever you stock
+// a new prescription item or non-medicine product.
+const HIDDEN_CATEGORIES = [
+    'antihypertensive', 'antibiotic', 'antidiabetic', 'antiplatelet',
+    'fragrance', 'cologne', 'cosmetic'
+];
+const HIDDEN_GENERICS = [
+    'amoxicillin', 'losartan', 'amlodipine', 'metformin', 'aspirin',
+    'domperidone'
+];
+
+function isHiddenFromChatbot(p) {
+    const cat = String(p.category     || '').toLowerCase();
+    const gen = String(p.generic_name || '').toLowerCase();
+    const nam = String(p.name         || '').toLowerCase();
+    return HIDDEN_CATEGORIES.some(c => cat.includes(c))
+        || HIDDEN_GENERICS.some(g => gen.includes(g) || nam.includes(g));
+}
 
 function statusLabel(status) {
     const labels = {
@@ -18,43 +40,59 @@ function statusLabel(status) {
     return labels[status] || status;
 }
 
+// Cleans what the AI sent as "q" and, when a multi-word search finds
+// nothing (e.g. "Tempra Forte tablet"), retries each word on its own.
+async function searchTolerant(rawQ) {
+    const q = String(rawQ || '').replace(/[?!.,;:"'()]/g, ' ').replace(/\s+/g, ' ').trim();
+    let results = await Product.findAllGroupedBroadSearch(q);
+    if (results.length || !q.includes(' ')) return { q, results };
+
+    const seen = new Map();
+    for (const word of q.split(' ').filter(w => w.length >= 3)) {
+        for (const p of await Product.findAllGroupedBroadSearch(word)) {
+            if (!seen.has(p.id)) seen.set(p.id, p);
+        }
+    }
+    return { q, results: [...seen.values()] };
+}
+
 /**
- * GET /api/public/inventory-search?q=<term>&key=<JOTFORM_API_KEY>
+ * GET /api/public/inventory-search?q=<term>&page=<n>&key=<JOTFORM_API_KEY>
  *
- * Read-only, no login required -- built specifically for the JotForm AI
- * agent's "Send API Request" tool. Searches Brand Name / Generic Name /
- * Category / Description for the term (see Product.findAllGroupedBroadSearch
- * -- deliberately a wider net than the Inventory page's own search, since
- * JotForm's "q" is usually a translated medical term like "pain relief",
- * far more likely to match a CATEGORY than a specific product name) and
- * returns only REAL, currently active products with their actual
- * rolled-up stock status (same logic the Inventory page itself uses --
- * see Product._rollUpGroup) -- the agent is instructed, via its own
- * Agent Prompt in JotForm, to answer using ONLY what this returns and
- * never invent a product that isn't listed here.
- *
- * Response is deliberately shaped for an AI agent to read directly --
- * plain labels, no internal ids/thresholds/costs it has no business
- * knowing about, and capped at 8 results so a broad query doesn't dump
- * the whole catalog into the agent's context.
+ * q is OPTIONAL: with no q, lists every available product (paged).
+ * Only products that can be sold right now are returned (out-of-stock and
+ * fully-expired brands are left out), and prescription / non-health items
+ * are hidden (see HIDDEN_* above). Quantities, costs, suppliers and batch
+ * data are never returned.
  */
 const searchInventoryForAgent = async (req, res) => {
     const providedKey = req.query.key || req.headers['x-api-key'];
     if (!process.env.JOTFORM_API_KEY || providedKey !== process.env.JOTFORM_API_KEY) {
+        console.log('[inventory-search] REJECTED: missing or wrong key');
         return res.status(401).json({ success: false, message: 'Invalid or missing API key.' });
     }
 
-    const q = (req.query.q || '').trim();
-    if (!q) {
-        return res.status(400).json({ success: false, message: 'Query parameter "q" is required.' });
-    }
+    const rawQ = req.query.q || req.query.query || '';
+    const page = Math.max(1, parseInt(req.query.page, 10) || 1);
 
     try {
-        const results = await Product.findAllGroupedBroadSearch(q);
+        let { q, results } = await searchTolerant(rawQ);
 
-        const products = results.slice(0, 8).map(p => ({
+        results = results.filter(p =>
+            !['out_of_stock', 'expired'].includes(p.stock_status) &&
+            !isHiddenFromChatbot(p)
+        );
+        results.sort((a, b) => a.name.localeCompare(b.name));
+
+        const total      = results.length;
+        console.log(`[inventory-search] q="${q}" page=${page} -> ${total} available product(s)`);
+        const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+        const slice      = results.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+
+        const products = slice.map(p => ({
             brand_name:   p.name,
             generic_name: p.generic_name || null,
+            // a product can have several categories (stored as "A|B"): shown as "A, B"
             category:     String(p.category ?? '').split('|').join(', '),
             price:        `\u20b1${Number(p.price).toFixed(2)}`,
             status:       statusLabel(p.stock_status),
@@ -63,12 +101,15 @@ const searchInventoryForAgent = async (req, res) => {
 
         res.json({
             success: true,
-            query:   q,
-            count:   products.length,
+            query: q || '(all available products)',
+            total_available: total,
+            page,
+            total_pages: totalPages,
+            has_more: page < totalPages,
             products,
             note: products.length
-                ? undefined
-                : 'No matching products found in inventory. Do not suggest or invent a product name -- tell the user this pharmacy does not currently carry anything matching their query, and recommend they ask a pharmacist in person.'
+                ? 'These are the ONLY products the pharmacy has. For each one, find its entry in the Knowledge Base by matching generic_name. Take uses, usage and warnings only from that entry. If no entry exists, say you have no information on it and refer the customer to a pharmacist. Never use outside knowledge.'
+                : 'No matching available products. Do not suggest or invent any product. Tell the customer the pharmacy does not currently have anything matching and suggest asking a pharmacist in person.'
         });
     } catch (err) {
         console.error('[searchInventoryForAgent]', err);
