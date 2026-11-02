@@ -14,10 +14,9 @@ USE pharmatrack;
 
 -- ============================================================
 -- USERS TABLE
--- Roles: super_admin ("Admin" label), admin ("Owner" label), cashier
--- ("Pharmacy Assistant" label) -- see main.js/users.js/audit.js for the
--- label mapping; these three DB values and every permission check are
--- unaffected by that display-only swap.
+-- Roles: super_admin ("Owner" label), admin ("Admin" label), cashier
+-- ("Pharmacist" label). The names live in ONE place (ROLE_LABELS in main.js); these
+-- three DB values and every permission check are unaffected by what is displayed.
 -- ============================================================
 CREATE TABLE IF NOT EXISTS users (
     id          INT AUTO_INCREMENT PRIMARY KEY,

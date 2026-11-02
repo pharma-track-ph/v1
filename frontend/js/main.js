@@ -147,6 +147,9 @@ const Auth = {
     logout(reason) {
         localStorage.removeItem(CONFIG.TOKEN_KEY);
         localStorage.removeItem(CONFIG.USER_KEY);
+        // The POS category filter is remembered per browser tab; signing out puts it back
+        // to "All Categories" for whoever signs in next.
+        try { sessionStorage.removeItem('pharmatrack_pos_category'); } catch (e) { /* nothing to clear */ }
         // sessionStorage (not a URL param) since this needs to survive
         // exactly one navigation and then be gone -- login.html reads and
         // immediately clears it on load, so it never lingers or reappears
@@ -302,19 +305,17 @@ const Nav = {
         // Display-only label — the underlying role value stays 'super_admin'/
         // 'cashier' everywhere in code/DB/JWT; this only changes what's shown
         // on screen, same as AUDIT_ROLE_LABELS/ROLE_LABELS elsewhere in the app.
-        // Owner/Admin label swap: super_admin now displays as "Admin" (was
-        // "Owner") -- the DB value and every permission check are unchanged.
-        const roleLabel = user.role === 'super_admin' ? 'Admin'
-            : user.role === 'admin'   ? 'Owner'
-            : user.role === 'cashier' ? 'Pharmacy Assistant'
-            : user.role.replace('_', ' ');
+        // Names come from the ONE shared list (ROLE_LABELS, further down): super_admin shows
+        // as "Owner", admin as "Admin", cashier as "Pharmacist". The DB value and every
+        // permission check are unchanged.
+        const roleLabelText = roleLabel(user.role);
 
         // Header user info
         const nameEl   = document.getElementById('header-user-name');
         const roleEl   = document.getElementById('header-user-role');
 
         if (nameEl) nameEl.textContent = user.name;
-        if (roleEl) roleEl.textContent = roleLabel;
+        if (roleEl) roleEl.textContent = roleLabelText;
 
         ProfileNav.renderAvatar(user);
     },
@@ -398,38 +399,112 @@ const Nav = {
 
     initLogout() {
         document.querySelectorAll('[data-action="logout"]').forEach(el => {
-            el.addEventListener('click', async (e) => {
+            el.addEventListener('click', (e) => {
                 e.preventDefault();
-
-                // Anything made on this computer that has NOT reached the server yet stays on
-                // this computer when you sign out. Say so, instead of a bare "are you sure?".
-                const left = await OfflineLeftovers.count(Auth.getUser()?.id);
-                if (left.sales + left.changes > 0) {
-                    const parts = [];
-                    if (left.sales)   parts.push(`<strong>${left.sales} sale${left.sales === 1 ? '' : 's'}</strong>`);
-                    if (left.changes) parts.push(`<strong>${left.changes} change${left.changes === 1 ? '' : 's'}</strong>`);
-                    const confirmedWithWarning = await ConfirmDialog.show({
-                        title:       'Unsent Work on This Computer',
-                        html:        `<div class="dlg-alert warn" style="margin-top:0">You have ${parts.join(' and ')} that ${left.sales + left.changes === 1 ? 'has' : 'have'} <strong>not reached the server yet</strong>.</div>
-                                      <p style="margin:12px 0">If you sign out now they stay on this computer and are only sent after <strong>you</strong> sign in here again, with an internet connection. Until then they are missing from the reports, and ${left.sales ? 'the register cannot be closed with sales still waiting.' : 'other computers will not see them.'}</p>
-                                      <div class="dlg-alert info">Better: stay signed in, make sure you are online, and wait for the "waiting to sync" or "Pending Sales" note to disappear.</div>`,
-                        confirmText: 'Sign Out Anyway',
-                        danger:      true
-                    });
-                    if (confirmedWithWarning) Auth.logout();
-                    return;
-                }
-
-                const confirmed = await ConfirmDialog.show({
-                    title:       'Sign Out',
-                    message:     'Are you sure you want to sign out?',
-                    confirmText: 'Sign Out'
-                });
-                if (confirmed) Auth.logout();
+                handleSignOut();   // the whole flow is below (register check, typed CONFIRM, audit)
             });
         });
     }
 };
+
+// -- Sign out (with the register check) --
+//   1) ask the server "may this person sign out?" -- a person with an OPEN register must close
+//      it first (everyone, whatever their role);
+//   2) the typed CONFIRM, with a warning inside it if anything made on this computer has not
+//      been sent to the server yet;
+//   3) the server checks the register AGAIN (a sign-out is not written to the Audit Logs), and
+//      only then is this browser's login thrown away.
+// If the server cannot be reached the person cannot sign out (the register cannot be checked).
+// Automatic sign-outs -- an expired login, or the sign-out after an Admin changes their own
+// role -- call Auth.logout directly and are not blocked.
+
+// Talks to the server directly instead of through API.request, so a refusal, a dead connection
+// and an expired login can each be told apart (API.request returns null for the last two, and
+// pops up its own error message).
+async function signOutRequest(method, path) {
+    const token      = Auth.getToken();
+    const controller = new AbortController();
+    const timer      = setTimeout(() => controller.abort(), 8000);
+    try {
+        const res = await fetch(`${CONFIG.API_BASE}${path}`, {
+            method,
+            headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+            signal:  controller.signal
+        });
+        let data = null;
+        try { data = await res.json(); } catch (e) { /* not JSON */ }
+        return { reachable: true, status: res.status, data };
+    } catch (e) {
+        return { reachable: false };
+    } finally {
+        clearTimeout(timer);
+    }
+}
+
+async function handleSignOut() {
+    // a one-button notice (a refusal the person only needs to read)
+    const notice = (title, content) => ConfirmDialog.show({
+        title, ...content, confirmText: 'OK', severity: 'warning', hideCancel: true
+    });
+
+    const registerOpenContent = (data) => {
+        const s = data?.session;
+        return { html:
+            `<div class="dlg-alert warn" style="margin-top:0">Your register is still open.</div>
+             <p class="dlg-text" style="margin-top:12px">Close it before you sign out, so the cash drawer is counted and recorded. Open <strong>Point of Sale</strong> and press <strong>Close Register</strong>.</p>
+             ${s ? `<div class="dlg-lead"><div><div class="dlg-label">Opened</div><div>${Fmt.datetime(s.opened_at)}</div></div><div style="text-align:right"><div class="dlg-label">Opening cash</div><div>${Fmt.currency(s.opening_cash)}</div></div></div>` : ''}` };
+    };
+
+    // Reads a server reply. True = the person may carry on; otherwise they have already been
+    // told why (or signed out, because their login had expired).
+    const mayContinue = async (r) => {
+        if (!r.reachable) {
+            await notice('Cannot Sign Out Right Now', { message: "Can't check your register right now. Sign out is unavailable until the connection returns." });
+            return false;
+        }
+        if (r.status === 401) { Auth.logout(r.data?.message || 'Your session expired. Please log in again.'); return false; }
+        if (r.status === 409 && r.data?.reason === 'register_open') {
+            await notice('Close Your Register First', registerOpenContent(r.data));
+            return false;
+        }
+        if (r.status >= 200 && r.status < 300 && r.data?.success) return true;
+        await notice('Cannot Sign Out Right Now', { message: r.data?.message || 'Something went wrong. Please try again.' });
+        return false;
+    };
+
+    // 1) may they sign out? (an open register says no)
+    if (!(await mayContinue(await signOutRequest('GET', '/auth/sign-out-check')))) return;
+
+    // 2) typed CONFIRM. Anything made on this computer that has NOT reached the server yet stays
+    //    on this computer when you sign out -- say so inside the same window.
+    const left   = await OfflineLeftovers.count(Auth.getUser()?.id);
+    const unsent = left.sales + left.changes;
+    let html = null;
+    if (unsent > 0) {
+        const parts = [];
+        if (left.sales)   parts.push(`<strong>${left.sales} sale${left.sales === 1 ? '' : 's'}</strong>`);
+        if (left.changes) parts.push(`<strong>${left.changes} change${left.changes === 1 ? '' : 's'}</strong>`);
+        html = `<div class="dlg-alert warn" style="margin-top:0">You have ${parts.join(' and ')} that ${unsent === 1 ? 'has' : 'have'} <strong>not reached the server yet</strong>.</div>
+                <p style="margin:12px 0">If you sign out now they stay on this computer and are only sent after <strong>you</strong> sign in here again, with an internet connection. Until then they are missing from the reports, and ${left.sales ? 'the register cannot be closed with sales still waiting.' : 'other computers will not see them.'}</p>
+                <div class="dlg-alert info">Better: stay signed in, make sure you are online, and wait for the "waiting to sync" or "Pending Sales" note to disappear.</div>`;
+    }
+    const confirmed = await TypedConfirm.show({
+        title:        unsent > 0 ? 'Unsent Work on This Computer' : 'Sign Out',
+        message:      'Are you sure you want to sign out?',
+        html,
+        confirmText:  unsent > 0 ? 'Sign Out Anyway' : 'Sign Out',
+        severity:     'warning',
+        finalMessage: unsent > 0
+            ? 'Your unsent work stays on this computer until you sign in here again.'
+            : 'You will be signed out of this computer.'
+    });
+    if (!confirmed) return;
+
+    // 3) the server checks the register AGAIN (it may have been opened in another tab since step
+    //    1), and only then does this browser forget the login.
+    if (!(await mayContinue(await signOutRequest('POST', '/auth/logout')))) return;
+    Auth.logout();
+}
 
 // -- What is still waiting on THIS computer --
 // Offline sales and changes are kept in the browser's own database until they reach the
@@ -476,6 +551,25 @@ const OfflineLeftovers = {
 // Reusable Yes/No confirmation modal (progressive enhancement — injected
 // on first use, so no per-page HTML is needed). Returns a Promise<boolean>.
 const ConfirmDialog = {
+    // The button for each severity: info = blue, success = green, warning = amber, danger = red.
+    // (Colour only -- no icons.) The window's band, title and button all follow the severity.
+    BUTTON_CLASS: {
+        info:    'btn btn-primary',
+        success: 'btn btn-success',
+        warning: 'btn btn-warning',
+        danger:  'btn btn-danger'
+    },
+
+    resolveSeverity(severity, danger = true) {
+        return this.BUTTON_CLASS[severity] ? severity : (danger ? 'danger' : 'info');
+    },
+
+    applySeverity(box, severity) {
+        if (!box) return;
+        Object.keys(this.BUTTON_CLASS).forEach(s => box.classList.remove(`modal-sev-${s}`));
+        box.classList.add(`modal-sev-${severity}`);
+    },
+
     ensureModal() {
         if (document.getElementById('confirm-dialog-modal')) return;
 
@@ -483,12 +577,12 @@ const ConfirmDialog = {
         overlay.className = 'modal-overlay';
         overlay.id = 'confirm-dialog-modal';
         overlay.innerHTML = `
-            <div class="modal" style="max-width:380px">
+            <div class="modal modal-sev modal-dlg modal-sev-danger">
                 <div class="modal-header">
                     <h3 id="confirm-dialog-title">Are you sure?</h3>
                 </div>
                 <div class="modal-body">
-                    <div id="confirm-dialog-message" style="font-size:0.9rem;color:var(--gray-700);white-space:pre-line"></div>
+                    <div id="confirm-dialog-message"></div>
                 </div>
                 <div class="modal-footer">
                     <button class="btn btn-light" id="confirm-dialog-cancel">Cancel</button>
@@ -502,33 +596,51 @@ const ConfirmDialog = {
         // removed everywhere.
     },
 
+    // Plain text -> readable paragraphs and bullet lists, so a message written as one
+    // string with line breaks no longer shows as a wall of text. Everything is escaped,
+    // so text from a product name or a person can never run as markup.
+    formatMessage(text) {
+        const esc = (s) => String(s ?? '').replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
+        const isBullet = (l) => /^[\u2022*-]\s+/.test(l);
+        const out = [];
+
+        String(text ?? '').split(/\n\s*\n/).forEach(block => {
+            let para = [], list = [];
+            const flushPara = () => { if (para.length) { out.push(`<p class="dlg-text">${para.map(esc).join('<br>')}</p>`); para = []; } };
+            const flushList = () => { if (list.length) { out.push(`<ul class="dlg-list">${list.map(l => `<li>${esc(l.replace(/^[\u2022*-]\s+/, ''))}</li>`).join('')}</ul>`); list = []; } };
+
+            block.split('\n').map(l => l.trim()).filter(Boolean).forEach(line => {
+                if (isBullet(line)) { flushPara(); list.push(line); }
+                else                { flushList(); para.push(line); }
+            });
+            flushPara();
+            flushList();
+        });
+        return out.join('');
+    },
+
     // `html` (optional) replaces the plain-text message with prepared markup -- an item
     // list, a totals card, alert boxes -- so a confirmation reads at a glance. Whoever
     // passes it must escape any user-supplied text (escHtml); `message` is the plain
-    // text used when no html is given.
+    // text used when no html is given (it is formatted into paragraphs and bullets).
+    // `severity` ('info' | 'success' | 'warning' | 'danger') sets the colour of the band,
+    // title and button; if it is not given, `danger` picks red or blue as before.
     // `hideCancel` turns it into a plain notice with a single OK button (a refusal the person
     // only needs to read), instead of a question.
-    show({ title = 'Are you sure?', message = '', html = null, confirmText = 'Confirm', danger = true, hideCancel = false } = {}) {
+    show({ title = 'Are you sure?', message = '', html = null, confirmText = 'Confirm', danger = true, severity = null, hideCancel = false } = {}) {
         this.ensureModal();
         const overlay = document.getElementById('confirm-dialog-modal');
+        const sev     = this.resolveSeverity(severity, danger);
 
         document.getElementById('confirm-dialog-title').textContent = title;
-        const msgEl = document.getElementById('confirm-dialog-message');
-        if (html !== null) {
-            msgEl.style.whiteSpace = 'normal';
-            msgEl.innerHTML = html;
-        } else {
-            msgEl.style.whiteSpace = 'pre-line';
-            msgEl.textContent = message;
-        }
-        const box = overlay.querySelector('.modal');
-        if (box) box.style.maxWidth = html !== null ? '440px' : '380px';
+        document.getElementById('confirm-dialog-message').innerHTML = html !== null ? html : this.formatMessage(message);
+        this.applySeverity(overlay.querySelector('.modal'), sev);
 
         const okBtn     = document.getElementById('confirm-dialog-ok');
         const cancelBtn = document.getElementById('confirm-dialog-cancel');
         cancelBtn.style.display = hideCancel ? 'none' : '';
         okBtn.textContent = confirmText;
-        okBtn.className   = danger ? 'btn btn-danger' : 'btn btn-primary';
+        okBtn.className   = this.BUTTON_CLASS[sev];
 
         return new Promise((resolve) => {
             function cleanup(result) {
@@ -550,15 +662,15 @@ const ConfirmDialog = {
 };
 
 // -- Typed Confirm (two steps) --
-// ONE component for every destructive action (deleting a product, an Item
-// No., a backup; restoring a backup; dismissing an unsynced sale; an Admin
-// changing their own access). Step 1 is the usual confirmation popup.
-// Step 2 asks the person to TYPE the word "confirm"; the final button stays
-// disabled until they have. The match ignores capitals and surrounding
-// spaces, so "Confirm " counts. Resolves true only after BOTH steps.
-//   TypedConfirm.show({ title, message, confirmText: 'Delete' })
+// ONE component for every destructive or sensitive action (deleting a product, an Item
+// No., a backup; restoring a backup; removing an expired batch; voiding a sale; changing
+// a role; dismissing an unsynced change). Step 1 is the usual confirmation popup.
+// Step 2 asks the person to TYPE the word CONFIRM -- exactly, in capital letters (only
+// spaces around it are ignored); the final button stays disabled until they have.
+// Resolves true only after BOTH steps.
+//   TypedConfirm.show({ title, message | html, confirmText: 'Delete', severity: 'danger' })
 const TypedConfirm = {
-    WORD: 'confirm',
+    WORD: 'CONFIRM',
 
     ensureModal() {
         if (document.getElementById('typed-confirm-modal')) return;
@@ -567,16 +679,17 @@ const TypedConfirm = {
         overlay.className = 'modal-overlay';
         overlay.id = 'typed-confirm-modal';
         overlay.innerHTML = `
-            <div class="modal" style="max-width:380px">
+            <div class="modal modal-sev modal-dlg modal-sev-danger">
                 <div class="modal-header">
                     <h3 id="typed-confirm-title">Are you sure?</h3>
                 </div>
                 <div class="modal-body">
-                    <p id="typed-confirm-message" style="font-size:0.9rem;color:var(--gray-700);white-space:pre-line"></p>
+                    <div id="typed-confirm-message"></div>
                     <div class="form-group" style="margin-top:14px;margin-bottom:0">
-                        <label class="form-label" for="typed-confirm-input">Type <strong>confirm</strong> to continue</label>
+                        <label class="form-label" for="typed-confirm-input">Type <strong>CONFIRM</strong> in capital letters to continue</label>
                         <input type="text" id="typed-confirm-input" class="form-control" autocomplete="off"
-                               autocapitalize="off" spellcheck="false" placeholder="confirm">
+                               autocapitalize="characters" spellcheck="false" placeholder="CONFIRM">
+                        <p class="typed-hint" id="typed-confirm-hint"></p>
                     </div>
                 </div>
                 <div class="modal-footer">
@@ -587,11 +700,12 @@ const TypedConfirm = {
         document.body.appendChild(overlay);
     },
 
-    async show({ title = 'Are you sure?', message = '', confirmText = 'Delete', danger = true,
-                finalMessage = 'This cannot be undone.' } = {}) {
+    async show({ title = 'Are you sure?', message = '', html = null, confirmText = 'Delete', danger = true,
+                severity = null, finalMessage = 'This cannot be undone.' } = {}) {
+        const sev = ConfirmDialog.resolveSeverity(severity, danger);
 
         // Step 1: the ordinary confirmation popup
-        const first = await ConfirmDialog.show({ title, message, confirmText: 'Continue', danger });
+        const first = await ConfirmDialog.show({ title, message, html, confirmText: 'Continue', danger, severity: sev });
         if (!first) return false;
 
         // Step 2: type the word to enable the final button
@@ -600,16 +714,22 @@ const TypedConfirm = {
         const input     = document.getElementById('typed-confirm-input');
         const okBtn     = document.getElementById('typed-confirm-ok');
         const cancelBtn = document.getElementById('typed-confirm-cancel');
+        const hint      = document.getElementById('typed-confirm-hint');
 
-        document.getElementById('typed-confirm-title').textContent   = title;
-        document.getElementById('typed-confirm-message').textContent = finalMessage;
+        document.getElementById('typed-confirm-title').textContent = title;
+        document.getElementById('typed-confirm-message').innerHTML = ConfirmDialog.formatMessage(finalMessage);
+        ConfirmDialog.applySeverity(overlay.querySelector('.modal'), sev);
         okBtn.textContent = confirmText;
-        okBtn.className   = danger ? 'btn btn-danger' : 'btn btn-primary';
-        okBtn.disabled   = true;
+        okBtn.className   = ConfirmDialog.BUTTON_CLASS[sev];
+        okBtn.disabled    = true;
         input.value       = '';
+        hint.textContent  = '';
 
         return new Promise((resolve) => {
-            const matches = () => input.value.trim().toLowerCase() === TypedConfirm.WORD;
+            // EXACT match: only the capitals count, spaces around the word are ignored
+            const matches  = () => input.value.trim() === TypedConfirm.WORD;
+            // right letters but wrong capitals ("confirm") -> say so instead of leaving it a mystery
+            const nearMiss = () => !matches() && input.value.trim().toUpperCase() === TypedConfirm.WORD;
 
             function cleanup(result) {
                 overlay.classList.remove('active');
@@ -618,9 +738,13 @@ const TypedConfirm = {
                 okBtn.removeEventListener('click', onOk);
                 cancelBtn.removeEventListener('click', onCancel);
                 input.value = '';
+                hint.textContent = '';
                 resolve(result);
             }
-            function onInput()  { okBtn.disabled = !matches(); }
+            function onInput()  {
+                okBtn.disabled   = !matches();
+                hint.textContent = nearMiss() ? 'Almost. It must be in capital letters: CONFIRM' : '';
+            }
             function onKey(e)  { if (e.key === 'Enter' && matches()) { e.preventDefault(); cleanup(true); } }
             function onOk()    { if (matches()) cleanup(true); }
             function onCancel() { cleanup(false); }
@@ -650,12 +774,12 @@ const ManagerApprovalDialog = {
         overlay.className = 'modal-overlay';
         overlay.id = 'manager-approval-modal';
         overlay.innerHTML = `
-            <div class="modal" style="max-width:380px">
+            <div class="modal modal-sev modal-dlg modal-sev-warning">
                 <div class="modal-header">
-                    <h3>🔒 Manager Approval Required</h3>
+                    <h3>Manager Approval Required</h3>
                 </div>
                 <div class="modal-body">
-                    <p id="manager-approval-message" style="font-size:0.85rem;color:var(--gray-700);margin-bottom:14px"></p>
+                    <p id="manager-approval-message" class="dlg-text"></p>
                     <div class="form-group">
                         <label class="form-label">Admin/Owner Email</label>
                         <input type="email" id="manager-approval-email" class="form-control" autocomplete="off">
@@ -668,7 +792,7 @@ const ManagerApprovalDialog = {
                 </div>
                 <div class="modal-footer">
                     <button class="btn btn-light" id="manager-approval-cancel">Cancel</button>
-                    <button class="btn btn-danger" id="manager-approval-ok">Approve</button>
+                    <button class="btn btn-warning" id="manager-approval-ok">Approve</button>
                 </div>
             </div>`;
         document.body.appendChild(overlay);
@@ -947,9 +1071,9 @@ const EditProfileModal = {
         overlay.className = 'modal-overlay';
         overlay.id = 'edit-profile-modal';
         overlay.innerHTML = `
-            <div class="modal" style="max-width:380px">
+            <div class="modal modal-sev modal-sev-info" style="max-width:380px">
                 <div class="modal-header">
-                    <h3>✏️ Edit Profile</h3>
+                    <h3>Edit Profile</h3>
                     <button class="btn-close" id="btn-close-edit-profile">✕</button>
                 </div>
                 <div class="modal-body">
@@ -1285,9 +1409,9 @@ const ChangePasswordOtpModal = {
         overlay.className = 'modal-overlay';
         overlay.id = 'change-password-otp-modal';
         overlay.innerHTML = `
-            <div class="modal" style="max-width:380px">
+            <div class="modal modal-sev modal-sev-warning" style="max-width:380px">
                 <div class="modal-header">
-                    <h3>🔒 Verify Password Change</h3>
+                    <h3>Verify Password Change</h3>
                     <button class="btn-close" id="btn-close-change-pw-otp">✕</button>
                 </div>
                 <div class="modal-body">
@@ -1491,7 +1615,7 @@ const ChangeEmailOtpModal = {
         overlay.className = 'modal-overlay';
         overlay.id = 'change-email-otp-modal';
         overlay.innerHTML = `
-            <div class="modal" style="max-width:380px">
+            <div class="modal modal-sev modal-sev-warning" style="max-width:380px">
                 <div class="modal-header">
                     <h3>Verify Email Change</h3>
                     <button class="btn-close" id="btn-close-change-email-otp">✕</button>
@@ -1626,6 +1750,15 @@ const ChangeEmailOtpModal = {
 // "Analgesic, Antipyretic". A product with one category reads exactly as before.
 function fmtCategory(value) {
     return String(value ?? '').split('|').map(s => s.trim()).filter(Boolean).join(', ');
+}
+
+// The name people see for each stored role code. ONE place, so a rename is a one-line
+// change and every screen agrees. (The codes themselves -- cashier / admin / super_admin --
+// are what the database and the permission checks use; they never change.)
+//   super_admin = Owner (full access)   admin = Admin (limited)   cashier = Pharmacist
+const ROLE_LABELS = { super_admin: 'Owner', admin: 'Admin', cashier: 'Pharmacist' };
+function roleLabel(role) {
+    return ROLE_LABELS[role] || String(role ?? '').replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
 }
 
 // -- Table header alignment --

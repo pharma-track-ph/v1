@@ -4,7 +4,7 @@ const multer  = require('multer');
 const path    = require('path');
 const {
     getProducts, getProduct, createProduct, updateProduct, deleteProduct,
-    addItem, updateItem, deleteItem,
+    addItem, updateItem, deleteItem, removeItem,
     getAlertSummary, importCSV, getImportTemplate, getBarcode,
     listCategories, addCategory, renameCategory, deleteCategories
 } = require('../controllers/inventoryController');
@@ -47,6 +47,8 @@ router.get('/export/:format', verifyToken, requireRole('admin'), exportInventory
 router.post('/:id/items',       verifyToken, requireRole('admin'), addItem);
 router.put('/items/:itemId',    verifyToken, requireRole('admin'), updateItem);
 router.delete('/items/:itemId', verifyToken, requireRole('admin'), deleteItem);
+// "Remove" on an expired / empty Item No.: nothing is erased, it is flagged as removed
+router.post('/items/:itemId/remove', verifyToken, requireRole('admin'), removeItem);
 
 router.get('/:id/barcode',    verifyToken, requireRole('admin'), getBarcode);
 router.get('/import/template', verifyToken, requireRole('admin'), getImportTemplate);

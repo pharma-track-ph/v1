@@ -84,11 +84,10 @@ document.addEventListener('DOMContentLoaded', () => {
         // reload above -- see TableSort's own comment for why a plain
         // array reference would go stale here.
         if (!usersSort) {
-            const roleLabels = { super_admin: 'Admin', admin: 'Owner', cashier: 'Pharmacy Assistant' };
             usersSort = TableSort.attach(document.querySelector('#users-table thead'), {
                 getData: () => allUsers,
                 getValue: (row, key) => {
-                    if (key === 'role') return (roleLabels[row.role] || row.role).toLowerCase();
+                    if (key === 'role') return roleLabel(row.role).toLowerCase();
                     if (key === 'is_active') return row.is_active ? 1 : 0;
                     if (key === 'created_at') return new Date(row.created_at).getTime();
                     return (row[key] || '').toString().toLowerCase();
@@ -146,10 +145,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
         tbody.innerHTML = users.map(u => {
             const isSelf    = u.id === currentUser?.id;
-            // Owner/Admin label swap: super_admin now displays as "Admin",
-            // admin now displays as "Owner" -- DB values and every
+            // Names come from the shared roleLabel() in main.js (super_admin = Owner,
+            // admin = Admin, cashier = Pharmacist) -- DB values and every
             // permission check are unchanged, only this display mapping.
-            const roleLabel = { super_admin: 'Admin', admin: 'Owner', cashier: 'Pharmacy Assistant' }[u.role] || u.role;
+            const roleName  = roleLabel(u.role);
             const roleClass = u.role;
             const activeLabel = u.is_active
                 ? '<span class="status-dot active"></span>Active'
@@ -179,7 +178,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     <div class="fw-600">${escHtml(u.name)}${isSelf ? '<span class="self-badge">You</span>' : ''}</div>
                 </td>
                 <td class="col-text${tint('email')}" style="color:var(--secondary);font-size:0.85rem">${escHtml(u.email)}</td>
-                <td class="col-text${tint('role')}"><span class="role-badge ${roleClass}">${roleLabel}</span></td>
+                <td class="col-text${tint('role')}"><span class="role-badge ${roleClass}">${roleName}</span></td>
                 <td class="col-text${tint('is_active')}" style="font-size:0.83rem">${activeLabel}</td>
                 <td class="col-text${tint('created_at')}" style="font-size:0.83rem;color:var(--secondary)">${Fmt.date(u.created_at)}</td>
                 <td class="action-cell">
@@ -188,7 +187,7 @@ document.addEventListener('DOMContentLoaded', () => {
                         ${canEdit ? `
                             <button class="btn btn-light btn-sm btn-pw" data-id="${u.id}" data-name="${escHtml(u.name)}" title="Change Password">Password</button>
                         ` : ''}
-                        ${(isOtherOwner && !canReactivateAdmin) ? `<span class="text-muted" style="font-size:0.78rem" title="Admin accounts can only be managed by the account holder.">Protected</span>` : ''}
+                        ${(isOtherOwner && !canReactivateAdmin) ? `<span class="text-muted" style="font-size:0.78rem" title="Owner accounts can only be managed by the account holder.">Protected</span>` : ''}
                         ${!canEdit && !isOtherOwner ? `<span class="text-muted" style="font-size:0.78rem">—</span>` : ''}
                     </div>
                     ${(canEdit || canReactivateAdmin) ? `<button class="kebab-trigger" data-id="${u.id}" title="More actions" aria-label="More actions">⋮</button>` : ''}
@@ -345,7 +344,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         // Admin role restriction check
         if (!isSuperAdmin && role !== 'cashier') {
-            Toast.show('Owners can only create Pharmacy Assistant accounts.', 'error');
+            Toast.show('Admins can only create Pharmacist accounts.', 'error');
             return;
         }
 
@@ -354,11 +353,10 @@ document.addEventListener('DOMContentLoaded', () => {
         // startActionOtp below; the account is created server-side only
         // inside confirmActionOtp. ──
         if (!editingId) {
-            const roleLabels = { super_admin: 'Admin', admin: 'Owner', cashier: 'Pharmacy Assistant' };
             submitBtn.disabled    = true;
             submitBtn.textContent = 'Sending code…';
             const otpResult = await startActionOtp('create_user', { name, email, role, password },
-                `create a new ${roleLabels[role] || role} account for ${name}`);
+                `create a new ${roleLabel(role)} account for ${name}`);
             submitBtn.disabled    = false;
             submitBtn.textContent = 'Add User';
             if (!otpResult.success) {
@@ -390,12 +388,36 @@ document.addEventListener('DOMContentLoaded', () => {
             const confirmedSelf = await TypedConfirm.show({
                 title:        'Change Your Own Access?',
                 message:      deactivating
-                    ? 'You are about to DEACTIVATE your own account.\n\nYou will be signed out right away. Another Admin can reactivate your account from User Management.'
-                    : 'You are about to change your own role.\n\nYou will be signed out right away and will no longer have Admin access to User Management. Another Admin can restore your access.',
+                    ? 'You are about to DEACTIVATE your own account.\n\nYou will be signed out right away. Another Owner can reactivate your account from User Management.'
+                    : 'You are about to change your own role.\n\nYou will be signed out right away and will no longer have Owner access to User Management. Another Owner can restore your access.',
                 confirmText:  'Change My Access',
                 finalMessage: 'You will be signed out as soon as this is saved.'
             });
             if (!confirmedSelf) return;
+        }
+
+        // Changing ANOTHER account's role, or switching their account off, changes what that
+        // person can do the moment it is saved -- so it needs the same typed CONFIRM.
+        if (!removesOwnAdmin) {
+            const target       = allUsers.find(u => u.id === editingId);
+            const roleChanged  = !!target && role !== target.role;
+            const deactivating = !!target && !!target.is_active && parseInt(is_active) !== 1;
+
+            if (roleChanged || deactivating) {
+                const who   = target.name || 'this account';
+                const parts = [];
+                if (roleChanged)  parts.push(`Change ${who} from ${roleLabel(target.role)} to ${roleLabel(role)}.`);
+                if (deactivating) parts.push(`${who} will no longer be able to sign in.`);
+
+                const confirmedChange = await TypedConfirm.show({
+                    title:        roleChanged ? 'Change Role?' : `Deactivate ${who}?`,
+                    message:      parts.join('\n\n') + '\n\nThe change takes effect right away.',
+                    confirmText:  roleChanged ? 'Change Role' : 'Deactivate',
+                    severity:     'warning',
+                    finalMessage: 'This takes effect as soon as it is saved.'
+                });
+                if (!confirmedChange) return;
+            }
         }
 
         submitBtn.disabled    = true;

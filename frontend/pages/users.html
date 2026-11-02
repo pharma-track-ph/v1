@@ -28,10 +28,10 @@
                 <li class="nav-item" data-roles="admin,super_admin"><a href="inventory.html"><span class="nav-icon"></span> Inventory</a></li>
                 <li class="nav-item" data-roles="admin,super_admin"><a href="forecasting.html"><span class="nav-icon"></span> Forecasting</a></li>
             </ul>
-            <p class="nav-section-label">Admin</p>
+            <p class="nav-section-label">Administration</p>
             <ul>
                 <li class="nav-item active" data-roles="super_admin"><a href="users.html"><span class="nav-icon"></span> User Management</a></li>
-                <li class="nav-item" data-roles="super_admin"><a href="audit.html"><span class="nav-icon"></span> Audit Logs</a></li>
+                <li class="nav-item" data-roles="admin,super_admin"><a href="audit.html"><span class="nav-icon"></span> Audit Logs</a></li>
                 <li class="nav-item" data-roles="super_admin"><a href="backup.html"><span class="nav-icon"></span> Backup & Restore</a></li>
                 <li class="nav-item"><a href="#" data-action="logout"><span class="nav-icon"></span> Sign Out</a></li>
             </ul>
@@ -69,19 +69,19 @@
                 </div>
                 <div class="user-stat-card">
                     <div>
-                        <div class="user-stat-label">Admins</div>
+                        <div class="user-stat-label">Owners</div>
                         <div class="user-stat-value" id="stat-owners">—</div>
                     </div>
                 </div>
                 <div class="user-stat-card">
                     <div>
-                        <div class="user-stat-label">Owners</div>
+                        <div class="user-stat-label">Admins</div>
                         <div class="user-stat-value" id="stat-admins">—</div>
                     </div>
                 </div>
                 <div class="user-stat-card">
                     <div>
-                        <div class="user-stat-label">Pharmacy Assistants</div>
+                        <div class="user-stat-label">Pharmacists</div>
                         <div class="user-stat-value" id="stat-cashiers">—</div>
                     </div>
                 </div>
@@ -96,9 +96,9 @@
                 </div>
                 <select id="filter-role" class="form-control" style="width:auto">
                     <option value="">All Roles</option>
-                    <option value="super_admin">Admin</option>
-                    <option value="admin">Owner</option>
-                    <option value="cashier">Pharmacy Assistant</option>
+                    <option value="super_admin">Owner</option>
+                    <option value="admin">Admin</option>
+                    <option value="cashier">Pharmacist</option>
                 </select>
                 <select id="filter-status" class="form-control" style="width:auto">
                     <option value="">All Status</option>
@@ -165,12 +165,12 @@
                     <label class="form-label">Role *</label>
                     <select id="field-role" name="role" class="form-control" required>
                         <option value="">— Select role —</option>
-                        <option value="cashier">Pharmacy Assistant</option>
-                        <option value="admin">Owner</option>
-                        <option value="super_admin" id="opt-super-admin">Admin</option>
+                        <option value="cashier">Pharmacist</option>
+                        <option value="admin">Admin</option>
+                        <option value="super_admin" id="opt-super-admin">Owner</option>
                     </select>
                     <div style="font-size:0.72rem;color:var(--secondary);margin-top:4px" id="role-hint">
-                        Pharmacy Assistants can only use POS. Owners manage inventory & reports. Admins have full access.
+                        Pharmacists work in the POS and see only their own reports. Admins manage inventory and reports, and can read Pharmacist activity in the Audit Logs. Owners have full access.
                     </div>
                 </div>
 
@@ -200,11 +200,11 @@
                      Role/Status above are greyed out (see users.js's
                      openEditModal) -->
                 <p class="hidden" id="self-edit-note" style="font-size:0.78rem;color:var(--secondary);margin-top:8px">
-                    You are editing your own account. Changing your role or deactivating it signs you out and removes your Admin access. This is only allowed while at least one other Admin is active.
+                    You are editing your own account. Changing your role or deactivating it signs you out and removes your Owner access. This is only allowed while at least one other Owner is active.
                 </p>
                 <!-- Shown only when reactivating ANOTHER Admin's deactivated account -->
                 <p class="hidden" id="reactivate-note" style="font-size:0.78rem;color:var(--secondary);margin-top:8px">
-                    This Admin account is deactivated. You can set it back to Active here. Nothing else about another Admin's account can be changed.
+                    This Owner account is deactivated. You can set it back to Active here. Nothing else about another Owner's account can be changed.
                 </p>
             </form>
         </div>

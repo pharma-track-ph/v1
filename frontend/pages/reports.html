@@ -28,10 +28,10 @@
                 <li class="nav-item" data-roles="admin,super_admin"><a href="inventory.html"><span class="nav-icon"></span> Inventory</a></li>
                 <li class="nav-item" data-roles="admin,super_admin"><a href="forecasting.html"><span class="nav-icon"></span> Forecasting</a></li>
             </ul>
-            <p class="nav-section-label">Admin</p>
+            <p class="nav-section-label">Administration</p>
             <ul>
                 <li class="nav-item" data-roles="super_admin"><a href="users.html"><span class="nav-icon"></span> User Management</a></li>
-                <li class="nav-item" data-roles="super_admin"><a href="audit.html"><span class="nav-icon"></span> Audit Logs</a></li>
+                <li class="nav-item" data-roles="admin,super_admin"><a href="audit.html"><span class="nav-icon"></span> Audit Logs</a></li>
                 <li class="nav-item" data-roles="super_admin"><a href="backup.html"><span class="nav-icon"></span> Backup & Restore</a></li>
                 <li class="nav-item"><a href="#" data-action="logout"><span class="nav-icon"></span> Sign Out</a></li>
             </ul>
@@ -276,6 +276,7 @@
                     <div class="summary-chip"><div class="chip-label">Sessions</div><div class="chip-value" id="chip-register-count">0</div></div>
                     <div class="summary-chip"><div class="chip-label">Currently Open</div><div class="chip-value" id="chip-register-open">0</div></div>
                     <div class="summary-chip"><div class="chip-label">Total Opening Cash</div><div class="chip-value" id="chip-register-opened">₱0</div></div>
+                    <div class="summary-chip"><div class="chip-label">Total Cash Sales</div><div class="chip-value" id="chip-register-sales">₱0</div></div>
                     <div class="summary-chip"><div class="chip-label">Total Variance</div><div class="chip-value" id="chip-register-variance">₱0</div></div>
                 </div>
 
@@ -284,18 +285,19 @@
                         <table class="table">
                             <thead>
                                 <tr>
+                                    <th style="width:30px"></th>
                                     <th class="col-text sticky-col sortable-col" data-sort-key="cashier_name">Processed By</th>
                                     <th class="col-text sortable-col" data-sort-key="opened_at">Opened At</th>
                                     <th class="col-num sortable-col" data-sort-key="opening_cash">Opening Cash</th>
-                                    <th class="col-text sortable-col" data-sort-key="opened_approved_by_name">Opened Approved By</th>
-                                    <th class="col-text sortable-col" data-sort-key="status">Status</th>
-                                    <th class="col-text sortable-col" data-sort-key="closed_at">Closed At</th>
+                                    <th class="col-num sortable-col" data-sort-key="cash_sales">Cash Sales</th>
+                                    <th class="col-num sortable-col" data-sort-key="expected_cash">Expected Cash</th>
+                                    <th class="col-num sortable-col" data-sort-key="counted_cash">Counted Cash</th>
                                     <th class="col-num sortable-col" data-sort-key="variance">Variance</th>
-                                    <th class="col-text sortable-col" data-sort-key="closed_approved_by_name">Closed Approved By</th>
+                                    <th class="col-text sortable-col" data-sort-key="status">Status</th>
                                 </tr>
                             </thead>
                             <tbody id="register-tbody">
-                                <tr><td colspan="8" class="text-center" style="padding:24px"><div class="spinner" style="margin:0 auto"></div></td></tr>
+                                <tr><td colspan="9" class="text-center" style="padding:24px"><div class="spinner" style="margin:0 auto"></div></td></tr>
                             </tbody>
                         </table>
                     </div>
@@ -406,9 +408,18 @@ document.addEventListener('DOMContentLoaded', () => {
                 </div>
 
                 <div class="pvv-totals">
-                    <div class="pvv-total-row"><span>Original total (${escHtml(o.order_number)})</span><span>${Fmt.currency(o.total)}</span></div>
-                    <div class="pvv-total-row pvv-refund"><span>Voided amount (refunded)</span><span>- ${Fmt.currency(d.refund_amount)}</span></div>
-                    <div class="pvv-total-row pvv-remaining"><span>Remaining total (${escHtml(r.order_number)})</span><span>${Fmt.currency(d.remaining_total)}</span></div>
+                    <div class="pvv-total-row pvv-original">
+                        <div class="pvv-label"><span class="pvv-label-main">Original total</span><span class="pvv-label-sub">${escHtml(o.order_number)}</span></div>
+                        <span class="pvv-amount">${Fmt.currency(o.total)}</span>
+                    </div>
+                    <div class="pvv-total-row pvv-refund">
+                        <div class="pvv-label"><span class="pvv-label-main">Voided amount (refund)</span><span class="pvv-label-sub">Goes back to the customer</span></div>
+                        <span class="pvv-amount">- ${Fmt.currency(d.refund_amount)}</span>
+                    </div>
+                    <div class="pvv-total-row pvv-remaining">
+                        <div class="pvv-label"><span class="pvv-label-main">Remaining total</span><span class="pvv-label-sub">New receipt ${escHtml(r.order_number)}</span></div>
+                        <span class="pvv-amount">${Fmt.currency(d.remaining_total)}</span>
+                    </div>
                 </div>`;
         }
     };
@@ -614,20 +625,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     </div>
                     ${o.parent_order_number ? `<div style="font-size:0.82rem;margin-bottom:8px"><strong>Replacement receipt</strong> for ${escHtml(o.parent_order_number)} (a partial void). The original receipt is in the Void Report.</div>` : ''}
                     <strong style="font-size:0.82rem">Items Sold:</strong>
-                    <div class="table-container" style="margin-top:8px">
-                        <table class="table" style="white-space:normal">
-                            <thead><tr><th>Product</th><th class="col-num">Qty</th><th class="col-num">Unit Price</th><th class="col-num">Line Total</th></tr></thead>
-                            <tbody>
-                                ${(o.items || []).map(item => `
-                                <tr>
-                                    <td>${escHtml(item.product_name)}</td>
-                                    <td class="col-num">${item.quantity}</td>
-                                    <td class="col-num">${Fmt.currency(item.unit_price)}</td>
-                                    <td class="fw-600 col-num">${Fmt.currency(item.subtotal)}</td>
-                                </tr>`).join('') || '<tr><td colspan="4" class="text-center text-muted">No item details recorded.</td></tr>'}
-                            </tbody>
-                        </table>
-                    </div>
+                    ${orderItemsTable(o)}
                 </td>
             </tr>`).join('');
 
@@ -886,6 +884,72 @@ document.addEventListener('DOMContentLoaded', () => {
         voidSort.resort();
     }
 
+    // Each item of a sale (voided or not) keeps its own share of the Senior/PWD discount (VAT removal +
+    // 20%), and those shares add up to the order's discount. In cents, to keep the arithmetic
+    // exact. An OLDER sale, from before each item kept its own share, has no per-item numbers:
+    // its order-level discount is spread over the items in proportion to what each cost, in
+    // whole cents, so the shares still add up to the order's discount exactly.
+    function orderItemShares(o) {
+        const items = o.items || [];
+        const cents = (v) => Math.round(Number(v || 0) * 100);
+        let shares = items.map(i => cents(i.discount_amount));
+        const want  = cents(o.discount);
+        if (shares.reduce((a, b) => a + b, 0) !== want) {
+            const gross = items.map(i => cents(i.subtotal));
+            const total = gross.reduce((a, b) => a + b, 0) || 1;
+            const raw   = gross.map(g => want * g / total);
+            shares = raw.map(Math.floor);
+            let left = want - shares.reduce((a, b) => a + b, 0);
+            raw.map((r, idx) => [r - Math.floor(r), idx]).sort((a, b) => b[0] - a[0])
+               .forEach(([, idx]) => { if (left > 0) { shares[idx]++; left--; } });
+        }
+        return shares;
+    }
+
+    // The items of a sale -- used by BOTH the Sales Report and the Void Report: listed unit price,
+    // each item's own discount, its line total
+    // AFTER that discount, and a Total row that adds the line totals -- so the table ends on the
+    // same figure as the order's Total column instead of looking like a mistake.
+    function orderItemsTable(o) {
+        const items = o.items || [];
+        if (!items.length) {
+            return '<div class="table-container" style="margin-top:8px"><table class="table" style="white-space:normal"><tbody><tr><td class="text-center text-muted">No item details recorded.</td></tr></tbody></table></div>';
+        }
+        const cents    = (v) => Math.round(Number(v || 0) * 100);
+        const money    = (c) => Fmt.currency(c / 100);
+        const shares   = orderItemShares(o);
+        const lineTot  = items.map((i, idx) => cents(i.subtotal) - shares[idx]);
+        const sumDisc  = shares.reduce((a, b) => a + b, 0);
+        const sumTotal = lineTot.reduce((a, b) => a + b, 0);
+        const discCell = (c) => c > 0
+            ? `<td class="col-num item-disc">- ${money(c)}</td>`
+            : '<td class="col-num text-muted">\u2014</td>';
+
+        const rows = items.map((item, idx) => `
+            <tr>
+                <td>${escHtml(item.product_name)}</td>
+                <td class="col-num">${item.quantity}</td>
+                <td class="col-num">${Fmt.currency(item.unit_price)}</td>
+                ${discCell(shares[idx])}
+                <td class="fw-600 col-num">${money(lineTot[idx])}</td>
+            </tr>`).join('');
+
+        return `
+            <div class="table-container" style="margin-top:8px">
+                <table class="table" style="white-space:normal">
+                    <thead><tr><th>Product</th><th class="col-num">Qty</th><th class="col-num">Unit Price</th><th class="col-num">Discount</th><th class="col-num">Line Total</th></tr></thead>
+                    <tbody>${rows}</tbody>
+                    <tfoot>
+                        <tr class="item-total-row">
+                            <td colspan="3">Total</td>
+                            ${discCell(sumDisc)}
+                            <td class="col-num">${money(sumTotal)}</td>
+                        </tr>
+                    </tfoot>
+                </table>
+            </div>`;
+    }
+
     function renderVoidTable(pageItems) {
         const tbody = document.getElementById('void-tbody');
         const activeKey = voidSort?.getCurrentSort().key;
@@ -919,20 +983,7 @@ document.addEventListener('DOMContentLoaded', () => {
                         </div>
                     </div>` : ''}
                     <strong style="font-size:0.82rem">Items Sold (before void):</strong>
-                    <div class="table-container" style="margin-top:8px">
-                        <table class="table" style="white-space:normal">
-                            <thead><tr><th>Product</th><th class="col-num">Qty</th><th class="col-num">Unit Price</th><th class="col-num">Line Total</th></tr></thead>
-                            <tbody>
-                                ${(o.items || []).map(item => `
-                                <tr>
-                                    <td>${escHtml(item.product_name)}</td>
-                                    <td class="col-num">${item.quantity}</td>
-                                    <td class="col-num">${Fmt.currency(item.unit_price)}</td>
-                                    <td class="fw-600 col-num">${Fmt.currency(item.subtotal)}</td>
-                                </tr>`).join('') || '<tr><td colspan="4" class="text-center text-muted">No item details recorded.</td></tr>'}
-                            </tbody>
-                        </table>
-                    </div>
+                    ${orderItemsTable(o)}
                 </td>
             </tr>`).join('');
 
@@ -996,7 +1047,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     async function loadRegisterReport(start, end) {
         const tbody = document.getElementById('register-tbody');
-        tbody.innerHTML = '<tr><td colspan="8" class="text-center" style="padding:24px"><div class="spinner" style="margin:0 auto"></div></td></tr>';
+        tbody.innerHTML = '<tr><td colspan="9" class="text-center" style="padding:24px"><div class="spinner" style="margin:0 auto"></div></td></tr>';
         document.getElementById('register-summary-chips').style.display = 'none';
 
         const params = new URLSearchParams({ limit: 500 });
@@ -1007,7 +1058,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const data = await API.get('/reports/register?' + params.toString());
         if (!data?.success) {
             Toast.show('Failed to load register report.', 'error');
-            tbody.innerHTML = '<tr><td colspan="8" class="text-center text-muted" style="padding:24px">Failed to load data.</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="9" class="text-center text-muted" style="padding:24px">Failed to load data.</td></tr>';
             return;
         }
 
@@ -1016,6 +1067,7 @@ document.addEventListener('DOMContentLoaded', () => {
         document.getElementById('chip-register-count').textContent    = s.total_sessions || 0;
         document.getElementById('chip-register-open').textContent     = s.open_count || 0;
         document.getElementById('chip-register-opened').textContent   = Fmt.currency(s.total_opened || 0);
+        document.getElementById('chip-register-sales').textContent    = Fmt.currency(s.total_cash_sales || 0);
         document.getElementById('chip-register-variance').textContent = Fmt.currency(s.total_variance || 0);
         document.getElementById('register-summary-chips').style.display = 'flex';
 
@@ -1026,7 +1078,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     if (key === 'opened_at' || key === 'closed_at') {
                         return row[key] ? new Date(row[key]).getTime() : null;
                     }
-                    if (key === 'opening_cash' || key === 'variance') {
+                    if (key === 'opening_cash' || key === 'variance' || key === 'cash_sales' || key === 'expected_cash' || key === 'counted_cash') {
                         return row[key] == null ? null : parseFloat(row[key]);
                     }
                     return (row[key] || '').toString().toLowerCase();
@@ -1052,30 +1104,83 @@ document.addEventListener('DOMContentLoaded', () => {
         const tint = (key) => key === activeKey ? ' sort-col-tint' : '';
 
         if (!registerData.length) {
-            tbody.innerHTML = '<tr><td colspan="8" class="text-center text-muted" style="padding:24px">No register sessions found for this period.</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="9" class="text-center text-muted" style="padding:24px">No register sessions found for this period.</td></tr>';
             return;
         }
+
+        const money = (v) => Fmt.currency(v);
+        const dash  = '<span class="text-muted">\u2014</span>';
 
         tbody.innerHTML = pageItems.map(s => {
             const isOpen = s.status === 'OPEN';
             const varianceVal = parseFloat(s.variance);
-            const varianceText = s.status === 'CLOSED' && !isNaN(varianceVal)
+            const varianceText = !isOpen && !isNaN(varianceVal)
                 ? `${varianceVal >= 0 ? '+' : ''}${Fmt.currency(varianceVal)}`
-                : '—';
+                : '\u2014';
             const varianceColor = varianceVal > 0 ? 'var(--success)' : (varianceVal < 0 ? 'var(--danger)' : 'var(--secondary)');
+            const moves = s.movements || [];
+
+            // One term of the sum shown under the arrow: label over amount
+            const term = (label, value, cls = '') =>
+                `<div class="reg-term ${cls}"><span class="reg-term-label">${label}</span><span class="reg-term-value">${value}</span></div>`;
+            const op = (c) => `<span class="reg-op">${c}</span>`;
+
+            const movesTable = moves.length ? `
+                <strong style="font-size:0.82rem">Cash In / Cash Out:</strong>
+                <div class="table-container" style="margin-top:8px">
+                    <table class="table" style="white-space:normal">
+                        <thead><tr><th>Time</th><th>Type</th><th class="col-num">Amount</th><th>Reason</th><th>Requested By</th><th>Approved By</th></tr></thead>
+                        <tbody>${moves.map(m => `
+                            <tr>
+                                <td>${Fmt.datetime(m.created_at)}</td>
+                                <td>${m.type === 'CASH_IN' ? 'Cash In' : 'Cash Out'}</td>
+                                <td class="col-num${m.type === 'CASH_OUT' ? ' item-disc' : ''}">${m.type === 'CASH_OUT' ? '- ' : '+ '}${money(m.amount)}</td>
+                                <td>${escHtml(m.reason || '\u2014')}</td>
+                                <td>${escHtml(m.requested_by_name || '\u2014')}</td>
+                                <td>${escHtml(m.approved_by_name || '\u2014')}</td>
+                            </tr>`).join('')}
+                        </tbody>
+                    </table>
+                </div>`
+                : '<div class="text-muted" style="font-size:0.82rem">No Cash In or Cash Out in this register.</div>';
 
             return `
             <tr>
+                <td><button class="btn-expand" data-key="${s.id}" title="See the breakdown and the Cash In / Cash Out">\u25b6</button></td>
                 <td class="fw-600 col-text sticky-col${tint('cashier_name')}">${escHtml(s.cashier_name)}</td>
                 <td class="col-text${tint('opened_at')}">${Fmt.datetime(s.opened_at)}</td>
-                <td class="col-num${tint('opening_cash')}">${Fmt.currency(s.opening_cash)}</td>
-                <td class="col-text${tint('opened_approved_by_name')}">${s.opened_approved_by_name ? escHtml(s.opened_approved_by_name) : '<span class="text-muted">—</span>'}</td>
-                <td class="col-text${tint('status')}"><span class="badge ${isOpen ? 'badge-success' : 'badge-secondary'}">${isOpen ? 'Open' : 'Closed'}</span></td>
-                <td class="col-text${tint('closed_at')}">${s.closed_at ? Fmt.datetime(s.closed_at) : '<span class="text-muted">—</span>'}</td>
+                <td class="col-num${tint('opening_cash')}">${money(s.opening_cash)}</td>
+                <td class="col-num${tint('cash_sales')}">${money(s.cash_sales)}</td>
+                <td class="col-num${tint('expected_cash')}">${money(s.expected_cash)}</td>
+                <td class="col-num${tint('counted_cash')}">${s.counted_cash != null ? money(s.counted_cash) : dash}</td>
                 <td class="col-num${tint('variance')}" style="font-weight:600;color:${varianceColor}">${varianceText}</td>
-                <td class="col-text${tint('closed_approved_by_name')}">${s.closed_approved_by_name ? escHtml(s.closed_approved_by_name) : '<span class="text-muted">—</span>'}</td>
+                <td class="col-text${tint('status')}"><span class="badge ${isOpen ? 'badge-success' : 'badge-secondary'}">${isOpen ? 'Open' : 'Closed'}</span></td>
+            </tr>
+            <tr class="detail-row hidden" id="register-detail-${s.id}">
+                <td colspan="9">
+                    <div class="reg-detail">
+                        <div class="reg-equation">
+                            ${term('Opening', money(s.opening_cash))}${op('+')}${term('Cash Sales', money(s.cash_sales))}${op('+')}${term('Cash In', money(s.cash_in))}${op('&minus;')}${term('Cash Out', money(s.cash_out), 'reg-out')}${op('=')}${term('Expected', money(s.expected_cash), 'reg-result')}
+                        </div>
+                        <div class="reg-counted">${isOpen
+                            ? 'Still open: the counted cash and the variance appear when the register is closed.'
+                            : `Counted <strong>${s.counted_cash != null ? money(s.counted_cash) : '\u2014'}</strong> &middot; Variance <strong style="color:${varianceColor}">${varianceText}</strong>`}</div>
+                        <div class="reg-facts">Opened ${Fmt.datetime(s.opened_at)}${s.opened_approved_by_name ? ` (approved by ${escHtml(s.opened_approved_by_name)})` : ''}${s.closed_at ? ` &middot; Closed ${Fmt.datetime(s.closed_at)}${s.closed_approved_by_name ? ` (approved by ${escHtml(s.closed_approved_by_name)})` : ''}` : ''}</div>
+                        ${movesTable}
+                    </div>
+                </td>
             </tr>`;
         }).join('');
+
+        tbody.querySelectorAll('.btn-expand').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const detailRow = document.getElementById(`register-detail-${btn.dataset.key}`);
+                if (!detailRow) return;
+                const isHidden = detailRow.classList.contains('hidden');
+                detailRow.classList.toggle('hidden', !isHidden);
+                btn.textContent = isHidden ? '\u25bc' : '\u25b6';
+            });
+        });
     }
 
     // ── Auto-load daily on open ───────────────────────────────
@@ -1097,11 +1202,10 @@ document.addEventListener('DOMContentLoaded', () => {
     async function loadReportUsers() {
         const data = await API.get('/reports/users');
         if (!data?.success) { Toast.show('Could not load the user list.', 'warning'); return; }
-        const roleLabels = { super_admin: 'Admin', admin: 'Owner', cashier: 'Pharmacy Assistant' };
         data.data.forEach(u => {
             const opt = document.createElement('option');
             opt.value = u.id;
-            opt.textContent = `${u.name} (${roleLabels[u.role] || u.role})${u.is_active ? '' : ' - Inactive'}`;
+            opt.textContent = `${u.name} (${roleLabel(u.role)})${u.is_active ? '' : ' - Inactive'}`;
             userSelects.forEach(select => select.appendChild(opt.cloneNode(true)));
         });
     }

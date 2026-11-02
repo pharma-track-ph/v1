@@ -118,10 +118,15 @@ const updateProduct = async (req, res, next) => {
  */
 const deleteProduct = async (req, res, next) => {
     try {
+        // Note what is being deleted BEFORE it is gone, so the audit entry says which product,
+        // how many Item Nos and how many units it had.
+        const before   = await Product.findGroupById(req.params.id);
         const affected = await Product.softDeleteGroup(req.params.id);
         if (!affected) return res.status(404).json({ success: false, message: 'Product not found.' });
 
-        await logAudit(req.user.id, 'DELETE_PRODUCT', 'products', req.params.id, {}, req.ip);
+        await logAudit(req.user.id, 'DELETE_PRODUCT', 'products', req.params.id,
+            before ? { product: before.name, item_nos: before.item_count, units_in_stock: before.stock_quantity, expired_units: before.expired_units || 0 } : {},
+            req.ip);
         res.json({ success: true, message: 'Product removed.' });
     } catch (err) { next(err); }
 };
@@ -148,7 +153,7 @@ const addItem = async (req, res, next) => {
 
         // A restock whose expiry date matches an existing Item No. of this brand
         // tops THAT Item No. up, instead of creating a second one for the same date.
-        const sameDate = await Product.findItemByBrandAndExpiry(name, expiry_date);
+        const sameDate = await Product.findItemByBrandAndExpiry(name, expiry_date, qty);
         if (sameDate) {
             await Product.addStockToItem(sameDate.id, qty);
             await logAudit(req.user.id, 'ADD_ITEM', 'products', sameDate.id,
@@ -217,8 +222,51 @@ const deleteItem = async (req, res, next) => {
         }
         if (!result.affected) return res.status(404).json({ success: false, message: 'Item not found.' });
 
-        await logAudit(req.user.id, 'DELETE_ITEM', 'products', req.params.itemId, {}, req.ip);
-        res.json({ success: true, message: 'Item removed.' });
+        await logAudit(req.user.id, 'DELETE_ITEM', 'products', req.params.itemId,
+            { product: result.name, item_no: result.itemNo, units: result.units, expiry_date: result.expiry_date }, req.ip);
+        // group_id: a row of this product that is still live, so the Edit window (which remembers
+        // the product by ONE row's id) can carry on if the row it remembered was the one deleted.
+        res.json({ success: true, message: 'Item removed.', group_id: await Product.findGroupIdByName(result.name) });
+    } catch (err) { next(err); }
+};
+
+/**
+ * POST /api/inventory/items/:itemId/remove  [Admin+]
+ * "Remove" on an EXPIRED Item No., or one with no units left (the Edit window's "Removed
+ * Item No." list). NOTHING IS ERASED: the batch stays in the database, flagged as removed (see
+ * Product.removeItem), and the product itself stays in Inventory -- deleting the product is
+ * the separate Delete button. Logged in the Audit Logs with what was removed, so it can be
+ * matched against the physical stock.
+ */
+const removeItem = async (req, res, next) => {
+    try {
+        const r = await Product.removeItem(req.params.itemId);
+        if (!r.found) return res.status(404).json({ success: false, message: 'Item not found.' });
+        if (!r.removable) {
+            return res.status(400).json({
+                success: false,
+                message: 'Only an expired Item No., or one with no units left, can be removed here. Use Delete for any other batch.'
+            });
+        }
+
+        await logAudit(req.user.id, 'REMOVE_ITEM', 'products', req.params.itemId, {
+            product:          r.name,
+            item_no:          r.itemNo,
+            units:            r.units,
+            expiry_date:      r.expiry_date,
+            reason:           r.reason,
+            last_item:        r.lastItem,
+            kept_in_database: true
+        }, req.ip);
+
+        res.json({
+            success: true,
+            last_item: r.lastItem,
+            group_id: await Product.findGroupIdByName(r.name),   // a still-live row of this product (see deleteItem)
+            message: r.lastItem
+                ? `Item No. ${r.itemNo} removed. The product stays in Inventory with no Item No. -- use Add Item No. when new stock arrives.`
+                : `Item No. ${r.itemNo} removed.`
+        });
     } catch (err) { next(err); }
 };
 
@@ -667,7 +715,7 @@ const deleteCategories = async (req, res, next) => {
 
 module.exports = {
     getProducts, getProduct, createProduct, updateProduct, deleteProduct,
-    addItem, updateItem, deleteItem,
+    addItem, updateItem, deleteItem, removeItem,
     getAlertSummary, importCSV, getImportTemplate, getBarcode,
     listCategories, addCategory, renameCategory, deleteCategories
 };

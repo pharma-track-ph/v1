@@ -1,10 +1,11 @@
 // ============================================================
 // PharmaTrack – audit.js
 // Audit log viewer: paginated table, filters, CSV export
-// Accessible by: super_admin only
+// Accessible by: Owner (sees every entry) and Admin (sees ONLY entries made by
+// Pharmacists -- enforced in the server's query, not just hidden here)
 // ============================================================
 document.addEventListener('DOMContentLoaded', () => {
-    if (!Auth.requireAuth(['super_admin'])) return;
+    if (!Auth.requireAuth(['admin', 'super_admin'])) return;   // Admin sees only what Pharmacists did (enforced by the server)
 
     // ── State ────────────────────────────────────────────────
     let allLogs      = [];
@@ -147,7 +148,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const todayLogs    = allLogs.filter(l => l.created_at?.startsWith(today));
         const loginCount   = todayLogs.filter(l => l.action?.includes('LOGIN')).length;
         const editCount    = todayLogs.filter(l => l.action?.includes('UPDATE') || l.action?.includes('CREATE') || l.action?.includes('CHANGE')).length;
-        const deleteCount  = todayLogs.filter(l => l.action?.includes('DELETE')).length;
+        const deleteCount  = todayLogs.filter(l => l.action?.includes('DELETE') || l.action?.includes('REMOVE')).length;
 
         const statTotal   = document.getElementById('stat-total');
         const statLogins  = document.getElementById('stat-logins');
@@ -194,16 +195,10 @@ document.addEventListener('DOMContentLoaded', () => {
         applyFilters();
     }
 
-    // Display-only maps — underlying values in the database/logic (role,
-    // entity) never change, only what's shown on screen here. Owner/Admin
-    // label swap: super_admin now displays as "Admin", admin now displays
-    // as "Owner" -- this is the only line that needed to change for that.
-    const ROLE_LABELS = { super_admin: 'Admin', admin: 'Owner', cashier: 'Pharmacy Assistant' };
-
-    function roleLabel(role) {
-        if (!role) return '';
-        return ROLE_LABELS[role] || role.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
-    }
+    // Display-only maps -- underlying values in the database/logic (role, entity) never
+    // change, only what's shown on screen here. Role names come from the shared
+    // roleLabel() in main.js, so this page always agrees with every other screen (an
+    // empty role shows as blank).
 
     const ENTITY_LABELS = {
         products:       'Product',
@@ -285,7 +280,7 @@ document.addEventListener('DOMContentLoaded', () => {
         let cls = 'DEFAULT';
         if (action.includes('CREATE') || action.includes('IMPORT')) cls = 'CREATE';
         else if (action.includes('UPDATE') || action.includes('CHANGE'))                          cls = 'UPDATE';
-        else if (action.includes('DELETE'))                          cls = 'DELETE';
+        else if (action.includes('DELETE') || action.includes('REMOVE'))                          cls = 'DELETE';
         else if (action.includes('LOGIN'))                           cls = 'LOGIN';
         else if (action.includes('CHECKOUT'))                        cls = 'CHECKOUT';
 
@@ -351,7 +346,27 @@ document.addEventListener('DOMContentLoaded', () => {
             }
             if (parsed.original_cashier) rows.push(['Rung Up By', escHtml(parsed.original_cashier)]);
             if (parsed.approved_by)      rows.push(['Approved By', escHtml(parsed.approved_by)]);
-            if (parsed.requested_by) rows.push(['Requested By (Pharmacy Assistant)', escHtml(parsed.requested_by)]);
+            // What happened to the refund money and to any units that could not simply go back onto
+            // their old batch (recorded by the server when the void happened)
+            if (parsed.refund) {
+                const rf = parsed.refund;
+                if (rf.recorded) {
+                    rows.push(['Refund Recorded', escHtml(Fmt.currency(rf.amount) + ' out of the voider\'s register' + (rf.original_register_open ? ', and back in to the other open register' : ''))]);
+                } else if (rf.reason === 'no_open_register') {
+                    rows.push(['Refund Recorded', 'No - the voider had no open register']);
+                } else if (rf.reason === 'same_register') {
+                    rows.push(['Refund Recorded', 'Not needed - the sale was in the voider\'s own register']);
+                }
+            }
+            (parsed.stock_notes || []).forEach(n => {
+                const units = `${n.qty} unit${n.qty === 1 ? '' : 's'} of ${n.name}`;
+                const text = n.status === 'revived'         ? `${units} brought back as an Item No. (expires ${n.expiry})`
+                           : n.status === 'merged'          ? `${units} added to the Item No. that expires ${n.expiry}`
+                           : n.status === 'product_deleted' ? `${units} not added back - the product was deleted`
+                           : null;
+                if (text) rows.push(['Stock', escHtml(text)]);
+            });
+            if (parsed.requested_by) rows.push(['Requested By (Pharmacist)', escHtml(parsed.requested_by)]);
             return detailGrid(rows);
         }
 
@@ -399,6 +414,40 @@ document.addEventListener('DOMContentLoaded', () => {
                 ['Inserted', parsed.inserted != null ? parsed.inserted : 0],
                 ['Updated', parsed.updated != null ? parsed.updated : 0],
                 ['Errors', (parsed.errors || []).length]
+            ]);
+        }
+
+        // Inventory removals. REMOVE_ITEM keeps the batch in the database (flagged removed);
+        // DELETE_ITEM / DELETE_PRODUCT are the real deletes. Each says WHAT, so it can be
+        // matched against the physical stock.
+        if (action === 'REMOVE_ITEM') {
+            const why = String(parsed.reason || '');
+            return detailGrid([
+                ['Product',          escHtml(parsed.product || '\u2014')],
+                ['Item No.',         escHtml(parsed.item_no ?? '\u2014')],
+                ['Units Removed',    escHtml(parsed.units ?? '\u2014')],
+                ['Expiry Date',      parsed.expiry_date ? escHtml(Fmt.date(parsed.expiry_date)) : '\u2014'],
+                ['Reason',           escHtml(why ? why.charAt(0).toUpperCase() + why.slice(1) : '\u2014')],
+                ['Only Item No.?',   parsed.last_item ? 'Yes - the product stayed in Inventory' : 'No'],
+                ['Kept in Database', parsed.kept_in_database ? 'Yes' : 'No']
+            ]);
+        }
+
+        if (action === 'DELETE_ITEM') {
+            return detailGrid([
+                ['Product',     escHtml(parsed.product || '\u2014')],
+                ['Item No.',    escHtml(parsed.item_no ?? '\u2014')],
+                ['Units',       escHtml(parsed.units ?? '\u2014')],
+                ['Expiry Date', parsed.expiry_date ? escHtml(Fmt.date(parsed.expiry_date)) : '\u2014']
+            ]);
+        }
+
+        if (action === 'DELETE_PRODUCT') {
+            return detailGrid([
+                ['Product',        escHtml(parsed.product || '\u2014')],
+                ['Item Nos',       escHtml(parsed.item_nos ?? '\u2014')],
+                ['Units In Stock', escHtml(parsed.units_in_stock ?? '\u2014')],
+                ['Expired Units',  escHtml(parsed.expired_units ?? '\u2014')]
             ]);
         }
 

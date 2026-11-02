@@ -8,6 +8,7 @@ const Order        = require('../models/Order');
 const OrderItem    = require('../models/OrderItem');
 const User         = require('../models/User');
 const CashSession  = require('../models/CashSession');
+const CashMovement = require('../models/CashMovement');
 const { logAudit } = require('../middleware/authMiddleware');
 const { computeOrder, toCents, centsToPesos } = require('../utils/vat');
 
@@ -629,12 +630,12 @@ const voidLastOrder = async (req, res, next) => {
 
         await connection.beginTransaction();
 
-        // Restore stock to the exact batches originally consumed
+        // Restore stock to the exact batches originally consumed. A batch that was removed or
+        // deleted since gets its units back as an Item No. by expiry date instead (see
+        // Product.restoreVoidedStock), never onto a hidden record.
+        const stockNotes = [];
         for (const item of items) {
-            await connection.query(
-                'UPDATE products SET stock_quantity = stock_quantity + ? WHERE id = ?',
-                [item.quantity, item.product_id]
-            );
+            stockNotes.push(await Product.restoreVoidedStock(connection, item.product_id, item.quantity));
         }
 
         const [result] = await connection.query(
@@ -649,6 +650,15 @@ const voidLastOrder = async (req, res, next) => {
             return res.status(409).json({ success: false, message: 'This transaction was already voided or refunded.' });
         }
 
+        // The money side: the refund leaves the voider's open register (and, when the sale sits
+        // in someone else's still-open register, goes back IN there). See recordVoidRefund. Refused
+        // here -- with everything above undone -- if the drawer cannot cover it.
+        const refund = await recordVoidRefund(connection, { order, refundAmount: order.total, voider: req.user, approverId });
+        if (!refund.ok) {
+            await connection.rollback();
+            return res.status(refund.status).json({ success: false, message: refund.message });
+        }
+
         await connection.commit();
 
         // Attributed to whoever actually PERFORMED the void (req.user.id) --
@@ -660,7 +670,8 @@ const voidLastOrder = async (req, res, next) => {
                 total: order.total,
                 original_cashier: order.cashier_name,
                 original_cashier_id: order.cashier_id,
-                ...(approverName ? { approved_by: approverName, approved_by_id: approverId } : {})
+                ...(approverName ? { approved_by: approverName, approved_by_id: approverId } : {}),
+                ...voidAuditExtras(refund.info, stockNotes)
             },
             req.ip);
 
@@ -668,9 +679,11 @@ const voidLastOrder = async (req, res, next) => {
 
         res.json({
             success: true,
-            message: isCashier
+            message: (isCashier
                 ? `Order ${order.order_number}${originalCashierNote} voided by ${approverName}. Stock has been restored.`
-                : `Order ${order.order_number}${originalCashierNote} voided. Stock has been restored.`
+                : `Order ${order.order_number}${originalCashierNote} voided. Stock has been restored.`) +
+                describeVoidExtras(refund.info, stockNotes),
+            refund: refund.info
         });
 
     } catch (err) {
@@ -846,12 +859,20 @@ const partialVoidOrder = async (req, res, next) => {
         const refundCents     = Math.max(0, toCents(order.total) - vat.totals.totalCents);
         const refundAmount    = centsToPesos(refundCents);
 
-        // -- Stock: only the voided quantities go back, to their exact batch --
+        // The money side (see recordVoidRefund). Done first, so a drawer that cannot cover the
+        // refund stops the void before anything else is changed.
+        const refund = await recordVoidRefund(connection, { order, refundAmount, voider: req.user, approverId });
+        if (!refund.ok) {
+            await connection.rollback();
+            return res.status(refund.status).json({ success: false, message: refund.message });
+        }
+
+        // -- Stock: only the voided quantities go back, to their exact batch (a batch removed or
+        //    deleted since gets its units back as an Item No. by expiry date -- see
+        //    Product.restoreVoidedStock) --
+        const stockNotes = [];
         for (const [itemId, qty] of voidQty) {
-            await connection.query(
-                'UPDATE products SET stock_quantity = stock_quantity + ? WHERE id = ?',
-                [qty, byId.get(itemId).product_id]
-            );
+            stockNotes.push(await Product.restoreVoidedStock(connection, byId.get(itemId).product_id, qty));
         }
 
         // -- The original leaves sales and cash totals --
@@ -915,7 +936,8 @@ const partialVoidOrder = async (req, res, next) => {
             refund_amount:              refundAmount,
             replacement_order_number:   newOrderNumber,
             replacement_order_id:       newOrderId,
-            ...(approverName ? { approved_by: approverName, approved_by_id: approverId } : {})
+            ...(approverName ? { approved_by: approverName, approved_by_id: approverId } : {}),
+            ...voidAuditExtras(refund.info, stockNotes)
         }, req.ip);
 
         await logAudit(req.user.id, 'PARTIAL_VOID_RECEIPT', 'orders', newOrderId, {
@@ -929,7 +951,9 @@ const partialVoidOrder = async (req, res, next) => {
         res.status(201).json({
             success: true,
             message: `Order ${order.order_number} partially voided${isCashier ? ` (approved by ${approverName})` : ''}. ` +
-                     `New receipt ${newOrderNumber} issued. Refund: ${Fmt2(refundAmount)}. Stock has been restored for the voided items.`,
+                     `New receipt ${newOrderNumber} issued. Refund: ${Fmt2(refundAmount)}. Stock has been restored for the voided items.` +
+                     describeVoidExtras(refund.info, stockNotes),
+            refund:                refund.info,
             refund_amount:         refundAmount,
             original_order_number: order.order_number,
             receipt: {
@@ -960,6 +984,131 @@ const partialVoidOrder = async (req, res, next) => {
         connection.release();
     }
 };
+
+// ============================================================
+// The MONEY and STOCK side of a void (shared by the full and the partial void)
+// ============================================================
+// A void is a refund: the cash leaves a drawer. Where that is recorded:
+//   - the voider has NO open register ............ nothing is recorded (the void still happens)
+//   - the sale is in the voider's OWN open register  nothing extra: it simply drops out of that
+//                                                     register's cash sales, so its expected cash
+//                                                     already goes down
+//   - the sale is in an EARLIER, CLOSED register ... a CASH OUT in the voider's open register (the
+//                                                     closed register's saved figures are never touched)
+//   - the sale is in ANOTHER person's still-OPEN register ... the same CASH OUT, plus a matching
+//                                                     CASH IN in that register (it lost the sale from
+//                                                     its cash sales but kept the cash), so both
+//                                                     drawers balance at closing
+// A refund the voider's drawer cannot cover (more than it is expected to hold) is refused, by the
+// same rule Cash Out already follows. It runs INSIDE the void's transaction, so a refusal -- or
+// anything failing later -- undoes the movements together with everything else.
+// Returns { ok: true, info } or { ok: false, status, message } (the caller rolls back and answers).
+async function recordVoidRefund(connection, { order, refundAmount, voider, approverId }) {
+    const refundCents = toCents(refundAmount);
+    if (refundCents <= 0) return { ok: true, info: { recorded: false, reason: 'nothing_to_refund' } };
+
+    const mine       = await CashSession.findOpenByCashier(voider.id, connection);
+    const originalId = order.cash_session_id ? Number(order.cash_session_id) : null;
+
+    // lock the registers involved, lowest id first, so two voids crossing each other cannot deadlock
+    const wanted = [...new Set([mine && mine.id, originalId].filter(Boolean))].sort((a, b) => a - b);
+    const locked = new Map();
+    if (wanted.length) {
+        const [rows] = await connection.query(
+            `SELECT * FROM cash_sessions WHERE id IN (${wanted.map(() => '?').join(',')}) ORDER BY id FOR UPDATE`,
+            wanted
+        );
+        rows.forEach(r => locked.set(Number(r.id), r));
+    }
+
+    const myRegister = mine ? locked.get(Number(mine.id)) : null;
+    if (!myRegister || myRegister.status !== 'OPEN') {
+        return { ok: true, info: { recorded: false, reason: 'no_open_register' } };
+    }
+    if (originalId && originalId === Number(myRegister.id)) {
+        return { ok: true, info: { recorded: false, reason: 'same_register' } };
+    }
+
+    // can this drawer cover it? (the same rule as Cash Out)
+    const totals    = await CashSession.getLiveTotals(myRegister.id, connection);
+    const available = parseFloat(myRegister.opening_cash) + totals.cash_sales + totals.cash_in - totals.cash_out;
+    if (refundCents > toCents(available)) {
+        return {
+            ok: false,
+            status: 400,
+            message: `Cannot refund ${Fmt2(centsToPesos(refundCents))} - only ${Fmt2(Math.max(0, available))} is expected in your drawer. ` +
+                     'Add cash to your register first (Cash In), then void.'
+        };
+    }
+
+    const amount     = centsToPesos(refundCents);
+    const saleDate   = toManilaDateString(order.created_at);
+    const approvedBy = approverId || voider.id;     // a manager voiding is their own approver, as with Cash Out
+
+    const cashOutId = await CashMovement.create({
+        cashSessionId: myRegister.id,
+        type:          'CASH_OUT',
+        amount,
+        reason:        `Refund for voided ${order.order_number} (sale of ${saleDate})`.slice(0, 255),
+        requestedBy:   voider.id,
+        approvedBy
+    }, connection);
+
+    let cashInId = null;
+    const original = originalId ? locked.get(originalId) : null;
+    if (original && original.status === 'OPEN') {
+        cashInId = await CashMovement.create({
+            cashSessionId: original.id,
+            type:          'CASH_IN',
+            amount,
+            reason:        `Refund of ${order.order_number} paid from another drawer (${voider.name || 'another cashier'})`.slice(0, 255),
+            requestedBy:   voider.id,
+            approvedBy
+        }, connection);
+    }
+
+    return {
+        ok: true,
+        info: {
+            recorded:             true,
+            amount,
+            register_id:          Number(myRegister.id),
+            original_register_id: originalId,
+            original_register_open: !!(original && original.status === 'OPEN'),
+            cash_out_id:          cashOutId,
+            cash_in_id:           cashInId
+        }
+    };
+}
+
+// The sentence(s) added to a void's reply: what happened to the refund money and to any units that
+// could not simply go back onto their old batch.
+function describeVoidExtras(refundInfo, stockNotes = []) {
+    const parts = [];
+    if (refundInfo && refundInfo.recorded) {
+        parts.push(refundInfo.original_register_open
+            ? `Refund ${Fmt2(refundInfo.amount)} recorded: Cash Out in your register and Cash In in the other open register.`
+            : `Refund ${Fmt2(refundInfo.amount)} recorded as Cash Out in your register.`);
+    } else if (refundInfo && refundInfo.reason === 'no_open_register') {
+        parts.push('You have no open register, so the refund was not recorded in a drawer.');
+    }
+    const units = (n) => `${n.qty} unit${n.qty === 1 ? '' : 's'}`;
+    for (const n of stockNotes) {
+        if (n.status === 'revived')         parts.push(`${units(n)} of ${n.name} came back into Inventory as an Item No. (expires ${n.expiry}).`);
+        if (n.status === 'merged')          parts.push(`${units(n)} of ${n.name} were added to the Item No. that expires ${n.expiry}.`);
+        if (n.status === 'product_deleted') parts.push(`${n.name} was deleted from Inventory, so ${units(n)} were not added back.`);
+    }
+    return parts.length ? ' ' + parts.join(' ') : '';
+}
+
+// What goes into the void's audit entry about the above (only what is worth recording).
+function voidAuditExtras(refundInfo, stockNotes = []) {
+    const extras = {};
+    if (refundInfo) extras.refund = refundInfo;
+    const special = stockNotes.filter(n => n.status !== 'restored');
+    if (special.length) extras.stock_notes = special;
+    return extras;
+}
 
 // peso formatting for the response message (the controller has no Fmt)
 function Fmt2(amount) {

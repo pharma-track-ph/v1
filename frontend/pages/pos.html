@@ -29,10 +29,10 @@
                 <li class="nav-item" data-roles="admin,super_admin"><a href="inventory.html"><span class="nav-icon"></span> Inventory</a></li>
                 <li class="nav-item" data-roles="admin,super_admin"><a href="forecasting.html"><span class="nav-icon"></span> Forecasting</a></li>
             </ul>
-            <p class="nav-section-label">Admin</p>
+            <p class="nav-section-label">Administration</p>
             <ul>
                 <li class="nav-item" data-roles="super_admin"><a href="users.html"><span class="nav-icon"></span> User Management</a></li>
-                <li class="nav-item" data-roles="super_admin"><a href="audit.html"><span class="nav-icon"></span> Audit Logs</a></li>
+                <li class="nav-item" data-roles="admin,super_admin"><a href="audit.html"><span class="nav-icon"></span> Audit Logs</a></li>
                 <li class="nav-item" data-roles="super_admin"><a href="backup.html"><span class="nav-icon"></span> Backup & Restore</a></li>
                 <li class="nav-item"><a href="#" data-action="logout"><span class="nav-icon"></span> Sign Out</a></li>
             </ul>
@@ -115,6 +115,13 @@
                     <button class="btn-barcode" id="btn-camera-scan">
                         Scan Barcode
                     </button>
+                    <!-- Category filter: same row, same height as the search box. Filled by
+                         pos.js from the products the POS is showing, and works together with
+                         the search box (both must match). -->
+                    <select class="pos-category-filter" id="pos-category-filter"
+                            aria-label="Filter products by category" title="Filter by category">
+                        <option value="">All Categories</option>
+                    </select>
                 </div>
 
                 <!-- Barcode scanner simulation row -->
@@ -244,7 +251,7 @@
 
 <!-- ── Void: pick which transaction ───────────────── -->
 <div class="modal-overlay" id="void-list-modal">
-    <div class="modal" style="max-width:480px">
+    <div class="modal modal-sev modal-sev-warning" style="max-width:480px">
         <div class="modal-header">
             <h3>Void a Transaction</h3>
             <button class="btn-close" onclick="Modal.close('void-list-modal')">✕</button>
@@ -264,7 +271,7 @@
 
 <!-- ── Receipt Modal ─────────────────────────────────────────── -->
 <div class="modal-overlay" id="receipt-modal">
-    <div class="modal" style="max-width:420px">
+    <div class="modal modal-sev modal-sev-success" style="max-width:420px">
         <div class="modal-header">
             <h3>Transaction Receipt</h3>
             <button class="btn-close" onclick="Modal.close('receipt-modal')">✕</button>
@@ -278,7 +285,7 @@
 </div>
 
 <div class="modal-overlay" id="open-register-modal">
-    <div class="modal" style="max-width:380px">
+    <div class="modal modal-sev modal-sev-info" style="max-width:380px">
         <div class="modal-header"><h3>Open Register</h3></div>
         <div class="modal-body">
             <div class="form-group">
@@ -309,7 +316,7 @@
 </div>
 
 <div class="modal-overlay" id="cash-in-modal">
-    <div class="modal" style="max-width:380px">
+    <div class="modal modal-sev modal-sev-success" style="max-width:380px">
         <div class="modal-header"><h3>Cash In</h3></div>
         <div class="modal-body">
             <div class="form-group">
@@ -329,7 +336,7 @@
 </div>
 
 <div class="modal-overlay" id="cash-out-modal">
-    <div class="modal" style="max-width:380px">
+    <div class="modal modal-sev modal-sev-warning" style="max-width:380px">
         <div class="modal-header"><h3>Cash Out</h3></div>
         <div class="modal-body">
             <div class="form-group">
@@ -349,7 +356,7 @@
 </div>
 
 <div class="modal-overlay" id="close-register-modal">
-    <div class="modal" style="max-width:420px">
+    <div class="modal modal-sev modal-sev-warning" style="max-width:420px">
         <div class="modal-header"><h3>Close Register</h3></div>
         <div class="modal-body">
             <div class="close-reg-summary" id="close-reg-summary"></div>

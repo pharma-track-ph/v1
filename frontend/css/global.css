@@ -1837,6 +1837,61 @@ body.has-waiting-sync .failed-sync-banner { bottom: 64px; }
 
 .sync-issue-wait { background: #fef3c7; color: #92400e; }
 
+/* -- Shared pop-up look -------------------------------------------------
+   Every pop-up in the app (confirmations, typed CONFIRM, manager approval,
+   the register, void and receipt windows) uses ONE look: a colored band at
+   the top and a colored title for its severity, larger readable text, and a
+   clearly primary button. Color only -- no icons.
+     info = blue   success = green   warning = amber   danger = red
+   Reuse: add  modal-sev modal-sev-<severity>  to any .modal (and modal-dlg
+   for the larger confirmation text). */
+:root              { --warning-text: #b45309; }   /* amber dark enough to READ as text */
+body.dark-mode     { --warning-text: #fbbf24; }
+
+.modal-sev { border-top: 6px solid var(--sev, var(--primary)); }
+.modal-sev .modal-header h3 { color: var(--sev-text, var(--sev, var(--primary))); }
+
+.modal-sev-info    { --sev: var(--primary); }
+.modal-sev-success { --sev: var(--success); }
+.modal-sev-warning { --sev: var(--warning); --sev-text: var(--warning-text); }
+.modal-sev-danger  { --sev: var(--danger); }
+
+.modal-dlg { max-width: 440px; }
+.modal-dlg .modal-header h3 { font-size: 1.15rem; }
+.modal-dlg .modal-body {
+    font-size:   0.95rem;
+    line-height: 1.55;
+    color:       var(--gray-700);
+}
+.modal-dlg .modal-footer .btn {
+    min-width:   96px;
+    padding:     10px 18px;
+    font-weight: 600;
+}
+
+.dlg-text { margin: 0 0 12px; }
+.dlg-text:last-child { margin-bottom: 0; }
+.dlg-list { margin: 0 0 12px; padding-left: 22px; }
+.dlg-list:last-child { margin-bottom: 0; }
+.dlg-list li { margin-bottom: 4px; }
+
+/* the typed CONFIRM step */
+.typed-hint {
+    min-height: 1.2em;
+    margin:     6px 0 0;
+    font-size:  0.8rem;
+    color:      var(--warning-text);
+}
+
+/* Inventory: the red "Expired stock" tag beside a status badge, and the "N expired" line
+   under the Stock number (a product can have good stock AND some expired units). */
+.expired-stock-tag { margin-left: 6px; white-space: nowrap; }
+.expired-units-line {
+    font-size:   0.7rem;
+    font-weight: 600;
+    color:       var(--danger);
+}
+
 /* -- Profile dropdown (avatar, top-right) -- */
 .profile-wrap { position: relative; }
 

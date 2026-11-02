@@ -114,6 +114,8 @@ document.addEventListener('DOMContentLoaded', () => {
             this.items = [];
             this.discountEnabled = false;
             this.amountTendered = 0;
+            this.paymentMethod = 'cash';
+            resetPaymentUI();   // the boxes on screen too, not just the numbers behind them
             renderCart();
             saveCartToStorage();
             setCartExpanded(false); // back to the compact peek bar on mobile
@@ -155,6 +157,22 @@ document.addEventListener('DOMContentLoaded', () => {
         } catch (e) { /* corrupted data — just start fresh */ }
     }
 
+    // After a sale (or Clear) the paying-customer controls go back to a blank slate: the
+    // Amount Paid box is emptied, the Senior/PWD toggle shows OFF, and the payment method
+    // is Cash (the only method). Resetting only the numbers in memory (what clear() used to
+    // do) left the old amount sitting in the box and the toggle looking ON. Because clear()
+    // also saves the cart, nothing of this comes back from sessionStorage either.
+    function resetPaymentUI() {
+        if (tenderedInput) tenderedInput.value = '';
+        if (discountToggle) {
+            discountToggle.classList.remove('active');
+            discountToggle.setAttribute('aria-pressed', 'false');
+        }
+        document.querySelectorAll('.pay-method-btn').forEach(btn => {
+            btn.classList.toggle('active', btn.dataset.method === 'cash');
+        });
+    }
+
     // Syncs the DOM controls (which aren't part of the `cart` object itself)
     // to match a just-restored cart, since setting the JS state alone doesn't
     // move a toggle switch or re-select a payment button.
@@ -186,6 +204,14 @@ document.addEventListener('DOMContentLoaded', () => {
     const changeEl        = document.getElementById('change-display');
     const discountToggle  = document.getElementById('discount-toggle');
     const tenderedInput   = document.getElementById('amount-tendered');
+
+    // Category filter (beside the search box) -- see "Category filter" below loadPOSProducts.
+    // The choice is remembered for this browser tab, like the cart, and Auth.logout clears it.
+    const CATEGORY_STORAGE_KEY = 'pharmatrack_pos_category';
+    const categoryFilterEl      = document.getElementById('pos-category-filter');
+    const knownCategories      = new Set();
+    let   categoryFilter        = '';
+    try { categoryFilter = sessionStorage.getItem(CATEGORY_STORAGE_KEY) || ''; } catch (e) { /* no storage: starts on All */ }
     const checkoutBtn     = document.getElementById('btn-checkout');
     const clearCartBtn    = document.getElementById('btn-clear-cart');
     const voidBtn         = document.getElementById('btn-void');
@@ -278,7 +304,7 @@ document.addEventListener('DOMContentLoaded', () => {
             overlay.className = 'modal-overlay';
             overlay.id = 'pending-sales-modal';
             overlay.innerHTML = `
-                <div class="modal" style="max-width:520px">
+                <div class="modal modal-sev modal-sev-warning" style="max-width:520px">
                     <div class="modal-header">
                         <h3>Pending Sales</h3>
                         <button class="btn-close" id="btn-close-pending-sales">X</button>
@@ -489,8 +515,57 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!data?.success) return;
 
         allProducts = data.data;
-        renderProductGrid(allProducts);
+        refreshCategoryOptions();
+        renderProductGrid(visibleProducts());
     }
+
+    // -- Category filter -----------------------------------------------------
+    // A dropdown after the Scan Barcode button. It narrows the grid to products that have the
+    // chosen category (a product can have several, stored as "A|B"), TOGETHER with whatever is
+    // typed in the search box -- both must match. allProducts always keeps the FULL list, so
+    // adding to the cart (including a barcode scan) still works for a product the filter is
+    // currently hiding. The options are every category seen so far this visit, so a search
+    // that returns only a few products does not shrink the dropdown.
+    const categoryTokens = (value) => String(value ?? '').split('|').map(s => s.trim()).filter(Boolean);
+
+    function visibleProducts() {
+        if (!categoryFilter) return allProducts;
+        const want = categoryFilter.toLowerCase();
+        return allProducts.filter(p => categoryTokens(p.category).some(c => c.toLowerCase() === want));
+    }
+
+    function saveCategoryFilter() {
+        try {
+            if (categoryFilter) sessionStorage.setItem(CATEGORY_STORAGE_KEY, categoryFilter);
+            else                sessionStorage.removeItem(CATEGORY_STORAGE_KEY);
+        } catch (e) { /* storage unavailable -- it just will not be remembered */ }
+    }
+
+    function refreshCategoryOptions() {
+        if (!categoryFilterEl) return;
+        allProducts.forEach(p => categoryTokens(p.category).forEach(c => knownCategories.add(c)));
+
+        const names = [...knownCategories].sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
+
+        // A remembered category that no longer exists (renamed or deleted since) quietly goes
+        // back to All Categories instead of leaving the grid empty.
+        if (categoryFilter) {
+            const match = names.find(n => n.toLowerCase() === categoryFilter.toLowerCase());
+            if (match !== categoryFilter) { categoryFilter = match || ''; saveCategoryFilter(); }
+        }
+
+        categoryFilterEl.innerHTML = '<option value="">All Categories</option>' +
+            names.map(n => `<option value="${escHtml(n)}">${escHtml(n)}</option>`).join('');
+        categoryFilterEl.value = categoryFilter;
+        categoryFilterEl.classList.toggle('is-filtering', !!categoryFilter);
+    }
+
+    categoryFilterEl?.addEventListener('change', () => {
+        categoryFilter = categoryFilterEl.value;
+        categoryFilterEl.classList.toggle('is-filtering', !!categoryFilter);
+        saveCategoryFilter();
+        renderProductGrid(visibleProducts());
+    });
 
     // ────────────────────────────────────────────────────────
     // CASH REGISTER (Opening Cash / Cash In-Out / Close Register)
@@ -682,7 +757,7 @@ document.addEventListener('DOMContentLoaded', () => {
             title:       isIn ? 'Confirm Cash In' : 'Confirm Cash Out',
             message:     `${Fmt.currency(amount)}\nReason: ${reason}`,
             confirmText: isIn ? 'Add Cash' : 'Remove Cash',
-            danger:      !isIn
+            severity:    isIn ? 'success' : 'warning'
         });
         if (!confirmed) return;
 
@@ -747,7 +822,8 @@ document.addEventListener('DOMContentLoaded', () => {
             const openList = await ConfirmDialog.show({
                 title:       'Sales Still Pending',
                 message:     `${pending.total} sale${pending.total === 1 ? ' has' : 's have'} not been recorded on the server yet${pending.failed ? ` (${pending.failed} failed)` : ''}. Sync ${pending.total === 1 ? 'it' : 'them'} before closing the register, or the drawer total will not match.`,
-                confirmText: 'Open Pending Sales'
+                confirmText: 'Open Pending Sales',
+                severity:    'warning'
             });
             if (openList) PendingPanel.openModal();
             return;
@@ -810,7 +886,7 @@ document.addEventListener('DOMContentLoaded', () => {
             title:       'Confirm Close Register',
             message:     `Actual cash counted: ${Fmt.currency(actual)}\nExpected: ${Fmt.currency(currentCashSession.expected_cash)}\n${varianceLabel}\n\nThis cannot be undone.`,
             confirmText: 'Close Register',
-            danger:      variance !== 0
+            severity:    variance === 0 ? 'success' : 'warning'
         });
         if (!confirmed) return;
 
@@ -1364,7 +1440,8 @@ document.addEventListener('DOMContentLoaded', () => {
         const confirmed = await ConfirmDialog.show({
             title: 'Clear Cart',
             message: 'Remove all items from the cart?',
-            confirmText: 'Clear'
+            confirmText: 'Clear',
+            severity: 'warning'
         });
         if (confirmed) cart.clear();
     });
@@ -1450,6 +1527,26 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
+    // Where the REFUND money goes, shown in the Void and Partial Void windows before the person
+    // confirms (the server does the actual recording -- see recordVoidRefund in posController):
+    //   no open register ......... the refund will not be recorded in a drawer
+    //   the sale is in THIS register  nothing to say (it simply drops out of the cash sales)
+    //   the sale is from another register ... the refund is recorded as money out of THIS register,
+    //                              unless the drawer is expected to hold less than that (refused)
+    function refundNoticeHtml(order, refundAmount) {
+        const amount = Number(refundAmount) || 0;
+        if (amount <= 0) return '';
+        if (!currentCashSession) {
+            return `<div class="dlg-alert warn">You have no open register, so the refund of ${Fmt.currency(amount)} will not be recorded in a drawer.</div>`;
+        }
+        if (order.cash_session_id && Number(order.cash_session_id) === Number(currentCashSession.id)) return '';
+        const expected = Number(currentCashSession.expected_cash) || 0;
+        if (amount > expected + 0.004) {
+            return `<div class="dlg-alert danger">Your drawer is expected to hold only ${Fmt.currency(expected)}, so a refund of ${Fmt.currency(amount)} will be refused. Add cash with Cash In first.</div>`;
+        }
+        return `<div class="dlg-alert info">This sale was rung up in another register. The refund of ${Fmt.currency(amount)} will be recorded as money out of your register.</div>`;
+    }
+
     async function confirmAndVoidOrder(order) {
         const itemsList = (order.items || [])
             .map(i => `• ${i.product_name} x${i.quantity}`)
@@ -1489,18 +1586,23 @@ document.addEventListener('DOMContentLoaded', () => {
             <div class="dlg-items">${voidItemRows}</div>
             ${isOlderDay ? `<div class="dlg-alert warn">This sale is from ${Fmt.date(order.created_at)}, not today. Reports already generated for that date will not automatically reflect this void.</div>` : ''}
             ${isOtherCashier ? `<div class="dlg-alert info">This sale was rung up by ${escHtml(order.cashier_name)}, not you.</div>` : ''}
+            ${refundNoticeHtml(order, order.total)}
             <div class="dlg-alert danger">This restores stock and cannot be undone.</div>`;
 
-        const confirmed = await ConfirmDialog.show({
-            title:       `Void ${order.order_number}?`,
-            message:     `Total: ${Fmt.currency(order.total)}\n${itemsList}\n${warningLine}\nThis restores stock and cannot be undone.`,
-            html:        voidHtml,
-            confirmText: 'Void Transaction'
+        // Typed CONFIRM comes FIRST, then (for a Pharmacist) the manager's approval -- so a
+        // manager is never called over for a void the Pharmacist then backs out of.
+        const isCashier = Auth.getUser()?.role === 'cashier';
+
+        const confirmed = await TypedConfirm.show({
+            title:        `Void ${order.order_number}?`,
+            message:      `Total: ${Fmt.currency(order.total)}\n${itemsList}\n${warningLine}\nThis restores stock and cannot be undone.`,
+            html:         voidHtml,
+            confirmText:  'Void Transaction',
+            finalMessage: `You are about to void ${order.order_number}. Its stock is restored and this cannot be undone.` +
+                          (isCashier ? '\n\nNext, an Admin or Owner will be asked to approve.' : '')
         });
 
         if (!confirmed) return;
-
-        const isCashier = Auth.getUser()?.role === 'cashier';
 
         if (isCashier) {
             // Cashiers cannot void on their own authority -- an admin/owner must
@@ -1544,16 +1646,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 return;
             }
         } else {
-            // Admins/super_admins already have full authority -- just a final
-            // explicit confirmation since voiding cannot be reversed.
-            const finalConfirmed = await ConfirmDialog.show({
-                title:       'Final Confirmation',
-                message:     `Are you absolutely sure you want to void ${order.order_number}? This action is permanent.`,
-                confirmText: 'Yes, Void It'
-            });
-
-            if (!finalConfirmed) return;
-
+            // Admins and Owners already have the authority. The typed CONFIRM above was
+            // their explicit confirmation, so the request goes straight through.
             const result = await OfflineAPI.post('/pos/void', { order_id: order.id });
 
             if (result?.offline) {
@@ -1588,7 +1682,7 @@ document.addEventListener('DOMContentLoaded', () => {
             overlay.className = 'modal-overlay';
             overlay.id = 'partial-void-modal';
             overlay.innerHTML = `
-                <div class="modal" style="max-width:520px">
+                <div class="modal modal-sev modal-sev-warning" style="max-width:520px">
                     <div class="modal-header">
                         <h3 id="partial-void-title">Partial Void</h3>
                         <button class="btn-close" id="btn-close-partial-void">X</button>
@@ -1722,29 +1816,36 @@ document.addEventListener('DOMContentLoaded', () => {
             if (!s.valid || !this.order) return;
             const order = this.order;
 
-            const lines = (order.items || [])
+            const voidedRows = (order.items || [])
                 .filter(i => (this.qty.get(i.id) || 0) > 0)
-                .map(i => `\u2022 ${i.product_name} x${this.qty.get(i.id)}`)
-                .join('\n');
+                .map(i => `<div class="dlg-item"><div>${escHtml(i.product_name)}<small>Quantity to void: ${this.qty.get(i.id)}</small></div></div>`)
+                .join('');
+            const refundText   = Fmt.currency(s.refundCents / 100);
+            const newTotalText = Fmt.currency(s.newTotalCents / 100);
+            const isCashier    = Auth.getUser()?.role === 'cashier';
 
-            const confirmed = await ConfirmDialog.show({
-                title:       `Partial Void ${order.order_number}?`,
-                message:     `Voiding:\n${lines}\n\nRefund: ${Fmt.currency(s.refundCents / 100)}\nNew receipt total: ${Fmt.currency(s.newTotalCents / 100)}\n\nThe original receipt is voided and a new one is issued for the remaining items. This restores stock for the voided items and cannot be undone.`,
-                confirmText: 'Void Selected Items'
+            // The two figures that matter -- what goes back to the customer, and what the new
+            // receipt will total -- are the biggest things in the window.
+            const partialHtml = `
+                <div class="dlg-lead">
+                    <div><div class="dlg-label">Refund to customer</div><div class="dlg-big">${refundText}</div></div>
+                    <div class="dlg-label" style="text-align:right">New receipt total<br><strong style="font-size:1.05rem;color:var(--dark)">${newTotalText}</strong></div>
+                </div>
+                <div class="dlg-label" style="margin-bottom:6px">Items being voided</div>
+                <div class="dlg-items">${voidedRows}</div>
+                ${refundNoticeHtml(order, s.refundCents / 100)}
+                <div class="dlg-alert warn">The original receipt is voided and a new one is issued for the remaining items. This restores stock for the voided items and cannot be undone.</div>`;
+
+            // Typed CONFIRM first, then (for a Pharmacist) the manager's approval
+            const confirmed = await TypedConfirm.show({
+                title:        `Partial Void ${order.order_number}?`,
+                message:      `Voiding part of ${order.order_number}. Refund: ${refundText}. New receipt total: ${newTotalText}.`,
+                html:         partialHtml,
+                confirmText:  'Void Selected Items',
+                finalMessage: `You are about to void part of ${order.order_number}. This cannot be undone.` +
+                              (isCashier ? '\n\nNext, an Admin or Owner will be asked to approve.' : '')
             });
             if (!confirmed) return;
-
-            const isCashier = Auth.getUser()?.role === 'cashier';
-
-            if (!isCashier) {
-                // admins/owners already have the authority -- one explicit final confirmation
-                const finalConfirmed = await ConfirmDialog.show({
-                    title:       'Final Confirmation',
-                    message:     `Are you absolutely sure you want to partially void ${order.order_number}? This action is permanent.`,
-                    confirmText: 'Yes, Void Them'
-                });
-                if (!finalConfirmed) return;
-            }
 
             const selections = [...this.qty].filter(([, q]) => q > 0).map(([id, q]) => ({ order_item_id: id, quantity: q }));
             let promptMessage = `Voiding part of ${order.order_number} requires an admin or owner to approve.`;

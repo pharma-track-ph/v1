@@ -17,6 +17,7 @@ document.addEventListener('DOMContentLoaded', () => {
     let invSort       = null; // set once the table's sortable headers are wired up (see loadProducts)
     let invPaginate   = null; // set once, alongside invSort (see loadProducts)
     let editingId     = null; // representative row id of the brand being edited
+    let editingName   = '';   // that brand's name (shown in the Remove confirmation)
     let currentItems  = [];   // Item No. entries for the brand currently open in the modal
 
     // ── DOM References ───────────────────────────────────────
@@ -253,13 +254,13 @@ document.addEventListener('DOMContentLoaded', () => {
             overlay.className = 'modal-overlay';
             overlay.id = 'manage-categories-modal';
             overlay.innerHTML = `
-                <div class="modal" style="max-width:640px">
+                <div class="modal modal-sev modal-sev-info" style="max-width:640px">
                     <div class="modal-header">
                         <h3>Manage Categories</h3>
                         <button class="btn-close" id="mc-close">X</button>
                     </div>
                     <div class="modal-body" style="max-height:62vh;overflow-y:auto">
-                        <p class="mc-note">Rename or delete a category, or add a new one. A change applies to every product that uses it, so you will be asked to type "confirm". To delete, tick the categories first (you can tick several).</p>
+                        <p class="mc-note">Rename or delete a category, or add a new one. A change applies to every product that uses it, so you will be asked to type "CONFIRM". To delete, tick the categories first (you can tick several).</p>
                         <div class="table-container">
                             <table class="table mc-table" style="white-space:normal">
                                 <thead><tr>
@@ -336,7 +337,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     overlay.className = 'modal-overlay';
                     overlay.id = 'category-name-modal';
                     overlay.innerHTML = `
-                        <div class="modal" style="max-width:420px">
+                        <div class="modal modal-sev modal-sev-info" style="max-width:420px">
                             <div class="modal-header"><h3 id="cn-title"></h3></div>
                             <div class="modal-body">
                                 <p class="mc-note" id="cn-intro"></p>
@@ -478,7 +479,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 overlay.className = 'modal-overlay';
                 overlay.id = 'import-result-modal';
                 overlay.innerHTML = `
-                    <div class="modal" style="max-width:680px">
+                    <div class="modal modal-sev modal-sev-info" style="max-width:680px">
                         <div class="modal-header">
                             <h3>Import Results</h3>
                             <button class="btn-close" id="ir-close">X</button>
@@ -511,7 +512,19 @@ document.addEventListener('DOMContentLoaded', () => {
     if (urlStatus && statusFilter) statusFilter.value = urlStatus;
 
     loadProducts();
-    loadCategories();
+    const categoriesReady = loadCategories();
+
+    // Forecasting's "Restock" button links here with ?edit=<product id>: open that product's
+    // Edit window straight away (where Add Item No. is). The parameter is then removed from the
+    // address, so reloading the page does not open it again. Anything that is not a plain number
+    // is ignored.
+    const urlEdit = new URLSearchParams(window.location.search).get('edit');
+    if (urlEdit && /^\d+$/.test(urlEdit)) {
+        const cleaned = new URL(window.location.href);
+        cleaned.searchParams.delete('edit');
+        history.replaceState(null, '', cleaned.pathname + cleaned.search + cleaned.hash);
+        Promise.resolve(categoriesReady).then(() => openEditModal(parseInt(urlEdit, 10)));
+    }
 
     // ── Filters ──────────────────────────────────────────────
     searchInput?.addEventListener('input',    debounce(loadProducts, 300));
@@ -721,10 +734,11 @@ document.addEventListener('DOMContentLoaded', () => {
                         ${p.stock_quantity}
                     </span>
                     <div class="text-muted" style="font-size:0.7rem">${p.item_count} item${p.item_count === 1 ? '' : 's'}</div>
+                    ${p.expired_units > 0 ? `<div class="expired-units-line">${p.expired_units} expired</div>` : ''}
                 </td>
                 <td class="col-num${tint('price')}">${Fmt.currency(p.price)}</td>
                 <td class="col-text${tint('earliest_expiry_days_left')}">${expiryCell}</td>
-                <td class="col-text${tint('effective_status')}">${statusBadge}</td>
+                <td class="col-text${tint('effective_status')}">${statusBadge}${getExpiredTag(p)}</td>
                 <td>
                     <div class="d-flex gap-8 row-actions">
                         <button class="btn btn-light btn-sm btn-edit"    data-id="${p.id}" title="Edit">Edit</button>
@@ -787,6 +801,18 @@ document.addEventListener('DOMContentLoaded', () => {
             in_stock:     '<span class="badge badge-success">In Stock</span>'
         };
         return map[p.effective_status] || `<span class="badge badge-secondary">${p.effective_status}</span>`;
+    }
+
+    // The red "Expired stock" tag beside the status badge. A product can have good stock AND
+    // some expired units still waiting to be removed (its badge then says In Stock, Low Stock,
+    // Expiring...), so a second, red tag says so. Not shown when the badge already says
+    // Expired (no filter and every batch expired, or the Expired filter is on).
+    function getExpiredTag(p) {
+        if (!p.has_expired_stock) return '';
+        const activeFilter = statusFilter?.value || '';
+        const badgeSaysExpired = activeFilter === 'expired' || (!activeFilter && p.effective_status === 'expired');
+        if (badgeSaysExpired) return '';
+        return ' <span class="badge badge-danger expired-stock-tag" title="Some units of this product have expired and are still in the system">Expired stock</span>';
     }
 
     function getEarliestExpiryCell(p) {
@@ -865,6 +891,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         const p = data.data;
         currentItems = p.items || [];
+        editingName  = p.name || '';
 
         if (modalTitle) modalTitle.textContent = `Edit: ${p.name}`;
 
@@ -934,10 +961,9 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // An item that's expired OR fully depleted moves out of the active
-    // "Item No. (restock batches)" list and into "Removed Item No." below
-    // -- see the HTML comment on #removed-items-section for why that
-    // section's own "Remove" button is display-only and never a database
-    // delete.
+    // "Item No. (restock batches)" list and into "Removed Item No." below.
+    // That section's "Remove" button really removes it (see removeItemRow) -- though
+    // nothing is erased from the database.
     function itemNeedsRemoval(item) {
         return item.is_expired || item.stock_quantity <= 0;
     }
@@ -1024,13 +1050,13 @@ document.addEventListener('DOMContentLoaded', () => {
                             ${getItemTagHtml(item)}
                         </div>
                         <div class="item-row-actions">
-                            <button type="button" class="btn btn-light btn-sm btn-dismiss-item" data-item-id="${item.id}">Remove</button>
+                            <button type="button" class="btn btn-danger btn-sm btn-dismiss-item" data-item-id="${item.id}">Remove</button>
                         </div>
                     </div>
                 </div>`).join('');
 
             removedContainer.querySelectorAll('.btn-dismiss-item').forEach(btn =>
-                btn.addEventListener('click', () => dismissItemFromView(btn.dataset.itemId)));
+                btn.addEventListener('click', () => removeItemRow(btn.dataset.itemId)));
 
             removedSection?.classList.remove('hidden');
         } else {
@@ -1039,13 +1065,50 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    // Display-only, for THIS modal session -- never calls the delete API
-    // (see the "Removed Item No." HTML comment for why). Reopening this
-    // product's Edit modal later re-fetches from the server and will show
-    // it again if it's still sitting there in the database, unchanged.
-    function dismissItemFromView(itemId) {
-        currentItems = currentItems.filter(i => String(i.id) !== String(itemId));
-        renderItemList();
+    // "Remove" on an expired or empty Item No. -- the moment a stock record is matched against
+    // what is physically on the shelf. NOTHING IS ERASED: the server keeps the batch in the
+    // database flagged as removed, and writes an Audit Logs entry (who, product, Item No.,
+    // units, expiry date). The product itself stays in Inventory even if this was its only
+    // Item No.; the separate Delete button on the main table deletes the product.
+    async function removeItemRow(itemId) {
+        const item = currentItems.find(i => String(i.id) === String(itemId));
+        if (!item) return;
+
+        const itemNo   = currentItems.filter(itemNeedsRemoval).findIndex(i => String(i.id) === String(itemId)) + 1;
+        const lastItem = currentItems.length === 1;
+        const what     = item.is_expired && item.stock_quantity <= 0 ? 'Expired and empty' : (item.is_expired ? 'Expired' : 'Empty');
+        const name     = editingName || 'this product';
+        const expiry   = formatLongDate(item.expiry_date);
+        const units    = `${item.stock_quantity} unit${item.stock_quantity === 1 ? '' : 's'}`;
+
+        const html = `
+            <div class="dlg-lead">
+                <div><div class="dlg-label">${what} - Item No. ${itemNo}</div><div class="dlg-big">${units}</div></div>
+                <div class="dlg-label" style="text-align:right">${escHtml(name)}<br>Expires ${escHtml(expiry)}</div>
+            </div>
+            <div class="dlg-alert warn">Check this against the stock on the shelf before you continue.</div>
+            <div class="dlg-alert info">Nothing is erased: the record stays in the database and an entry is added to the Audit Logs.</div>
+            ${lastItem ? '<div class="dlg-alert info">This is the only Item No. The product stays in Inventory with no Item No. until you use Add Item No.</div>' : ''}`;
+
+        const confirmed = await TypedConfirm.show({
+            title:        `Remove Item No. ${itemNo}?`,
+            message:      `Remove Item No. ${itemNo} of ${name} (${units}, expires ${expiry}).`,
+            html,
+            confirmText:  'Remove',
+            severity:     'warning',
+            finalMessage: `Item No. ${itemNo} of ${name} will be taken out of the stock. It is kept in the database and logged in the Audit Logs.`
+        });
+        if (!confirmed) return;
+
+        const result = await OfflineAPI.post(`/inventory/items/${itemId}/remove`, {});
+        if (result?.success) {
+            Toast.show(result.message || 'Item No. removed.', 'success');
+            // the row this window remembered the product by may be the one just removed
+            if (result.group_id) editingId = result.group_id;
+            await reloadEditingItems();
+        } else {
+            Toast.show(result?.message || 'Failed to remove the Item No.', 'error');
+        }
     }
 
     function toggleItemEdit(itemId, showEdit) {
@@ -1083,6 +1146,8 @@ document.addEventListener('DOMContentLoaded', () => {
         const result = await OfflineAPI.delete(`/inventory/items/${itemId}`);
         if (result?.success) {
             Toast.show('Item removed.', 'success');
+            // the row this window remembered the product by may be the one just deleted
+            if (result.group_id) editingId = result.group_id;
             await reloadEditingItems();
         } else {
             // e.g. "can't delete the last remaining Item No." — surfaced
@@ -1096,6 +1161,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const data = await API.get(`/inventory/${editingId}`);
         if (data?.success) {
             currentItems = data.data.items || [];
+            editingName  = data.data.name || editingName;
             renderItemList();
         }
         loadProducts(); // main table's rolled-up stock/status may have changed

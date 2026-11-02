@@ -1139,7 +1139,7 @@ const SyncIssues = {
         overlay.className = 'modal-overlay';
         overlay.id = 'waiting-sync-modal';
         overlay.innerHTML = `
-            <div class="modal" style="max-width:520px">
+            <div class="modal modal-sev modal-sev-info" style="max-width:520px">
                 <div class="modal-header">
                     <h3>Changes Waiting to Sync</h3>
                     <button class="btn-close" id="btn-close-waiting-sync">X</button>
@@ -1328,7 +1328,7 @@ const SyncIssues = {
         overlay.className = 'modal-overlay';
         overlay.id = 'failed-sync-modal';
         overlay.innerHTML = `
-            <div class="modal" style="max-width:520px">
+            <div class="modal modal-sev modal-sev-warning" style="max-width:520px">
                 <div class="modal-header">
                     <h3>Changes That Were Not Saved</h3>
                     <button class="btn-close" id="btn-close-failed-sync">X</button>

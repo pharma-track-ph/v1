@@ -12,6 +12,7 @@ const { sendOtpEmail, sendEmailChangeOtp, sendActionOtp } = require('../utils/ma
 const { exportReport, formatShortDateTime } = require('../utils/reportExporter');
 const EmailChangeOtpStore = require('../utils/emailChangeOtpStore');
 const ActionOtpStore      = require('../utils/actionOtpStore');
+const CashSession         = require('../models/CashSession');
 
 /**
  * POST /api/auth/login
@@ -154,7 +155,7 @@ const updateUser = async (req, res, next) => {
                 if (!isReactivation) {
                     return res.status(403).json({
                         success: false,
-                        message: 'Admin accounts can only be managed by the account holder. The only change another Admin can make is reactivating a deactivated Admin account.'
+                        message: 'Owner accounts can only be managed by the account holder. The only change another Owner can make is reactivating a deactivated Owner account.'
                     });
                 }
             }
@@ -194,7 +195,7 @@ const updateUser = async (req, res, next) => {
                     await connection.rollback();
                     return res.status(409).json({
                         success: false,
-                        message: 'You are the only active Admin. Create or activate another Admin first, or the system would be left with no Admin.'
+                        message: 'You are the only active Owner. Create or activate another Owner first, or the system would be left with no Owner.'
                     });
                 }
             }
@@ -261,11 +262,10 @@ const requestEmailChangeOtp = async (req, res, next) => {
             return res.status(404).json({ success: false, message: 'User not found.' });
         }
 
-        // Same owner-protection rule as updateUser above. Wording updated
-        // to "Admin accounts" to match the super_admin DB value's new label
-        // -- see the Owner/Admin label swap note in updateUser above.
+        // Same owner-protection rule as updateUser above. The top role is shown
+        // as "Owner" (DB value super_admin).
         if (parseInt(id) !== req.user.id && target.role === 'super_admin') {
-            return res.status(403).json({ success: false, message: 'Admin accounts can only be managed by the account holder.' });
+            return res.status(403).json({ success: false, message: 'Owner accounts can only be managed by the account holder.' });
         }
 
         if (normalizedEmail === target.email.toLowerCase()) {
@@ -396,12 +396,10 @@ const requestActionOtp = async (req, res, next) => {
         }
 
         let actionDescription;
-        // Owner/Admin label swap: super_admin now displays as "Admin", admin
-        // now displays as "Owner" -- the DB values and every permission
-        // check throughout this file are completely unchanged, only this
-        // display mapping (and the handful of messages below that name one
-        // specific role) reflect the new labels.
-        const roleLabels = { super_admin: 'Admin', admin: 'Owner', cashier: 'Pharmacy Assistant' };
+        // Names people see: super_admin = Owner (full access), admin = Admin (limited),
+        // cashier = Pharmacist. The DB values and every permission check throughout this
+        // file are unchanged -- only this display mapping and the messages that name a role.
+        const roleLabels = { super_admin: 'Owner', admin: 'Admin', cashier: 'Pharmacist' };
 
         if (action === 'create_user') {
             const { name, email, password, role } = payload;
@@ -436,14 +434,14 @@ const requestActionOtp = async (req, res, next) => {
                 // the role that will actually be back in effect -- not the
                 // form's now-irrelevant role field.
                 if (req.user.role === 'admin' && existingAny.role !== 'cashier') {
-                    return res.status(403).json({ success: false, message: 'Owners can only reactivate Pharmacy Assistant accounts.' });
+                    return res.status(403).json({ success: false, message: 'Admins can only reactivate Pharmacist accounts.' });
                 }
                 payload.reactivateUserId = existingAny.id;
                 const oldRoleLabel = roleLabels[existingAny.role] || existingAny.role;
                 actionDescription = `reactivate the deactivated ${oldRoleLabel} account for ${existingAny.name}, restoring their previous role and access`;
             } else {
                 if (req.user.role === 'admin' && role !== 'cashier') {
-                    return res.status(403).json({ success: false, message: 'Owners can only create Pharmacy Assistant accounts.' });
+                    return res.status(403).json({ success: false, message: 'Admins can only create Pharmacist accounts.' });
                 }
                 actionDescription = `create a new ${roleLabels[role] || role} account for ${name}`;
             }
@@ -460,11 +458,10 @@ const requestActionOtp = async (req, res, next) => {
             if (!target) {
                 return res.status(404).json({ success: false, message: 'User not found.' });
             }
-            // Same owner-protection rule as updateUser above.
-            // Wording updated to "Admin accounts" -- see the Owner/Admin
-            // label swap note in updateUser above.
+            // Same owner-protection rule as updateUser above (the top role is
+            // shown as "Owner").
             if (parseInt(targetId) !== req.user.id && target.role === 'super_admin') {
-                return res.status(403).json({ success: false, message: 'Admin accounts can only be managed by the account holder.' });
+                return res.status(403).json({ success: false, message: 'Owner accounts can only be managed by the account holder.' });
             }
             actionDescription = `change the password for ${target.name}'s account`;
 
@@ -489,7 +486,7 @@ const requestActionOtp = async (req, res, next) => {
                 const allUsersForCount = await User.findAll();
                 const activeOwnerCount = allUsersForCount.filter(u => u.role === 'super_admin' && u.is_active).length;
                 if (activeOwnerCount < 2) {
-                    return res.status(400).json({ success: false, message: 'At least one Admin must remain in the system. You cannot delete your own account while you are the only active Admin.' });
+                    return res.status(400).json({ success: false, message: 'At least one Owner must remain in the system. You cannot delete your own account while you are the only active Owner.' });
                 }
                 actionDescription = 'deactivate your own account';
             } else {
@@ -498,7 +495,7 @@ const requestActionOtp = async (req, res, next) => {
                     return res.status(404).json({ success: false, message: 'User not found.' });
                 }
                 if (target.role === 'super_admin') {
-                    return res.status(403).json({ success: false, message: 'Admin accounts can only be managed by the account holder.' });
+                    return res.status(403).json({ success: false, message: 'Owner accounts can only be managed by the account holder.' });
                 }
                 actionDescription = `deactivate ${target.name}'s account`;
             }
@@ -650,7 +647,7 @@ const confirmActionOtp = async (req, res, next) => {
                 const activeOwnerCount = allUsersForCount.filter(u => u.role === 'super_admin' && u.is_active).length;
                 if (activeOwnerCount < 2) {
                     ActionOtpStore.clear(req.user.id);
-                    return res.status(400).json({ success: false, message: 'At least one Admin must remain in the system. You cannot delete your own account while you are the only active Admin.' });
+                    return res.status(400).json({ success: false, message: 'At least one Owner must remain in the system. You cannot delete your own account while you are the only active Owner.' });
                 }
             }
             await User.softDelete(targetId);
@@ -664,8 +661,18 @@ const confirmActionOtp = async (req, res, next) => {
     } catch (err) { next(err); }
 };
 
+// An Admin (DB role 'admin') may read the Audit Logs, but ONLY entries made by
+// Pharmacists (DB role 'cashier') -- never their own entries and never an Owner's.
+// The Owner (DB role 'super_admin') sees everything. This is added to the SQL itself, so
+// it also covers the filters, the search, the paging and the export -- it is not just
+// something the page chooses to show.
+// Sign-outs are never shown (a sign-out is not written to the Audit Logs any more; any entries
+// recorded by an earlier version are kept out of the list and the export too).
+const auditScopeSql = (req) =>
+    (req.user.role === 'super_admin' ? '' : " AND u.role = 'cashier'") + " AND al.action <> 'LOGOUT'";
+
 /**
- * GET /api/auth/audit-logs  [Super Admin only]
+ * GET /api/auth/audit-logs  [Owner: every entry | Admin: Pharmacist entries only]
  * Query params: limit, offset, action, user, date_start, date_end
  */
 const getAuditLogs = async (req, res, next) => {
@@ -686,6 +693,9 @@ const getAuditLogs = async (req, res, next) => {
             WHERE 1=1
         `;
         const params = [];
+
+        // Admin: Pharmacist entries only (Owner: everything) -- see auditScopeSql
+        sql += auditScopeSql(req);
 
         if (action) {
             sql += ' AND al.action LIKE ?';
@@ -728,13 +738,10 @@ const AUDIT_COLUMNS = [
     { label: 'Entity ID',   excelWidth: 10, pdfWidth: 50  }
 ];
 
-// Owner/Admin label swap: super_admin now displays as "Admin", admin now
-// displays as "Owner" throughout this app -- see requestActionOtp's
-// roleLabels for the full explanation. Audit Logs show whatever role the
-// user held AT THE TIME of each action (from the users table's CURRENT
-// role, not a historical snapshot), so a past log entry now reads with
-// today's labels, not whatever was displayed when it was originally logged.
-const AUDIT_ROLE_LABELS   = { super_admin: 'Admin', admin: 'Owner', cashier: 'Pharmacy Assistant' };
+// Names people see: super_admin = Owner, admin = Admin, cashier = Pharmacist. Audit Logs
+// show the user's CURRENT role (not a snapshot from the moment of each action), so an
+// older entry reads with today's names.
+const AUDIT_ROLE_LABELS   = { super_admin: 'Owner', admin: 'Admin', cashier: 'Pharmacist' };
 const AUDIT_ENTITY_LABELS = {
     products: 'Product', users: 'User', orders: 'Order', order_items: 'Order Item',
     cash_sessions: 'Cash Session', cash_movements: 'Cash Movement', audit_logs: 'Audit Log',
@@ -759,6 +766,10 @@ const exportAuditLogs = async (req, res, next) => {
             WHERE 1=1
         `;
         const params = [];
+
+        // Admin: Pharmacist entries only (Owner: everything) -- the export must follow
+        // the same rule as the page, so it cannot be used to read more than the page shows.
+        sql += auditScopeSql(req);
 
         if (search) {
             sql += ' AND (u.name LIKE ? OR al.action LIKE ? OR al.entity LIKE ?)';
@@ -1231,7 +1242,47 @@ const confirmChangeEmailOtp = async (req, res, next) => {
     } catch (err) { next(err); }
 };
 
+// ============================================================
+// SIGN OUT (with the register check)
+// ============================================================
+// A person with an OPEN register must close it before signing out, so the drawer is counted and
+// recorded. This is true for everyone -- Pharmacist, Admin and Owner alike: the rule is "has an
+// open register", not a role. The app first asks GET /sign-out-check ("may I?"); then, once the
+// person has typed CONFIRM, it calls POST /logout, which CHECKS AGAIN before it says yes -- so
+// the refusal cannot be skipped by calling /logout directly. A sign-out is deliberately NOT
+// written to the Audit Logs (by request).
+// (A login pass cannot be cancelled from the server, so nothing here can stop someone simply
+// discarding the pass in their browser; their open register then just stays open and shows up
+// at their next sign-in.)
+const openRegisterReply = (session) => ({
+    success: false,
+    allowed: false,
+    reason:  'register_open',
+    message: 'Your register is still open. Close the register before signing out.',
+    session: { opened_at: session.opened_at, opening_cash: session.opening_cash }
+});
+
+/** GET /api/auth/sign-out-check  [any logged-in role] -- "may this person sign out?" */
+const signOutCheck = async (req, res, next) => {
+    try {
+        const open = await CashSession.findOpenByCashier(req.user.id);
+        if (open) return res.status(409).json(openRegisterReply(open));
+        res.json({ success: true, allowed: true });
+    } catch (err) { next(err); }
+};
+
+/** POST /api/auth/logout  [any logged-in role] -- checks the register again, then says OK. Writes nothing to the Audit Logs. */
+const signOut = async (req, res, next) => {
+    try {
+        const open = await CashSession.findOpenByCashier(req.user.id);
+        if (open) return res.status(409).json(openRegisterReply(open));
+
+        res.json({ success: true, message: 'Signed out.' });
+    } catch (err) { next(err); }
+};
+
 module.exports = {
+    signOutCheck, signOut,
     login, getMe, getAllUsers, updateUser, getAuditLogs, exportAuditLogs,
     forgotPassword, verifyOtp, resetPassword, updateProfile,
     requestEmailChangeOtp, confirmEmailChangeOtp,

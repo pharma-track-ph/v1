@@ -727,16 +727,77 @@ const Product = {
     //     _toItemSummary), so a brand can show fully "In Stock" overall
     //     while one specific item is individually flagged for FEFO
     //     attention, exactly as specified.
-    _rollUpGroup: (rows) => {
+    // A product whose LAST batch was removed keeps one empty stand-in batch, so the product
+    // itself stays in Inventory (see removeItem). It is marked in batch_number, has no units and
+    // a far-future date, and is invisible everywhere else: never listed as an Item No., never
+    // counted, never exported, never sold (the POS only lists batches with units left).
+    NO_ITEM_MARK:   '(no item)',
+    NO_ITEM_EXPIRY: '2099-12-31',
+    _isPlaceholder: (r) => r.batch_number === Product.NO_ITEM_MARK,
+
+    // Expired = its date is before Manila's today (the same rule the roll-up below uses).
+    _isExpired: (r) => new Date(r.expiry_date) < manilaTime.midnight(),
+
+    // Earliest expiry first; the same date -> the older record first.
+    _byExpiry: (a, b) => (new Date(a.expiry_date) - new Date(b.expiry_date)) || (a.id - b.id),
+
+    // The two lists the Edit window shows, built the SAME way the screen builds them, so an
+    // "Item No. 2" in a message always means the Item No. 2 you can see:
+    //   "Item No. (restock batches)" -- still sellable: not expired and with units left
+    //   "Removed Item No."           -- expired, or no units left
+    // Each list is sorted by expiry date (earliest first) and numbered from 1.
+    // Returns Map(rowId -> { itemNo, list: 'active' | 'removed' }).
+    numberItems: (rows) => {
+        const real    = rows.filter(r => !Product._isPlaceholder(r));
+        const removed = (r) => Product._isExpired(r) || r.stock_quantity <= 0;
+        const out = new Map();
+        real.filter(r => !removed(r)).sort(Product._byExpiry).forEach((r, i) => out.set(r.id, { itemNo: i + 1, list: 'active' }));
+        real.filter(removed).sort(Product._byExpiry).forEach((r, i) => out.set(r.id, { itemNo: i + 1, list: 'removed' }));
+        return out;
+    },
+
+    _rollUpGroup: (allRows) => {
         // "Today" is Manila's today (its midnight), on ANY server -- a hosted server in UTC
         // used to flip an Item No. to expired at 8 AM Manila time instead of at midnight.
         const today = manilaTime.midnight();
+
+        // The stand-in batch (if any) carries the product's details but is not a batch.
+        const rows  = allRows.filter(r => !Product._isPlaceholder(r));
+        const first = allRows[0]; // representative row for shared/top-level fields (its id is used for Edit/Delete)
+
+        // A product with no Item No. at all (its last batch was removed): nothing to sell and
+        // nothing that can expire.
+        if (!rows.length) {
+            return {
+                id:                  first.id,
+                name:                first.name,
+                generic_name:        first.generic_name,
+                category:            first.category,
+                supplier:            first.supplier,
+                barcode:             first.barcode,
+                price:               first.price,
+                cost:                first.cost,
+                low_stock_threshold: first.low_stock_threshold,
+                is_tax_exempt:       first.is_tax_exempt ? 1 : 0,
+                description:         first.description,
+                stock_quantity:      0,
+                stock_status:        'out_of_stock',
+                effective_status:    'out_of_stock',
+                item_count:          0,
+                all_items_expired:   false,
+                earliest_expiry:           null,
+                earliest_expiry_days_left: null,
+                has_item_expiring_this_month: false,
+                has_item_expiring_3mo:        false,
+                has_expired_stock:   false,
+                expired_units:       0
+            };
+        }
 
         const nonExpired = rows.filter(r => new Date(r.expiry_date) >= today);
         const allItemsExpired = nonExpired.length === 0;
 
         const combinedStock = nonExpired.reduce((s, r) => s + r.stock_quantity, 0);
-        const first     = rows[0]; // representative row for shared/top-level fields
         const threshold = first.low_stock_threshold;
 
         let stock_status;
@@ -792,20 +853,26 @@ const Product = {
             earliest_expiry:           soonest ? soonest.expiry_date : null,
             earliest_expiry_days_left: soonest ? soonest.days_until_expiry : null,
             has_item_expiring_this_month: hasItemExpiringThisMonth,
-            has_item_expiring_3mo:        hasItemExpiring3mo
+            has_item_expiring_3mo:        hasItemExpiring3mo,
+            // Expired units still sitting in the system (a batch can be expired while the
+            // product also has good stock): this is what the red "Expired stock" tag and the
+            // Expired filter look at. A fully expired product is covered by all_items_expired.
+            has_expired_stock: rows.some(r => !(new Date(r.expiry_date) >= today) && r.stock_quantity > 0),
+            expired_units:     rows.filter(r => !(new Date(r.expiry_date) >= today)).reduce((s, r) => s + r.stock_quantity, 0)
         };
     },
 
     _toItemSummary: (row) => {
         const daysLeft = row.days_until_expiry;
+        const expired  = Product._isExpired(row);   // Manila's today, same rule as the roll-up
         return {
             id:                 row.id,
             stock_quantity:     row.stock_quantity,
             expiry_date:        row.expiry_date,
             days_until_expiry:  daysLeft,
-            is_expired:         daysLeft < 0,
-            expiring_this_month: daysLeft >= 0 && daysLeft <= 30,
-            expiring_3mo:        daysLeft >= 0 && daysLeft <= 90
+            is_expired:         expired,
+            expiring_this_month: !expired && daysLeft >= 0 && daysLeft <= 30,
+            expiring_3mo:        !expired && daysLeft >= 0 && daysLeft <= 90
         };
     },
 
@@ -837,24 +904,21 @@ const Product = {
 
         if (status) {
             const normalized = status === 'expiring' ? 'near_expiry' : status;
-            // Only Expired and Out of Stock genuinely need mutual exclusion
-            // -- a brand where every Item No. is expired ALSO always has 0
-            // sellable stock by construction (see stock_status above), so
-            // without excluding that case here it would show up under both
-            // filters at once. Low Stock, Expiring This Month, and
-            // Expiring in 3 Months are NOT like that -- they're genuinely
-            // independent conditions (a brand can legitimately be low on
-            // stock AND separately have an item expiring soon), so those
-            // stay as their own real checks rather than being folded into
-            // effective_status's single-pick hierarchy. effective_status is
-            // still what the single visible BADGE shows (see inventory.js's
-            // getStatusBadge) -- this is deliberately not the same question
-            // as "does this brand belong in the Low Stock list", which is
-            // why the two use different logic here.
+            // A product shows under EVERY filter that applies to any of its Item Nos -- the
+            // conditions are independent, not a single pick:
+            //   Expired       any batch that is expired with units still in the system (the
+            //                 product may also have good stock), or every batch expired
+            //   Out of Stock  no sellable units left -- including a product whose only remaining
+            //                 stock has expired (it is both Expired and Out of Stock)
+            //   Low Stock, Expiring This Month, Expiring in 3 Months  as before (any Item No.)
+            //   In Stock      stays the strict one on purpose: "nothing here needs attention".
+            // effective_status is still what the single visible BADGE shows when no filter is
+            // chosen (see inventory.js's getStatusBadge); the red "Expired stock" tag covers the
+            // partly-expired case beside it.
             summaries = summaries.filter(g => {
                 switch (normalized) {
-                    case 'expired':      return g.all_items_expired;
-                    case 'out_of_stock': return g.stock_status === 'out_of_stock' && !g.all_items_expired;
+                    case 'expired':      return g.all_items_expired || g.has_expired_stock;
+                    case 'out_of_stock': return g.stock_status === 'out_of_stock';
                     case 'low_stock':    return g.stock_status === 'low_stock';
                     case 'near_expiry':  return g.has_item_expiring_this_month;
                     case 'expiring_3mo': return g.has_item_expiring_3mo;
@@ -863,7 +927,7 @@ const Product = {
                     // all", so it should NOT match a brand that also has an
                     // item expiring soon just because its raw stock level
                     // happens to be fine.
-                    case 'in_stock':     return g.effective_status === 'in_stock';
+                    case 'in_stock':     return g.effective_status === 'in_stock' && !g.has_expired_stock;
                     default:             return true;
                 }
             });
@@ -896,7 +960,10 @@ const Product = {
         if (!rows.length) return null;
 
         const summary = Product._rollUpGroup(rows);
-        return { ...summary, items: rows.map(Product._toItemSummary) };
+        // The Item Nos the Edit window lists: real batches only (never the stand-in batch),
+        // earliest expiry first -- so a new batch finds its place by date, not by when it was added.
+        const items = rows.filter(r => !Product._isPlaceholder(r)).sort(Product._byExpiry).map(Product._toItemSummary);
+        return { ...summary, items };
     },
 
     // "Add Product" -- a brand-new medicine: its full shared details, plus
@@ -1014,7 +1081,7 @@ const Product = {
         const rows  = await Product._fetchGroupRowsByName(name);
         const first = rows[0];
 
-        return Product.create({
+        const newId = await Product.create({
             batch_number:        null,
             name:                first.name,
             generic_name:        first.generic_name,
@@ -1029,22 +1096,35 @@ const Product = {
             is_tax_exempt:       first.is_tax_exempt ? 1 : 0,
             expiry_date
         });
+
+        // A real batch now exists, so the empty stand-in batch (kept only while a product had
+        // none) is no longer needed.
+        await db.query(
+            'UPDATE products SET is_active = 0 WHERE name = ? AND is_active = 1 AND batch_number = ?',
+            [first.name, Product.NO_ITEM_MARK]
+        );
+        return newId;
     },
 
     // The Item No. of a brand that already has EXACTLY this expiry date, if any.
     // A restock whose expiry date matches an existing Item No. tops THAT one up
     // instead of creating a second Item No. for the same shipment date.
-    // Returns { id, itemNo, stock_quantity } or null. itemNo is the 1-based
-    // position in the brand's Item No. list (same numbering the screens show).
-    findItemByBrandAndExpiry: async (name, expiryDate) => {
-        const ymd = (d) => d instanceof Date
-            ? new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Manila', year: 'numeric', month: '2-digit', day: '2-digit' }).format(d)
-            : String(d).slice(0, 10);
-        const rows = await Product._fetchGroupRowsByName(name);
-        const target = ymd(expiryDate);
-        const idx = rows.findIndex(r => ymd(r.expiry_date) === target);
-        return idx === -1 ? null : { id: rows[idx].id, itemNo: idx + 1, stock_quantity: rows[idx].stock_quantity };
+    // Returns { id, itemNo, stock_quantity } or null. itemNo is the number the Edit window
+    // shows for that batch AFTER the top-up of `addQty` (an empty batch that gets units moves
+    // into the sellable list and is numbered there) -- see numberItems.
+    findItemByBrandAndExpiry: async (name, expiryDate, addQty = 0) => {
+        const rows = (await Product._fetchGroupRowsByName(name)).filter(r => !Product._isPlaceholder(r));
+        const target = Product._ymd(expiryDate);
+        const hit = rows.find(r => Product._ymd(r.expiry_date) === target);
+        if (!hit) return null;
+        const after = rows.map(r => r.id === hit.id ? { ...r, stock_quantity: r.stock_quantity + addQty } : r);
+        return { id: hit.id, itemNo: Product.numberItems(after).get(hit.id).itemNo, stock_quantity: hit.stock_quantity };
     },
+
+    // yyyy-mm-dd of a DATE value, in Manila time
+    _ymd: (d) => d instanceof Date
+        ? new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Manila', year: 'numeric', month: '2-digit', day: '2-digit' }).format(d)
+        : String(d).slice(0, 10),
 
     // Adds `quantity` to one Item No.'s current stock (a top-up, not a replace)
     addStockToItem: async (itemId, quantity) => {
@@ -1075,14 +1155,126 @@ const Product = {
         const name = await Product._resolveGroupName(itemId);
         if (!name) return { affected: 0, blocked: false };
 
-        const rows = await Product._fetchGroupRowsByName(name);
+        // The empty stand-in batch is not an Item No., so it does not count as one.
+        const rows = (await Product._fetchGroupRowsByName(name)).filter(r => !Product._isPlaceholder(r));
         if (rows.length <= 1) return { affected: 0, blocked: true };
+
+        const target = rows.find(r => String(r.id) === String(itemId));
+        const info   = target ? Product.numberItems(rows).get(target.id) : null;
 
         const [result] = await db.query(
             'UPDATE products SET is_active = 0 WHERE id = ? AND is_active = 1',
             [itemId]
         );
-        return { affected: result.affectedRows, blocked: false };
+        return {
+            affected: result.affectedRows, blocked: false,
+            // what the audit log records about the batch that was deleted
+            name, itemNo: info?.itemNo ?? null, units: target?.stock_quantity ?? null,
+            expiry_date: target ? Product._ymd(target.expiry_date) : null
+        };
+    },
+
+    // Puts units of a VOIDED sale back. Normally onto the batch they came from. If that batch is
+    // no longer live (removed or deleted since), the units are NOT sent to a hidden record --
+    // they come back as an Item No. in its place by expiry date:
+    //   - added to the Item No. that already has the same expiry date, if there is one;
+    //   - otherwise a new Item No. with that expiry date (the shared details -- price, barcode,
+    //     category -- come from the product as it is NOW; the removed batch row itself is left
+    //     untouched, so nothing recorded about it is lost);
+    //   - and if the PRODUCT itself was deleted, nothing is added (it was deleted on purpose).
+    // Runs inside the void's transaction (`connection`). Returns what happened, for the reply
+    // and the audit log: { status: 'restored' | 'merged' | 'revived' | 'product_deleted' | 'missing', name, qty, expiry }.
+    restoreVoidedStock: async (connection, productId, qty) => {
+        const [rows] = await connection.query('SELECT * FROM products WHERE id = ? FOR UPDATE', [productId]);
+        const row = rows[0];
+        if (!row) return { status: 'missing', qty };
+
+        if (Number(row.is_active) === 1) {
+            await connection.query('UPDATE products SET stock_quantity = stock_quantity + ? WHERE id = ?', [qty, productId]);
+            return { status: 'restored', name: row.name, qty };
+        }
+
+        const expiry = Product._ymd(row.expiry_date);
+        const [live] = await connection.query(
+            'SELECT * FROM products WHERE LOWER(name) = LOWER(?) AND is_active = 1 ORDER BY id ASC FOR UPDATE',
+            [row.name]
+        );
+        if (!live.length) return { status: 'product_deleted', name: row.name, qty, expiry };
+
+        const same = live.filter(r => !Product._isPlaceholder(r)).find(r => Product._ymd(r.expiry_date) === expiry);
+        if (same) {
+            await connection.query('UPDATE products SET stock_quantity = stock_quantity + ? WHERE id = ?', [qty, same.id]);
+            return { status: 'merged', name: row.name, qty, expiry };
+        }
+
+        const base = live[0];
+        await connection.query(
+            `INSERT INTO products (batch_number, name, generic_name, category, supplier, description, barcode,
+                                  price, cost, stock_quantity, low_stock_threshold, is_tax_exempt, expiry_date, is_active)
+             VALUES ('', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)`,
+            [base.name, base.generic_name, base.category, base.supplier, base.description, base.barcode,
+             base.price, base.cost, qty, base.low_stock_threshold, base.is_tax_exempt ? 1 : 0, row.expiry_date]
+        );
+        // a real batch exists again, so the empty stand-in (kept only while there was none) retires
+        await connection.query(
+            'UPDATE products SET is_active = 0 WHERE LOWER(name) = LOWER(?) AND is_active = 1 AND batch_number = ?',
+            [row.name, Product.NO_ITEM_MARK]
+        );
+        return { status: 'revived', name: row.name, qty, expiry };
+    },
+
+    // "Remove" on an expired or empty Item No. (the Edit window's "Removed Item No." list).
+    // NOTHING IS ERASED: the batch row stays in the table with is_active = 2 ("removed, kept for
+    // the records"). Every query already tests is_active = 1, so a removed batch drops out of the
+    // lists, the stock totals, the reports, the exports and the POS without touching any of them
+    // (is_active = 0 stays "deleted"). If it was the product's LAST batch, one empty stand-in
+    // batch is added so the product itself stays in Inventory (Out of Stock) and can be
+    // restocked with "Add Item No."; deleting the product is a separate action (softDeleteGroup).
+    // Returns what the audit log needs.
+    removeItem: async (itemId) => {
+        const [found] = await db.query(
+            `SELECT *, DATEDIFF(expiry_date, CURDATE()) AS days_until_expiry
+             FROM products WHERE id = ? AND is_active = 1`,
+            [itemId]
+        );
+        const row = found[0];
+        if (!row || Product._isPlaceholder(row)) return { found: false };
+
+        const group   = (await Product._fetchGroupRowsByName(row.name)).filter(r => !Product._isPlaceholder(r));
+        const expired = Product._isExpired(row);
+        const empty   = row.stock_quantity <= 0;
+        if (!expired && !empty) return { found: true, removable: false };
+
+        const info     = Product.numberItems(group).get(row.id);
+        const lastItem = group.length === 1;
+
+        const conn = await db.getConnection();
+        try {
+            await conn.beginTransaction();
+            await conn.query('UPDATE products SET is_active = 2 WHERE id = ? AND is_active = 1', [row.id]);
+            if (lastItem) {
+                await conn.query(
+                    `INSERT INTO products (batch_number, name, generic_name, category, supplier, description, barcode,
+                                          price, cost, stock_quantity, low_stock_threshold, is_tax_exempt, expiry_date, is_active)
+                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, 1)`,
+                    [Product.NO_ITEM_MARK, row.name, row.generic_name, row.category, row.supplier, row.description,
+                     row.barcode, row.price, row.cost, row.low_stock_threshold, row.is_tax_exempt ? 1 : 0, Product.NO_ITEM_EXPIRY]
+                );
+            }
+            await conn.commit();
+        } catch (err) {
+            await conn.rollback();
+            throw err;
+        } finally {
+            conn.release();
+        }
+
+        return {
+            found: true, removable: true, lastItem,
+            name: row.name, itemNo: info.itemNo, units: row.stock_quantity,
+            expiry_date: Product._ymd(row.expiry_date),
+            reason: expired && empty ? 'expired and empty' : (expired ? 'expired' : 'empty')
+        };
     },
 
     // Same counts as the individual getters above, recomputed from the
@@ -1100,8 +1292,8 @@ const Product = {
             low_stock:    summaries.filter(g => g.stock_status === 'low_stock').length,
             near_expiry:  summaries.filter(g => g.has_item_expiring_this_month).length,
             expiring_3mo: summaries.filter(g => g.has_item_expiring_3mo).length,
-            expired:      summaries.filter(g => g.all_items_expired).length,
-            out_of_stock: summaries.filter(g => g.stock_status === 'out_of_stock' && !g.all_items_expired).length
+            expired:      summaries.filter(g => g.all_items_expired || g.has_expired_stock).length,
+            out_of_stock: summaries.filter(g => g.stock_status === 'out_of_stock').length
         };
     },
 
@@ -1117,8 +1309,9 @@ const Product = {
         const [rows] = await db.query(
             `SELECT *, DATEDIFF(expiry_date, CURDATE()) AS days_until_expiry
              FROM products
-             WHERE is_active = 1
-             ORDER BY name ASC, id ASC`
+             WHERE is_active = 1 AND batch_number <> ?
+             ORDER BY name ASC, id ASC`,
+            [Product.NO_ITEM_MARK]      // the empty stand-in batch is not an Item No.
         );
 
         const groups = new Map();
@@ -1132,10 +1325,11 @@ const Product = {
 
         const orderedRows = [];
         sortedNames.forEach(name => {
-            const items = groups.get(name); // already id ASC from the query above
-            const needsAttention = r => new Date(r.expiry_date) < new Date() || r.stock_quantity <= 0;
-            const flagged    = items.filter(needsAttention);
-            const notFlagged = items.filter(r => !needsAttention(r));
+            const items = groups.get(name);
+            const needsAttention = r => Product._isExpired(r) || r.stock_quantity <= 0;
+            // each block earliest-expiry first, like the Edit window
+            const flagged    = items.filter(needsAttention).sort(Product._byExpiry);
+            const notFlagged = items.filter(r => !needsAttention(r)).sort(Product._byExpiry);
             orderedRows.push(...flagged, ...notFlagged);
         });
 

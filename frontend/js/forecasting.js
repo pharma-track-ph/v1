@@ -289,7 +289,8 @@ document.addEventListener('DOMContentLoaded', async () => {
                 <div class="restock-action">
                     <span class="restock-qty">Order ${s.recommended_qty}</span>
                     <button class="btn btn-sm btn-primary"
-                            onclick="window.location.href='inventory.html'">Restock</button>
+                            title="Open this product in Inventory to add stock"
+                            onclick="window.location.href='inventory.html?edit=${Number(s.id)}'">Restock</button>
                 </div>
             </div>
         `).join('');

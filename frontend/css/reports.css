@@ -232,31 +232,110 @@
 }
 
 .pvv-totals {
-    border-top:  2px solid var(--gray-200);
-    padding-top: 10px;
+    display:        flex;
+    flex-direction: column;
+    gap:            10px;
+    border-top:     2px solid var(--gray-200);
+    padding-top:    14px;
 }
 
+/* Three labelled blocks. All three amounts are the SAME size (1.25rem, bold) -- the blocks are
+   told apart by their label, colour and border: what the sale originally came to, what goes
+   back to the customer, and the total of the new receipt. Label colours are the darker
+   shades on purpose: they need to be readable on the tinted background, not just look right. */
 .pvv-total-row {
     display:         flex;
     justify-content: space-between;
-    gap:             12px;
-    font-size:       0.9rem;
-    padding:         3px 0;
+    align-items:     center;
+    gap:             16px;
+    padding:         12px 16px;
+    border-radius:   var(--border-radius);
+    background:      var(--gray-100);
 }
 
-.pvv-total-row span:last-child { white-space: nowrap; font-variant-numeric: tabular-nums; }
+.pvv-label      { display: flex; flex-direction: column; min-width: 0; }
+.pvv-label-main {
+    font-size:      0.88rem;
+    font-weight:    700;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    color:          var(--gray-700);
+}
+.pvv-label-sub  { font-size: 0.75rem; color: var(--secondary); margin-top: 2px; }
 
-.pvv-refund { color: var(--danger); }
+.pvv-amount {
+    font-size:           1.25rem;
+    font-weight:         700;
+    line-height:         1.1;
+    white-space:         nowrap;
+    font-variant-numeric: tabular-nums;
+    color:               var(--dark);
+}
 
-.pvv-remaining {
+/* what the sale originally came to */
+.pvv-original { border: 2px solid var(--gray-300); background: var(--white); }
+
+/* what goes back to the customer */
+.pvv-refund { border: 2px solid var(--danger); background: var(--danger-light); }
+.pvv-refund .pvv-label-main,
+.pvv-refund .pvv-amount { color: #a71d2a; }
+
+/* the new receipt's total */
+.pvv-remaining { background: var(--success-light); }
+.pvv-remaining .pvv-label-main,
+.pvv-remaining .pvv-amount { color: #0f5132; }
+
+/* dark theme: the brighter shades read better on dark tints */
+body.dark-mode .pvv-refund .pvv-label-main,
+body.dark-mode .pvv-refund .pvv-amount       { color: var(--danger); }
+body.dark-mode .pvv-remaining .pvv-label-main,
+body.dark-mode .pvv-remaining .pvv-amount    { color: var(--success); }
+
+@media (max-width: 480px) {
+    .pvv-total-row { padding: 10px 12px; gap: 10px; }
+    .pvv-amount    { font-size: 1.15rem; }
+}
+
+/* Items tables in the Sales Report and the Void Report: each item's own Senior/PWD discount,
+   its line total after that discount, and a Total row at the bottom that adds the line totals. */
+.item-disc { color: #a71d2a; font-weight: 600; }
+body.dark-mode .item-disc { color: var(--danger); }
+.item-total-row td {
     font-weight: 700;
-    font-size:   1.05rem;
-    border-top:  1px solid var(--gray-300);
-    margin-top:  4px;
-    padding-top: 6px;
+    background:  var(--gray-100);
+    border-top:  2px solid var(--gray-300);
 }
 
-/* Pharmacy Assistants never receive cost or profit figures from the server;
+/* Register Report: the breakdown under a row's arrow -- the sum that ends on the Expected cash,
+   then what was counted, then the Cash In / Cash Out entries. The wrapper turns text wrapping back
+   ON because the table this sits in is white-space: nowrap. */
+.reg-detail   { white-space: normal; padding: 4px 0; }
+.reg-equation { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; margin: 2px 0 10px; }
+.reg-term {
+    display:        flex;
+    flex-direction: column;
+    min-width:      108px;
+    padding:        8px 12px;
+    border:         1px solid var(--gray-300);
+    border-radius:  var(--border-radius);
+    background:     var(--white);
+}
+.reg-term-label {
+    font-size:      0.7rem;
+    font-weight:    600;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    color:          var(--secondary);
+}
+.reg-term-value { font-size: 1.05rem; font-weight: 700; font-variant-numeric: tabular-nums; color: var(--dark); }
+.reg-out .reg-term-value { color: #a71d2a; }
+.reg-result { border-color: var(--primary); background: var(--primary-bg); }
+.reg-op     { font-size: 1.1rem; font-weight: 700; color: var(--secondary); }
+.reg-counted { font-size: 0.9rem; margin-bottom: 6px; }
+.reg-facts   { font-size: 0.8rem; color: var(--secondary); margin-bottom: 12px; }
+body.dark-mode .reg-out .reg-term-value { color: var(--danger); }
+
+/* Pharmacists never receive cost or profit figures from the server;
    this hides the columns and cards that would otherwise sit empty. */
 body.hide-cost .cost-col { display: none !important; }
 

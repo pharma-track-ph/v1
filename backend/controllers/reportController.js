@@ -457,7 +457,7 @@ const getVoidReport = async (req, res, next) => {
         const orderIds = orders.map(o => o.id);
         const placeholders = orderIds.map(() => '?').join(',');
         const [items] = await db.query(
-            `SELECT order_id, product_name, quantity, unit_price, subtotal
+            `SELECT order_id, product_name, quantity, unit_price, subtotal, discount_amount
              FROM order_items
              WHERE order_id IN (${placeholders})
              ORDER BY order_id, id`,
@@ -576,31 +576,39 @@ const getRegisterReport = async (req, res, next) => {
         const { start_date, end_date, limit = 500, offset = 0 } = req.query;
         const userId = scopedUserId(req);
 
-        const sessions = await CashSession.findAllForReport({
+        const sessions = await addRegisterTotals(await CashSession.findAllForReport({
             startDate: start_date, endDate: end_date, cashierId: userId, limit, offset
-        });
+        }));
 
         const summary = sessions.reduce((acc, s) => ({
-            total_sessions: acc.total_sessions + 1,
-            total_opened:   acc.total_opened + parseFloat(s.opening_cash || 0),
-            total_variance: acc.total_variance + parseFloat(s.variance || 0),
-            open_count:     acc.open_count + (s.status === 'OPEN' ? 1 : 0)
-        }), { total_sessions: 0, total_opened: 0, total_variance: 0, open_count: 0 });
+            total_sessions:   acc.total_sessions + 1,
+            total_opened:     acc.total_opened + parseFloat(s.opening_cash || 0),
+            total_cash_sales: acc.total_cash_sales + Math.round(s.cash_sales * 100),
+            total_variance:   acc.total_variance + parseFloat(s.variance || 0),
+            open_count:       acc.open_count + (s.status === 'OPEN' ? 1 : 0)
+        }), { total_sessions: 0, total_opened: 0, total_cash_sales: 0, total_variance: 0, open_count: 0 });
+        summary.total_cash_sales = summary.total_cash_sales / 100;
 
         res.json({ success: true, data: sessions, summary });
 
     } catch (err) { next(err); }
 };
 
+// The exported file has room for every column the screen keeps under the row's arrow.
 const REGISTER_COLUMNS = [
-    { label: 'Processed By',       excelWidth: 22, pdfWidth: 90  },
-    { label: 'Opened At',           excelWidth: 26, pdfWidth: 108 },
-    { label: 'Opening Cash',        excelWidth: 14, pdfWidth: 60  },
-    { label: 'Opened Approved By',  excelWidth: 20, pdfWidth: 90  },
-    { label: 'Status',              excelWidth: 10, pdfWidth: 45  },
-    { label: 'Closed At',           excelWidth: 26, pdfWidth: 108 },
-    { label: 'Variance',            excelWidth: 12, pdfWidth: 55  },
-    { label: 'Closed Approved By',  excelWidth: 20, pdfWidth: 90  }
+    { label: 'Processed By',       excelWidth: 20, pdfWidth: 66 },
+    { label: 'Opened At',          excelWidth: 24, pdfWidth: 84 },
+    { label: 'Opening Cash',       excelWidth: 14, pdfWidth: 54 },
+    { label: 'Cash Sales',         excelWidth: 14, pdfWidth: 52 },
+    { label: 'Cash In',            excelWidth: 12, pdfWidth: 46 },
+    { label: 'Cash Out',           excelWidth: 12, pdfWidth: 46 },
+    { label: 'Expected Cash',      excelWidth: 14, pdfWidth: 54 },
+    { label: 'Counted Cash',       excelWidth: 14, pdfWidth: 54 },
+    { label: 'Variance',           excelWidth: 12, pdfWidth: 50 },
+    { label: 'Status',             excelWidth: 10, pdfWidth: 38 },
+    { label: 'Closed At',          excelWidth: 24, pdfWidth: 84 },
+    { label: 'Opened Approved By', excelWidth: 18, pdfWidth: 62 },
+    { label: 'Closed Approved By', excelWidth: 18, pdfWidth: 62 }
 ];
 
 /**
@@ -611,21 +619,24 @@ const exportRegisterReport = async (req, res, next) => {
         const { start_date, end_date } = req.query;
         const userId = scopedUserId(req);
 
-        const sessions = await CashSession.findAllForReport({
+        const sessions = await addRegisterTotals(await CashSession.findAllForReport({
             startDate: start_date, endDate: end_date, cashierId: userId, limit: 500, offset: 0
-        });
+        }));
 
+        const peso = (v) => `₱${Number(v).toFixed(2)}`;
         const rows = sessions.map(s => {
             const isOpen = s.status === 'OPEN';
             const varianceVal = parseFloat(s.variance);
             const varianceText = s.status === 'CLOSED' && !isNaN(varianceVal)
-                ? `${varianceVal >= 0 ? '+' : ''}₱${varianceVal.toFixed(2)}`
+                ? `${varianceVal >= 0 ? '+' : ''}${peso(varianceVal)}`
                 : '—';
             return [
                 s.cashier_name, formatShortDateTime(s.opened_at),
-                `₱${Number(s.opening_cash).toFixed(2)}`, s.opened_approved_by_name || '—',
+                peso(s.opening_cash), peso(s.cash_sales), peso(s.cash_in), peso(s.cash_out),
+                peso(s.expected_cash), s.counted_cash != null ? peso(s.counted_cash) : '—',
+                varianceText,
                 isOpen ? 'Open' : 'Closed', s.closed_at ? formatShortDateTime(s.closed_at) : '—',
-                varianceText, s.closed_approved_by_name || '—'
+                s.opened_approved_by_name || '—', s.closed_approved_by_name || '—'
             ];
         });
 
@@ -640,6 +651,80 @@ const exportRegisterReport = async (req, res, next) => {
         });
     } catch (err) { next(err); }
 };
+
+// For every register session in a report: what it EARNED and where its cash stands, plus the list
+// of its Cash In / Cash Out entries (refunds included). All sums are done in cents.
+//   - a CLOSED register uses the figures SAVED when it was closed (Expected, Counted, Variance) and
+//     works Cash Sales out from them (Expected - Opening - Cash In + Cash Out), so voiding an old
+//     sale later never changes a closed register's row (the refund shows in the register that paid it);
+//   - a register still OPEN (or one closed before closing figures were saved) is worked out LIVE
+//     from its sales and its Cash In / Cash Out.
+async function addRegisterTotals(sessions) {
+    if (!sessions.length) return sessions;
+
+    const cents = (v) => Math.round(Number(v || 0) * 100);
+    const pesos = (c) => c / 100;
+    const ids   = sessions.map(s => s.id);
+
+    const [movements] = await db.query(
+        `SELECT cm.cash_session_id, cm.type, cm.amount, cm.reason, cm.created_at,
+                req.name AS requested_by_name, appr.name AS approved_by_name
+         FROM cash_movements cm
+         JOIN users req  ON req.id  = cm.requested_by
+         JOIN users appr ON appr.id = cm.approved_by
+         WHERE cm.cash_session_id IN (${ids.map(() => '?').join(',')})
+         ORDER BY cm.created_at ASC, cm.id ASC`,
+        ids
+    );
+    const movesBySession = new Map();
+    movements.forEach(m => {
+        const key = Number(m.cash_session_id);
+        if (!movesBySession.has(key)) movesBySession.set(key, []);
+        movesBySession.get(key).push(m);
+    });
+
+    // live sales are only needed for registers that have no saved closing figures
+    const needLive = sessions.filter(s => s.status === 'OPEN' || s.closing_cash_expected == null).map(s => s.id);
+    const liveSales = new Map();
+    if (needLive.length) {
+        const [rows] = await db.query(
+            `SELECT cash_session_id, COALESCE(SUM(total), 0) AS cash_sales
+             FROM orders
+             WHERE cash_session_id IN (${needLive.map(() => '?').join(',')}) AND status = 'completed'
+             GROUP BY cash_session_id`,
+            needLive
+        );
+        rows.forEach(r => liveSales.set(Number(r.cash_session_id), cents(r.cash_sales)));
+    }
+
+    return sessions.map(s => {
+        const moves   = movesBySession.get(Number(s.id)) || [];
+        const cashIn  = moves.filter(m => m.type === 'CASH_IN').reduce((t, m) => t + cents(m.amount), 0);
+        const cashOut = moves.filter(m => m.type === 'CASH_OUT').reduce((t, m) => t + cents(m.amount), 0);
+        const opening = cents(s.opening_cash);
+
+        const savedClose = s.status === 'CLOSED' && s.closing_cash_expected != null;
+        const expected   = savedClose ? cents(s.closing_cash_expected) : null;
+        const sales      = savedClose ? expected - opening - cashIn + cashOut : (liveSales.get(Number(s.id)) || 0);
+
+        return {
+            ...s,
+            cash_sales:    pesos(sales),
+            cash_in:       pesos(cashIn),
+            cash_out:      pesos(cashOut),
+            expected_cash: pesos(savedClose ? expected : opening + sales + cashIn - cashOut),
+            counted_cash:  s.closing_cash_actual != null ? parseFloat(s.closing_cash_actual) : null,
+            movements:     moves.map(m => ({
+                type:              m.type,
+                amount:            parseFloat(m.amount),
+                reason:            m.reason,
+                created_at:        m.created_at,
+                requested_by_name: m.requested_by_name,
+                approved_by_name:  m.approved_by_name
+            }))
+        };
+    });
+}
 
 /**
  * GET /api/reports/users  [Admin and Owner only -- see reportRoutes.js]

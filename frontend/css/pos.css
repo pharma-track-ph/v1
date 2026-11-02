@@ -119,6 +119,36 @@ body.pos-page .main-wrapper {
 
 .btn-barcode:hover { transform: scale(1.02); }
 
+/* Category filter -- the last item in the search row. Same 40px height as the search box
+   and the barcode buttons, centred on the row. It takes only the room it needs and is the
+   first thing to give way when the row gets tight (see the container query below).
+   Tinted blue while a category is chosen, so nobody forgets that a filter is on. */
+.pos-category-filter {
+    flex:          0 1 190px;
+    min-width:     0;
+    height:        40px;
+    align-self:    center;
+    padding:       0 10px;
+    font-size:     0.85rem;
+    font-family:   inherit;
+    color:         var(--dark);
+    background:    var(--white);
+    border:        1px solid var(--gray-300);
+    border-radius: var(--border-radius);
+    cursor:        pointer;
+    transition:    var(--transition);
+}
+.pos-category-filter:focus {
+    outline:      none;
+    border-color: var(--primary);
+}
+.pos-category-filter.is-filtering {
+    color:        var(--primary);
+    background:   var(--primary-bg);
+    border-color: var(--primary);
+    font-weight:  600;
+}
+
 .barcode-input-row {
     display:     none;
     align-items: center;
@@ -1006,6 +1036,13 @@ body.pos-page .main-wrapper {
     .register-strip-totals { flex-wrap: wrap; gap: 8px 14px; }
     .register-strip-actions { margin-left: 0; width: 100%; }
     .register-strip-actions .btn { flex: 1; justify-content: center; }
+}
+
+/* Not enough room for everything on one row: the category filter drops to its own
+   full-width line under the search box and the buttons. */
+@container fixed-top (max-width: 640px) {
+    .pos-search-bar { flex-wrap: wrap; }
+    .pos-category-filter { flex: 1 1 100%; }
 }
 
 @container fixed-top (max-width: 480px) {

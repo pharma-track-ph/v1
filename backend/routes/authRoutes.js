@@ -1,6 +1,7 @@
 const express = require('express');
 const router  = express.Router();
 const {
+    signOutCheck, signOut,
     login, getMe, getAllUsers, updateUser, getAuditLogs, exportAuditLogs,
     forgotPassword, verifyOtp, resetPassword, updateProfile,
     requestEmailChangeOtp, confirmEmailChangeOtp,
@@ -12,6 +13,12 @@ const { verifyToken, requireRole } = require('../middleware/authMiddleware');
 
 router.post('/login', login);
 router.get('/me',     verifyToken, getMe);
+
+// Sign out, with the register check: ANY logged-in role (the rule is "has an open register",
+// not a role). /sign-out-check answers "may I?"; /logout checks AGAIN and says OK (it writes
+// nothing to the Audit Logs).
+router.get('/sign-out-check', verifyToken, signOutCheck);
+router.post('/logout',        verifyToken, signOut);
 
 // Self-service profile update (name + avatar) -- any logged-in role,
 // unlike /users/:id below which is admin/owner only.
@@ -59,9 +66,10 @@ router.post('/users/:id/email-otp/confirm', verifyToken, requireRole('super_admi
 router.post('/action-otp/request', verifyToken, requireRole('super_admin'), requestActionOtp);
 router.post('/action-otp/confirm', verifyToken, requireRole('super_admin'), confirmActionOtp);
 
-// Audit logs – Super Admin only. Export route before the plain GET so
-// Express doesn't need any special-casing (different path shape anyway).
-router.get('/audit-logs/export/:format', verifyToken, requireRole('super_admin'), exportAuditLogs);
-router.get('/audit-logs', verifyToken, requireRole('super_admin'), getAuditLogs);
+// Audit logs -- Owner (every entry) and Admin (ONLY entries made by Pharmacists; the
+// controller adds that rule to the SQL). Pharmacists are refused here (403). Export route
+// before the plain GET so Express doesn't need any special-casing (different path shape anyway).
+router.get('/audit-logs/export/:format', verifyToken, requireRole('admin'), exportAuditLogs);
+router.get('/audit-logs', verifyToken, requireRole('admin'), getAuditLogs);
 
 module.exports = router;
