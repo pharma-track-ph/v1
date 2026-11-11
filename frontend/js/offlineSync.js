@@ -1,18 +1,4 @@
-// ============================================================
-// Offline Sync Module
-// IndexedDB-based offline-first data sync for PharmaTrack
-//
-// Covers: product/inventory browsing, the CURRENT cash register session,
-// and POS checkout -- all three keep working with no internet, and sync
-// back once the connection returns. Built for a single-cashier pharmacy
-// (see pos.js), so this deliberately does NOT try to reconcile
-// simultaneous multi-cashier stock conflicts -- it optimistically trusts
-// the locally cached numbers while offline, and the server still has
-// final say once synced. If a queued sale is ever rejected at sync time
-// (e.g. stock genuinely ran out in the meantime), it's recorded in
-// `failed_syncs` instead of silently vanishing -- see recordFailedSync()
-// and OfflineAPI.getFailedSyncs().
-// ============================================================
+// Offline Sync Module - IndexedDB-based offline-first data sync for PharmaTrack Covers
 
 class OfflineSync {
     constructor() {
@@ -24,10 +10,7 @@ class OfflineSync {
 
     async initDB() {
         return new Promise((resolve, reject) => {
-            // Bumped 1 -> 2 to add the `session` and `failed_syncs` stores
-            // below. onupgradeneeded only fires for browsers that still
-            // have the old version 1 database, so existing cached
-            // products/sync_queue data is untouched by this bump.
+            // Bumped 1 -> 2 to add the `session` and `failed_syncs` stores below...
             const request = indexedDB.open('pharmatrack_offline', 2);
 
             request.onerror = () => reject(request.error);
@@ -54,16 +37,11 @@ class OfflineSync {
                 }
 
                 // Single-row cache of "the cashier's currently open register"
-                // (see OfflineAPI.cacheCurrentSession) -- keyPath 'key' with
-                // one fixed record ('current'), same pattern as any small
-                // singleton cache.
                 if (!db.objectStoreNames.contains('session')) {
                     db.createObjectStore('session', { keyPath: 'key' });
                 }
 
-                // Sync attempts that got permanently discarded (rejected by
-                // the server, or gave up after repeated failures) land here
-                // instead of just disappearing -- see recordFailedSync().
+                // Sync attempts that got permanently discarded
                 if (!db.objectStoreNames.contains('failed_syncs')) {
                     const failedStore = db.createObjectStore('failed_syncs', { keyPath: 'id', autoIncrement: true });
                     failedStore.createIndex('timestamp', 'timestamp', { unique: false });
@@ -90,17 +68,13 @@ class OfflineSync {
         if (show && !banner) {
             const topHeader   = document.querySelector('.top-header');
             const headerRight = document.querySelector('.header-right');
-            if (!topHeader) return; // no header on this page (e.g. login) -- nothing to show it in
+            if (!topHeader) return; // no header on this page (e.g. login) - nothing to show it in
 
             banner = document.createElement('div');
             banner.id = 'offline-banner';
             banner.textContent = 'Offline Mode';
 
-            // Inserted BEFORE .header-right (not just appended) so it lands
-            // in the middle of the header's own flex layout
-            // (justify-content:space-between between .header-left and
-            // .header-right) -- the empty gap that's already there on
-            // every page, rather than overlaying anything.
+            // Inserted BEFORE .header-right (not just appended)
             if (headerRight) {
                 topHeader.insertBefore(banner, headerRight);
             } else {
@@ -181,12 +155,7 @@ class OfflineSync {
         });
     }
 
-    /**
-     * Records a sync attempt that's being permanently given up on (rejected
-     * by the server, or repeated failures) so it doesn't just silently
-     * vanish -- OfflineAPI.getFailedSyncs() surfaces these on the POS page
-     * for the cashier/owner to review and handle manually if needed.
-     */
+    /** Records a sync attempt that's being permanently given up on */
     async recordFailedSync(item, reason) {
         return new Promise((resolve, reject) => {
             const transaction = this.db.transaction(['failed_syncs'], 'readwrite');
@@ -206,16 +175,7 @@ class OfflineSync {
         });
     }
 
-    /**
-     * Sends ONE queued item and reports what happened. Outcomes:
-     *   synced -- the server accepted it (or answered "already recorded");
-     *             it is removed from the queue.
-     *   failed -- the server refused it (or it kept erroring); it is moved to
-     *             failed_syncs with the reason.
-     *   retry  -- could not be completed this time; it stays queued.
-     *   auth   -- the login expired. The item is KEPT (it was not refused,
-     *             just unsigned) and syncing resumes after signing in again.
-     */
+    /** Sends ONE queued item and reports what happened. */
     async syncItem(item) {
         try {
             const queuedHeaders = { ...(item.headers || {}) };
@@ -266,8 +226,7 @@ class OfflineSync {
         }
     }
 
-    // Counts a failed attempt; after 3 the item is given up on and moved to
-    // failed_syncs (where it can be retried or dismissed by hand).
+    // Counts a failed attempt; after 3 the item is given up on and moved...
     async noteRetry(item, finalReason, softMessage) {
         item.retries   = (item.retries || 0) + 1;
         item.lastError = softMessage;
@@ -280,15 +239,7 @@ class OfflineSync {
         return { status: 'failed', message: finalReason };
     }
 
-    /**
-     * One sync pass -- the automatic one (when the connection returns), "Sync
-     * all", and the per-sale Sync button all come through here. `onlyIds`
-     * limits it to specific queue items. Only ONE pass runs at a time: a
-     * second request while one is running is refused as "busy" rather than
-     * sending the same sale twice (the server's duplicate guard is the second
-     * line of defence behind this lock).
-     * Returns { results, skipped? } with one result per item attempted.
-     */
+    /** One sync pass - the automatic one (when the connection returns), "Sync all" */
     async runSync(onlyIds = null) {
         if (!this.isOnline || !this.db) return { results: [], skipped: 'offline' };
         if (this.syncRunning)           return { results: [], skipped: 'busy' };
@@ -328,10 +279,7 @@ class OfflineSync {
             );
         }
 
-        // Lets any page listening (pos.js's Pending list and FailedSyncPanel)
-        // refresh itself right after a pass -- both to update what's shown and
-        // to re-pull the server's now-authoritative stock/session numbers
-        // instead of the offline cache's approximation.
+        // Lets any page listening (pos.js's Pending list and FailedSyncPanel)...
         if (results.length) {
             window.dispatchEvent(new CustomEvent('pharmatrack:sync-complete', {
                 detail: { syncedCount, failedCount, results }
@@ -387,12 +335,7 @@ function getRequestUrl(endpoint) {
     return `${getRuntimeConfig().API_BASE}${endpoint}`;
 }
 
-// Only a server that is TEMPORARILY unavailable (502/503/504: restarting, cold
-// start, gateway) is treated like being offline and queued. A plain 500 means the
-// server RECEIVED the request and its own code or database failed: retrying the
-// same request later cannot fix that, and queuing it only hid the failure behind
-// a green "added" message while nothing was saved. A 500 is now shown as a
-// failure, with the server's message (and its short error code).
+// Only a server that is TEMPORARILY unavailable
 function isTemporaryServerStatus(status) {
     return status === 502 || status === 503 || status === 504;
 }
@@ -488,13 +431,7 @@ const OfflineAPI = {
         }
     },
 
-    // POS list refresh. The /pos/products response is the full list of brands
-    // that are sellable RIGHT NOW (stock left, not expired), so after caching
-    // it, any POS entry cached earlier that is no longer in the response is
-    // removed -- otherwise a brand that sold out (and so disappeared online)
-    // would keep showing in offline mode. Only done for the unfiltered list,
-    // never for a search or barcode result, which is just a slice of it.
-    // Entries are tagged _pos so Inventory's own cached rows are never touched.
+    // POS list refresh.
     async cachePosProducts(products = [], endpoint = '') {
         const url        = new URL(endpoint, window.location.origin);
         const isFullList = !(url.searchParams.get('q') || url.searchParams.get('barcode'));
@@ -586,13 +523,7 @@ const OfflineAPI = {
         };
     },
 
-    /**
-     * Caches "the cashier's currently open register" (or null, if there
-     * isn't one) every time it's successfully fetched online, so Checkout
-     * still knows the register is open -- and which session ID to attach
-     * the sale to -- once offline. See getCachedSession() for the
-     * offline-read side.
-     */
+    /** Caches "the cashier's currently open register" */
     async cacheCurrentSession(session) {
         await offlineSync.put('session', { key: 'current', data: session ?? null, cachedAt: Date.now() });
     },
@@ -602,18 +533,7 @@ const OfflineAPI = {
         return { success: true, data: record?.data ?? null, cached: true };
     },
 
-    /**
-     * Applied when a checkout is queued for later sync (whether truly
-     * offline, or the server errored while nominally online -- see
-     * OfflineAPI.post below). Decrements the CACHED product-family entry
-     * (keyed by product_id, the same id /pos/products groups batches
-     * under) by the quantity just sold, so a second offline sale of the
-     * same product sees accurate remaining stock instead of the
-     * pre-sale number. This is a display-side approximation, not a
-     * batch-exact mirror of the server's FEFO consumption -- fine for
-     * keeping the offline UI honest; the server still does the real,
-     * exact stock deduction once this sale actually syncs.
-     */
+    /** Applied when a checkout is queued for later sync */
     async decrementCachedStockForCheckout(items = []) {
         for (const item of items) {
             const cached = await offlineSync.get('products', item.product_id);
@@ -621,17 +541,15 @@ const OfflineAPI = {
 
             const available = Number(cached.stock_quantity) || 0;
             cached.stock_quantity = Math.max(0, available - (Number(item.quantity) || 0));
-            delete cached.stock_status; // force normalizeCachedProduct to recompute it from the new quantity
+            delete cached.stock_status; // force normalizeCachedProduct to recompute it from the new...
 
             await offlineSync.put('products', normalizeCachedProduct(cached));
         }
     },
 
-    // -- Pending offline sales (the "Pending" list on the POS page) --
+    // Pending offline sales (the "Pending" list on the POS page)
 
-    // A random reference for one sale. The server saves it (orders.client_ref,
-    // UNIQUE) so the same sale can never be recorded twice, however many times
-    // it is re-sent.
+    // A random reference for one sale.
     newSaleRef() {
         if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
             return crypto.randomUUID();
@@ -639,8 +557,7 @@ const OfflineAPI = {
         return 's' + Date.now().toString(36) + Math.random().toString(36).slice(2, 12);
     },
 
-    // Every checkout that has not reached the server yet (queued) or that the
-    // server refused (failed), oldest sale first, shaped for the list.
+    // Every checkout that has not reached the server yet
     async getPendingCheckouts() {
         const queued = (await offlineSync.getAll('sync_queue')).filter(i => isCheckoutEndpoint(i.endpoint));
         const failed = (await offlineSync.getAll('failed_syncs')).filter(i => isCheckoutEndpoint(i.endpoint));
@@ -664,15 +581,12 @@ const OfflineAPI = {
             .sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
     },
 
-    // How many pending sales THIS account has (queued or failed). A sale made under
-    // another account stays on this computer until that account signs in and syncs it;
-    // it must not block this account (e.g. Close Register), because this account can
-    // never sync it. `others` counts those, for information only.
+    // How many pending sales THIS account has (queued or failed).
     async getPendingCheckoutCount(userId = null) {
         const list = await this.getPendingCheckouts();
         const mine = userId == null
             ? list
-            : list.filter(i => i.cashierId == null || i.cashierId === userId);   // no recorded owner = treat as this account's
+            : list.filter(i => i.cashierId == null || i.cashierId === userId);   // no recorded owner =...
         return {
             total:  mine.length,
             failed: mine.filter(i => i.status === 'failed').length,
@@ -681,7 +595,6 @@ const OfflineAPI = {
     },
 
     // Puts a refused checkout back in the queue (same reference, same payload)
-    // so it can be tried again; returns its new queue id.
     async retryFailedCheckout(failedId) {
         const record = await offlineSync.get('failed_syncs', failedId);
         if (!record) return null;
@@ -697,8 +610,6 @@ const OfflineAPI = {
     },
 
     // Older queued checkouts (from before this update) have no reference yet.
-    // Give each one now so even those are protected against double-sending,
-    // and keep the time they were originally queued as the sale time.
     async ensureCheckoutRefs() {
         const queue = await offlineSync.getAll('sync_queue');
         for (const item of queue) {
@@ -714,8 +625,6 @@ const OfflineAPI = {
     },
 
     // Removes any void request left in the browser's storage (queued or failed).
-    // Those carry a manager's password and are no longer allowed to be stored.
-    // Returns how many were removed.
     async purgeStoredVoidRequests() {
         let removed = 0;
         for (const store of ['sync_queue', 'failed_syncs']) {
@@ -833,10 +742,7 @@ const OfflineAPI = {
 
                 if (!response.ok) {
                     if (isTemporaryServerStatus(response.status) || (response.status === 500 && isCheckoutEndpoint(endpoint))) {
-                        // Server briefly unavailable (e.g. restarting) -- treat exactly like a
-                        // network failure below and queue it for later sync. A SALE is also
-                        // queued on a plain 500: it carries a unique reference, so re-sending it
-                        // later can never record it twice, and a customer's sale must not be lost.
+                        // Server briefly unavailable (e.g. restarting)
                         console.warn(`Server error ${response.status} on ${endpoint}, queuing for later sync.`);
                         this.showFallbackWarning('Server error. Request queued for sync.');
                     } else {
@@ -861,9 +767,7 @@ const OfflineAPI = {
             }
         }
 
-        // Voids (full or partial) are NEVER queued. The request carries a manager's
-        // email and password, which must not sit in the browser's storage waiting
-        // to be sent, and a void needs the live server to check the order anyway.
+        // Voids (full or partial) are NEVER queued.
         if (endpoint === '/pos/void' || endpoint === '/pos/partial-void') {
             return {
                 success: false,
@@ -872,10 +776,7 @@ const OfflineAPI = {
             };
         }
 
-        // A queued checkout carries (a) the reference that makes re-sending it
-        // safe and (b) the time the sale was actually made, which the server
-        // keeps if it falls inside the open register session. `meta` is for
-        // display only (the Pending list) and is never sent to the server.
+        // A queued checkout carries (a) the reference that makes re-sending it safe...
         let queuedBody = body;
         if (isCheckoutEndpoint(endpoint)) {
             queuedBody = { ...body };
@@ -1041,17 +942,7 @@ const OfflineAPI = {
 window.OfflineAPI = OfflineAPI;
 window.offlineSync = offlineSync;
 
-// ============================================================
-// Sync issues: changes that could NOT be saved
-// ============================================================
-// When the connection drops, a change (a new product, a restock, an edit) is kept on
-// this computer and sent to the server later. If the server then REFUSES it, trying
-// again can never succeed, so it is moved to a "not saved" list instead of vanishing.
-// This is the ONE shared panel for that list -- a pill at the bottom-left and a window
-// that explains each item in plain words (what was being done, why it was not saved,
-// what to do). Each page shows only the issues that belong to it: the Inventory page
-// shows inventory changes, the POS page shows the rest. (A failed SALE has its own
-// Pending Sales list on the POS page.)
+// Sync issues: changes that could NOT be saved - When the connection drops, a change
 const SyncIssues = {
     area: null,
 
@@ -1077,8 +968,7 @@ const SyncIssues = {
     // Call once per page: 'inventory' or 'pos'
     mount(area) {
         this.area = area;
-        // Changes still WAITING to be sent are shown on the Inventory page. (The POS page has
-        // its own Pending Sales list for sales, so it does not show this one.)
+        // Changes still WAITING to be sent are shown on the Inventory page.
         this.showWaiting = area === 'inventory';
         const again = () => this.refresh();
         window.addEventListener('pharmatrack:sync-complete', again);
@@ -1103,10 +993,7 @@ const SyncIssues = {
         }
     },
 
-    // -- Changes waiting to be sent (not refused -- just not delivered yet) --
-    // A change made while offline (or while the server was restarting) is kept on this
-    // computer and sent automatically later. Until it goes through it exists ONLY here,
-    // so a small note says so, and disappears by itself once everything has been sent.
+    // Changes waiting to be sent (not refused - just not delivered yet) A change...
     async queuedItems() {
         const all = await offlineSync.getAll('sync_queue');
         return all
@@ -1276,7 +1163,7 @@ const SyncIssues = {
         return { what: 'Change', subject: `${method} ${ep}`.trim(), detail: null };
     },
 
-    // Why it was not saved, and what to do about it -- in plain words
+    // Why it was not saved, and what to do about it - in plain words
     explain(item, d) {
         const reason = String(item.reason || '');
 
@@ -1350,7 +1237,7 @@ const SyncIssues = {
                 confirmText: 'Dismiss All'
             });
             if (!confirmed) return;
-            // only THIS page's items -- another page's issues are not touched
+            // only THIS page's items - another page's issues are not touched
             for (const item of await this.items()) await OfflineAPI.clearFailedSync(item.id);
             Modal.close('failed-sync-modal');
             this.refresh();
@@ -1394,8 +1281,7 @@ const SyncIssues = {
 
         body.querySelectorAll('.btn-dismiss-failed').forEach(btn => {
             btn.addEventListener('click', async () => {
-                // Dismissing throws the unsaved change away for good, so it gets the same
-                // two-step typed confirmation as every delete.
+                // Dismissing throws the unsaved change away for good
                 const confirmed = await TypedConfirm.show({
                     title:       'Dismiss This Item',
                     message:     'This change was never saved on the server. Dismissing removes it from this list for good.',

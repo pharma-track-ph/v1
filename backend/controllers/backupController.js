@@ -1,17 +1,10 @@
-// ============================================================
-// Backup Controller
-// Manual/scheduled backup, restore, list, delete, download, schedule.
-// All routes are super_admin ("owner") only — see routes/backupRoutes.js.
-// ============================================================
+// Backup Controller - Manual/scheduled backup, restore, list, delete, download
 const backupService   = require('../services/backupService');
 const AppSetting      = require('../models/AppSetting');
 const { SETTING_KEY, DEFAULT_TIME, TIME_PATTERN, rescheduleNow } = require('../utils/backupScheduler');
 const { logAudit }    = require('../middleware/authMiddleware');
 
-/**
- * GET /api/backup
- * Lists existing backup files, newest first.
- */
+/** GET /api/backup - Lists existing backup files, newest first. */
 const getBackups = async (req, res, next) => {
     try {
         const backups = await backupService.listBackups();
@@ -19,10 +12,7 @@ const getBackups = async (req, res, next) => {
     } catch (err) { next(err); }
 };
 
-/**
- * POST /api/backup/run
- * Triggers a manual, on-demand backup.
- */
+/** POST /api/backup/run - Triggers a manual, on-demand backup. */
 const triggerBackup = async (req, res, next) => {
     try {
         const result = await backupService.runBackup('manual');
@@ -31,12 +21,7 @@ const triggerBackup = async (req, res, next) => {
     } catch (err) { next(err); }
 };
 
-/**
- * POST /api/backup/:filename/restore
- * DESTRUCTIVE — truncates and replaces every table covered by the backup.
- * A safety snapshot of the pre-restore state is taken automatically
- * (see backupService.restoreBackup).
- */
+/** POST /api/backup/:filename/restore - DESTRUCTIVE - truncates and replaces... */
 const restore = async (req, res, next) => {
     try {
         const result = await backupService.restoreBackup(req.params.filename);
@@ -46,9 +31,7 @@ const restore = async (req, res, next) => {
     } catch (err) { next(err); }
 };
 
-/**
- * DELETE /api/backup/:filename
- */
+/** DELETE /api/backup/:filename */
 const remove = async (req, res, next) => {
     try {
         await backupService.deleteBackup(req.params.filename);
@@ -57,9 +40,7 @@ const remove = async (req, res, next) => {
     } catch (err) { next(err); }
 };
 
-/**
- * GET /api/backup/:filename/download
- */
+/** GET /api/backup/:filename/download */
 const download = async (req, res, next) => {
     try {
         const content = await backupService.getBackupContent(req.params.filename);
@@ -71,11 +52,7 @@ const download = async (req, res, next) => {
     } catch (err) { next(err); }
 };
 
-/**
- * GET /api/backup/schedule
- * Returns the currently configured daily auto-backup time (HH:MM, 24hr,
- * Asia/Manila).
- */
+/** GET /api/backup/schedule - Returns the currently configured daily auto-backup... */
 const getSchedule = async (req, res, next) => {
     try {
         const time = await AppSetting.get(SETTING_KEY, DEFAULT_TIME);
@@ -83,13 +60,7 @@ const getSchedule = async (req, res, next) => {
     } catch (err) { next(err); }
 };
 
-/**
- * PUT /api/backup/schedule
- * Body: { time: "HH:MM" }
- * Takes effect immediately — rescheduleNow() cancels whatever timer is
- * currently counting down and re-arms it against the freshly saved time,
- * rather than waiting for the old timer to fire on its own schedule first.
- */
+/** PUT /api/backup/schedule - Body: { time: "HH:MM" } Takes effect immediately */
 const updateSchedule = async (req, res, next) => {
     try {
         const { time } = req.body;

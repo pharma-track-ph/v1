@@ -7,7 +7,8 @@
     <link rel="icon" type="image/png" href="../images/pharmatrack-logo.png">
     <link rel="stylesheet" href="../css/global.css">
     <link rel="stylesheet" href="../css/forecasting.css">
-    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+    <!-- Chart.js: hosted by PharmaTrack (frontend/vendor, exact pinned version) -->
+    <script src="../vendor/chart.umd.js"></script>
 </head>
 <body>
 <div class="app-container">
@@ -60,7 +61,7 @@
 
         <main class="page-content">
 
-            <!-- ── TRENDING PRODUCTS ─────────────────────────── -->
+            <!-- TRENDING PRODUCTS -->
             <div class="trending-section">
                 <div class="section-header">
                     <h4>Trending Products <span style="font-weight:400;font-size:0.85rem">(Last 4 weeks vs previous 4 weeks)</span></h4>
@@ -71,13 +72,13 @@
                 </div>
             </div>
 
-            <!-- ── RESTOCK SUGGESTIONS ───────────────────────── -->
+            <!-- RESTOCK SUGGESTIONS -->
             <div class="restock-suggestions" id="restock-section" style="display:none">
                 <h4>What to Restock This Week</h4>
                 <div class="restock-grid" id="restock-grid"></div>
             </div>
 
-            <!-- ── PRODUCT SELECTOR & ALGORITHM ─────────────── -->
+            <!-- PRODUCT SELECTOR & ALGORITHM -->
             <div class="forecast-panel">
                 <div class="panel-header">
                     <h4>Detailed Demand Forecast</h4>
@@ -85,12 +86,7 @@
 
                 <div class="selector-row">
                     <div class="product-selector-wrapper">
-                        <!-- Single combobox: shows the current selection, and
-                             doubles as the search box the moment it's clicked
-                             (via SearchSuggest in forecasting.js) -- the
-                             underlying <select> just tracks the actual
-                             selected id/options for the rest of the page's
-                             logic and is never shown. -->
+                        <!-- Single combobox: shows the current selection -->
                         <div class="searchable-select">
                             <input type="text" id="product-search" class="form-control"
                                    placeholder="Search or select a product…" autocomplete="off">
@@ -125,12 +121,7 @@
                     </div>
                 </div>
 
-                <!-- Advanced parameters -- alpha applies to both Exponential
-                     Smoothing and Holt-Winters; beta/gamma/season-length are
-                     Holt-Winters only and get hidden for Exponential
-                     Smoothing (see forecasting.js's renderHorizonButtons-
-                     adjacent logic that toggles this). Hidden entirely for
-                     Moving Average, which has no tunable parameters. -->
+                <!-- Advanced parameters -->
                 <details id="hw-params" style="margin-bottom:20px">
                     <summary style="cursor:pointer;font-weight:600;color:var(--primary);">
                         <span id="hw-params-summary">Advanced Parameters (α, β, γ) Holt-Winters only</span>
@@ -153,18 +144,19 @@
                                 <div class="alpha-hint">Higher = stronger seasonal response</div>
                             </div>
                             <div class="form-group">
-                                <label class="form-label">Seasonal Period (s)</label>
-                                <select id="forecast-season-length" class="form-control" style="max-width:120px">
-                                    <option value="4" selected>4 — Quarterly</option>
-                                    <option value="12">12 — Monthly</option>
-                                    <option value="52">52 — Weekly</option>
+                                <label class="form-label">Seasonal Period (s), in weeks</label>
+                                <select id="forecast-season-length" class="form-control" style="max-width:230px">
+                                    <option value="4" selected>4 weeks (about a month)</option>
+                                    <option value="12">12 weeks (about a quarter)</option>
+                                    <option value="52">52 weeks (a year)</option>
                                 </select>
+                                <div class="alpha-hint" style="max-width:230px">Needs 2 full seasons of sales: 8, 24 or 104 weeks. With less, Holt-Winters uses Exponential Smoothing instead.</div>
                             </div>
                         </div>
                     </div>
                 </details>
 
-                <!-- Forecast Horizon (per-algorithm options, like the Reports date filter) -->
+                <!-- Forecast Horizon... -->
                 <div class="horizon-selector">
                     <label class="input-label">Forecast Range</label>
                     <div class="filter-buttons" id="horizon-buttons"></div>
@@ -183,16 +175,10 @@
                 </div>
             </div>
 
-            <!-- ── FORECAST RESULTS ──────────────────────────── -->
+            <!-- FORECAST RESULTS -->
             <div id="forecast-results" class="hidden">
 
-                <!-- Product info + pattern detection: truly ONE container
-                     now (not a card nested inside another) -- the blue
-                     gradient panel that used to be just "Historical Pattern
-                     Detected" now also carries the product name/category
-                     and the three quick stats at its top, laid out
-                     compactly so the whole thing takes noticeably less
-                     vertical space than the previous two stacked cards. -->
+                <!-- Product info + pattern detection: truly ONE container now -->
                 <div class="pattern-detection-card">
                     <div class="pdc-top-row">
                         <div class="pdc-product-info">
@@ -286,7 +272,7 @@
                 </details>
             </div>
 
-            <!-- ── COMPARISON MODAL ──────────────────────────── -->
+            <!-- COMPARISON MODAL -->
             <div class="modal-overlay hidden" id="comparison-modal">
                 <div class="modal-content modal-lg">
                     <div class="modal-header">

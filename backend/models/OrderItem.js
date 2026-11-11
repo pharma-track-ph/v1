@@ -1,6 +1,4 @@
-// ============================================================
 // OrderItem Model
-// ============================================================
 const db = require('../config/db');
 
 const OrderItem = {
@@ -9,9 +7,7 @@ const OrderItem = {
 
         if (!items || !items.length) return;
 
-        // Build bulk INSERT. is_tax_exempt is a snapshot of the brand's flag at
-        // the time of sale and discount_amount is this row's share of the
-        // Senior/PWD reduction -- both default to 0 when a caller doesn't pass them.
+        // Build bulk INSERT. is_tax_exempt is a snapshot of the brand's flag...
         const placeholders = items.map(() => '(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').join(', ');
         const values = items.flatMap(item => [
             orderId,

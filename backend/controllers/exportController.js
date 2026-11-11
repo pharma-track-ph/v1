@@ -1,24 +1,8 @@
-// ============================================================
-// Export Controller — Inventory
-// Uses the shared engine in utils/reportExporter.js. Formatting specific
-// to inventory data (status labels, short dates) stays here; layout
-// (headers, widths, signature area) lives in the shared engine.
-//
-// Rows here are per-ITEM (one row per batch/Item No.), not per-brand --
-// Product.findAllForInventoryExport() sorts brands alphabetically by
-// Brand Name and, within each brand's block, puts its expired/out-of-
-// stock items first, so this always reads as a proper audit-style list:
-// every one of a brand's items sits together, in the same order the Edit
-// modal shows them, with anything needing attention surfaced first.
-// ============================================================
+// Export Controller - Inventory - Uses the shared engine in utils/reportExporter.js.
 const Product  = require('../models/Product');
 const { exportReport, formatShortDate } = require('../utils/reportExporter');
 
-// Per-ITEM status (not the brand-level rollup Inventory's own table
-// shows) -- makes sense for a report where every row IS one specific
-// batch: showing the same rolled-up brand status identically across
-// several rows of the same brand would misrepresent which particular
-// item is actually expired/out of stock.
+// Per-ITEM status (not the brand-level rollup Inventory's own table shows)
 function itemStatusLabel(p) {
     const daysLeft = p.days_until_expiry;
     if (daysLeft < 0)          return 'Expired';
@@ -46,9 +30,7 @@ function toRow(p) {
     ];
 }
 
-/**
- * GET /api/inventory/export/:format (excel|pdf|word)
- */
+/** GET /api/inventory/export/:format (excel|pdf|word) */
 const exportInventory = async (req, res, next) => {
     try {
         const products = await Product.findAllForInventoryExport();

@@ -1,20 +1,9 @@
-// ============================================================
-// Forecasting Controller
-// Endpoints:
-//   GET /api/forecasting/products           – product dropdown
-//   GET /api/forecasting/data/:productId    – weekly history
-//   GET /api/forecasting/trending           – top trending products
-//   GET /api/forecasting/restock-suggestions– restock recommendations
-//   GET /api/forecasting/compare/:productId – algorithm comparison
-// ============================================================
+// Forecasting Controller - Endpoints: GET /api/forecasting/products
 const db      = require('../config/db');
 const Order   = require('../models/Order');
 const Product = require('../models/Product');
 
-// ─────────────────────────────────────────────────────────────
-// GET /api/forecasting/products
-// Returns all active products for the dropdown selector
-// ─────────────────────────────────────────────────────────────
+// GET /api/forecasting/products - Returns all active products for the dropdown selector
 const getProductList = async (req, res, next) => {
     try {
         const [rows] = await db.query(
@@ -30,11 +19,7 @@ const getProductList = async (req, res, next) => {
     }
 };
 
-// ─────────────────────────────────────────────────────────────
-// GET /api/forecasting/data/:productId
-// Returns weekly sales history for Holt-Winters (client-side)
-// Query params: weeks (default 24), alpha, beta, gamma, seasonLength
-// ─────────────────────────────────────────────────────────────
+// GET /api/forecasting/data/:productId - Returns weekly sales history for Holt-Winters
 const getForecastData = async (req, res, next) => {
     try {
         const { productId } = req.params;
@@ -49,9 +34,6 @@ const getForecastData = async (req, res, next) => {
         const filled     = fillMissingWeeks(history, weeks);
 
         // How far back does this product's actual sales history go?
-        // Used by the frontend to flag longer Holt-Winters horizons
-        // (8/12-week, seasonal) as lower-confidence when there isn't
-        // roughly a year of real data behind them yet.
         const [[spanRow]] = await db.query(
             `SELECT DATEDIFF(CURDATE(), MIN(o.created_at)) AS span_days
              FROM order_items oi
@@ -81,10 +63,7 @@ const getForecastData = async (req, res, next) => {
     }
 };
 
-// ─────────────────────────────────────────────────────────────
-// GET /api/forecasting/trending
-// Top 4 products by sales velocity; includes week-over-week trend %
-// ─────────────────────────────────────────────────────────────
+// GET /api/forecasting/trending - Top 4 products by sales velocity
 const getTrendingProducts = async (req, res, next) => {
     try {
         // Current 4-week window vs previous 4-week window
@@ -145,51 +124,54 @@ const getTrendingProducts = async (req, res, next) => {
     }
 };
 
-// ─────────────────────────────────────────────────────────────
-// GET /api/forecasting/restock-suggestions
-// Products that are low-stock OR will run out based on avg daily sales
-// ─────────────────────────────────────────────────────────────
+// GET /api/forecasting/restock-suggestions - Products that are low-stock OR will run...
 const getRestockSuggestions = async (req, res, next) => {
     try {
-        // Average daily sales per product over the last 30 days
+        // PER PRODUCT (all the batches of one brand together)
         const [rows] = await db.query(
             `SELECT
-                p.id,
-                p.name,
-                p.category,
-                p.stock_quantity,
-                p.low_stock_threshold,
-                p.price,
-                COALESCE(SUM(oi.quantity), 0)                              AS sold_30d,
-                ROUND(COALESCE(SUM(oi.quantity), 0) / 30, 2)              AS daily_avg,
-                DATEDIFF(p.expiry_date, CURDATE())                         AS days_to_expiry
+                MIN(p.id)                                                                               AS id,
+                MIN(p.name)                                                                             AS name,
+                MIN(p.category)                                                                         AS category,
+                COALESCE(SUM(CASE WHEN p.expiry_date >= CURDATE() THEN p.stock_quantity ELSE 0 END), 0) AS sellable_stock,
+                COALESCE(SUM(CASE WHEN p.expiry_date <  CURDATE() THEN p.stock_quantity ELSE 0 END), 0) AS expired_units,
+                MAX(p.low_stock_threshold)                                                              AS low_stock_threshold,
+                MIN(CASE WHEN p.expiry_date >= CURDATE() AND p.stock_quantity > 0
+                         THEN DATEDIFF(p.expiry_date, CURDATE()) END)                                   AS days_to_expiry,
+                COALESCE(MAX(s.sold_30d), 0)                                                            AS sold_30d
 
              FROM products p
-             LEFT JOIN order_items oi ON oi.product_id = p.id
-             LEFT JOIN orders o
-                 ON o.id = oi.order_id
-                 AND o.status = 'completed'
-                 AND o.created_at >= DATE_SUB(CURDATE(), INTERVAL 30 DAY)
+             LEFT JOIN (
+                 SELECT LOWER(sp.name) AS brand, SUM(oi.quantity) AS sold_30d
+                 FROM order_items oi
+                 JOIN orders   o  ON o.id = oi.order_id
+                                 AND o.status = 'completed'
+                                 AND o.created_at >= DATE_SUB(CURDATE(), INTERVAL 30 DAY)
+                 JOIN products sp ON sp.id = oi.product_id
+                 GROUP BY LOWER(sp.name)
+             ) s ON s.brand = LOWER(p.name)
              WHERE p.is_active = 1
-             GROUP BY p.id, p.name, p.category,
-                      p.stock_quantity, p.low_stock_threshold, p.price, p.expiry_date`
+             GROUP BY LOWER(p.name)`
         );
 
         const suggestions = [];
 
         for (const r of rows) {
-            const stock      = parseInt(r.stock_quantity)      || 0;
+            const stock      = parseInt(r.sellable_stock)      || 0;   // units that can still be sold
+            const expired    = parseInt(r.expired_units)       || 0;
             const threshold  = parseInt(r.low_stock_threshold) || 10;
-            const dailyAvg   = parseFloat(r.daily_avg)         || 0;
-            const daysLeft   = dailyAvg > 0 ? Math.floor(stock / dailyAvg) : 999;
-            const daysExpiry = parseInt(r.days_to_expiry)      || 999;
+            const dailyAvg   = (parseFloat(r.sold_30d) || 0) / 30;      // units sold per day over the last 30...
+            const daysLeft   = dailyAvg > 0 ? Math.floor(stock / dailyAvg) : 999;   // 999 = no recent sales
+            const daysExpiry = (r.days_to_expiry === null || r.days_to_expiry === undefined) ? 999 : parseInt(r.days_to_expiry);
 
             // Determine if this product needs attention
             let reason = null;
             let urgency = 0; // higher = more urgent, used for sorting
 
             if (stock <= 0) {
-                reason  = 'Out of stock';
+                reason  = expired > 0
+                    ? `Out of stock (${expired} expired unit${expired !== 1 ? 's' : ''} cannot be sold)`
+                    : 'Out of stock';
                 urgency = 100;
             } else if (stock <= threshold) {
                 reason  = `Below reorder level (${threshold} units)`;
@@ -198,7 +180,7 @@ const getRestockSuggestions = async (req, res, next) => {
                 reason  = `Will run out in ~${daysLeft} day${daysLeft !== 1 ? 's' : ''} at current rate`;
                 urgency = 60;
             } else if (daysExpiry <= 30 && stock > threshold) {
-                reason  = `Expires in ${daysExpiry} day${daysExpiry !== 1 ? 's' : ''}`;
+                reason  = `A batch expires in ${daysExpiry} day${daysExpiry !== 1 ? 's' : ''}`;
                 urgency = 40;
             }
 
@@ -208,12 +190,13 @@ const getRestockSuggestions = async (req, res, next) => {
             const recommended_qty = Math.ceil(Math.max(dailyAvg * 30 * 1.2, threshold * 1.5));
 
             suggestions.push({
-                id:               r.id,
+                id:               r.id,           // a live batch of the product: the Restock button opens...
                 name:             r.name,
                 category:         r.category,
-                stock_quantity:   stock,
+                stock_quantity:   stock,          // sellable units across all its batches
+                expired_units:    expired,
                 reorder_level:    threshold,
-                daily_avg:        dailyAvg,
+                daily_avg:        Math.round(dailyAvg * 100) / 100,
                 days_until_empty: daysLeft,
                 days_to_expiry:   daysExpiry,
                 reason,
@@ -231,11 +214,7 @@ const getRestockSuggestions = async (req, res, next) => {
     }
 };
 
-// ─────────────────────────────────────────────────────────────
-// GET /api/forecasting/compare/:productId
-// Server-side Moving Average + Simple Exponential Smoothing
-// compared against each other (Holt-Winters stays client-side)
-// ─────────────────────────────────────────────────────────────
+// GET /api/forecasting/compare/:productId - Server-side Moving Average + Simple...
 const compareForecasts = async (req, res, next) => {
     try {
         const { productId } = req.params;
@@ -249,19 +228,18 @@ const compareForecasts = async (req, res, next) => {
         const filled  = fillMissingWeeks(history, 24);
         const sales   = filled.map(w => w.total_qty);
 
-        // ── Moving Average (4-week) ──────────────────────────────
+        // Moving Average (4-week)
         const maPredictions = movingAverageForecast(sales, 4, 4);
         const maFitted      = movingAverageFitted(sales, 4);
         const maMAPE        = calcMAPE(sales.slice(4), maFitted.slice(4));
 
-        // ── Simple Exponential Smoothing (α = 0.3) ───────────────
+        // Simple Exponential Smoothing (α = 0.3)
         const alpha          = 0.3;
         const sesFitted      = sesFittedValues(sales, alpha);
         const sesPredictions = sesForecast(sales, alpha, 4);
         const sesMAPE        = calcMAPE(sales, sesFitted);
 
-        // ── Holt-Winters (client-side — we give MAPE placeholder) ─
-        // The frontend runs the actual HW; we just describe it here
+        // Holt-Winters (client-side - we give MAPE placeholder) The frontend runs...
         const hwNote = 'Holt-Winters runs client-side — MAPE shown after forecast generation.';
 
         const methods = [
@@ -288,9 +266,7 @@ const compareForecasts = async (req, res, next) => {
             }
         ];
 
-        // Pick recommendation: lowest MAPE wins, but only among methods that
-        // actually have a measurable score — a null MAPE (no comparable sales
-        // weeks) must never win by default null-coerces-to-0 comparison.
+        // Pick recommendation: lowest MAPE wins, but only among methods...
         let best;
         if (maMAPE === null && sesMAPE === null) {
             best = null;
@@ -316,31 +292,21 @@ const compareForecasts = async (req, res, next) => {
     }
 };
 
-// ─────────────────────────────────────────────────────────────
 // HELPERS
-// ─────────────────────────────────────────────────────────────
 
 const manilaTime = require('../utils/manilaTime');
 
-/** Fill missing weeks so the time series is continuous.
- *  Weeks are MANILA's (Monday first), worked out from Manila's calendar date with plain
- *  day arithmetic -- never from the server's own clock, which on a hosted server (UTC)
- *  is a different day for 8 hours of every day. On a SUNDAY the current week used to be
- *  calculated as the NEXT Monday (Sunday counted as day 0), leaving an empty future week
- *  at the end of the series; Sunday is now day 7, the last day of its week.
- *  `now` exists only so this can be tested. */
+/** Fill missing weeks so the time series is continuous. */
 function fillMissingWeeks(dbRows, totalWeeks, now = new Date()) {
     const result = [];
     const [y, m, d] = manilaTime.dateString(now).split('-').map(Number);
     const todayDay   = Date.UTC(y, m - 1, d);                 // Manila's date, as a UTC calendar day
-    const dayOfWeek = new Date(todayDay).getUTCDay() || 7;    // Mon=1 ... Sun=7
+    const dayOfWeek = new Date(todayDay).getUTCDay() || 7;    // Mon=1 - Sun=7
 
     for (let i = totalWeeks - 1; i >= 0; i--) {
         const weekStart = new Date(todayDay + (1 - dayOfWeek - i * 7) * 86400000);   // that week's Monday
 
         // Includes the YEAR, so it is always clear which year a week belongs to
-        // (e.g. "Week of Oct 6, 2026") -- otherwise a 24-week history that
-        // crosses New Year looks like the same dates repeating.
         const label    = `Week of ${weekStart.toLocaleDateString('en-PH', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' })}`;
         const yearWeek = getYearWeek(weekStart);
         const found    = dbRows.find(r => r.year_week == yearWeek);
@@ -356,9 +322,7 @@ function fillMissingWeeks(dbRows, totalWeeks, now = new Date()) {
     return result;
 }
 
-/** ISO week number -> YYYYWW integer. Identical, for every day, to MySQL's YEARWEEK(date, 1),
- *  which is what the weekly sales query groups by (Order.js).
- *  Takes a Date that stands for a calendar day in UTC terms. */
+/** ISO week number -> YYYYWW integer. */
 function getYearWeek(date) {
     const d = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()));
     d.setUTCDate(d.getUTCDate() + 3 - (d.getUTCDay() + 6) % 7);
@@ -367,7 +331,7 @@ function getYearWeek(date) {
         Math.round(((d - week1) / 86400000 - 3 + (week1.getUTCDay() + 6) % 7) / 7) + 1;
 }
 
-/** Simple Moving Average — fitted values */
+/** Simple Moving Average - fitted values */
 function movingAverageFitted(sales, window) {
     return sales.map((_, i) => {
         if (i < window) return null;
@@ -376,14 +340,14 @@ function movingAverageFitted(sales, window) {
     });
 }
 
-/** Simple Moving Average — future forecast */
+/** Simple Moving Average - future forecast */
 function movingAverageForecast(sales, window, periods) {
     const last   = sales.slice(-window);
     const avg    = Math.round(last.reduce((s, v) => s + v, 0) / window);
     return Array(periods).fill(avg);
 }
 
-/** Simple Exponential Smoothing — fitted values */
+/** Simple Exponential Smoothing - fitted values */
 function sesFittedValues(sales, alpha) {
     const fitted = [sales[0]];
     for (let i = 1; i < sales.length; i++) {
@@ -392,15 +356,17 @@ function sesFittedValues(sales, alpha) {
     return fitted;
 }
 
-/** Simple Exponential Smoothing — future forecast */
+/** Simple Exponential Smoothing - future forecast */
 function sesForecast(sales, alpha, periods) {
     const fitted = sesFittedValues(sales, alpha);
-    const last   = fitted[fitted.length - 1];
+    // The forecast for the NEXT week also uses the latest actual sales
+    const n      = sales.length;
+    const last   = Math.round(alpha * sales[n - 1] + (1 - alpha) * fitted[n - 1]);
     // SES gives flat forecast (no trend captured)
     return Array(periods).fill(last);
 }
 
-/** Mean Absolute Percentage Error — ignores zero-actual weeks */
+/** Mean Absolute Percentage Error - ignores zero-actual weeks */
 function calcMAPE(actual, fitted) {
     let sum = 0, count = 0;
     for (let i = 0; i < actual.length; i++) {
@@ -409,13 +375,10 @@ function calcMAPE(actual, fitted) {
             count++;
         }
     }
-    // No comparable weeks means accuracy genuinely cannot be measured —
-    // return null rather than 0, since 0% would misleadingly imply a
-    // perfect score when really there was nothing to score at all.
+    // No comparable weeks means accuracy genuinely cannot be measured
     return count === 0 ? null : (sum / count) * 100;
 }
 
-// ─────────────────────────────────────────────────────────────
 module.exports = {
     getProductList,
     getForecastData,

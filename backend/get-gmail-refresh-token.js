@@ -1,24 +1,4 @@
-// ============================================================
-// ONE-TIME SETUP SCRIPT -- get a Gmail API refresh token
-// ============================================================
-// Run this ONCE, locally, to authorize PharmaTrack to send email as
-// pharma.track.ph@gmail.com via the Gmail API. Not part of the running
-// app itself -- safe to delete after you've copied the refresh token
-// into .env, or just leave it here, it does nothing unless you run it.
-//
-// Usage:
-//   1. cd backend
-//   2. npm install googleapis
-//   3. node get-gmail-refresh-token.js
-//   4. It prints a URL -- open it in your browser, sign in as
-//      pharma.track.ph@gmail.com, click Allow.
-//   5. It catches the result automatically and prints a refresh token.
-//   6. Copy that into .env as GMAIL_OAUTH_REFRESH_TOKEN.
-//
-// Requires GMAIL_OAUTH_CLIENT_ID and GMAIL_OAUTH_CLIENT_SECRET to
-// already be in .env (see the "Desktop app" OAuth client you just
-// created in Google Cloud Console).
-// ============================================================
+// ONE-TIME SETUP SCRIPT
 require('dotenv').config();
 const { google } = require('googleapis');
 const http = require('http');
@@ -37,8 +17,8 @@ if (!CLIENT_ID || !CLIENT_SECRET) {
 const oauth2Client = new google.auth.OAuth2(CLIENT_ID, CLIENT_SECRET, REDIRECT_URI);
 
 const authUrl = oauth2Client.generateAuthUrl({
-    access_type: 'offline', // required -- without this, Google only gives a short-lived access token, no refresh token
-    prompt:      'consent', // forces a fresh refresh token even if you've authorized this app before
+    access_type: 'offline', // required - without this, Google only gives a short-lived...
+    prompt:      'consent', // forces a fresh refresh token even if you've authorized...
     scope:       ['https://www.googleapis.com/auth/gmail.send']
 });
 

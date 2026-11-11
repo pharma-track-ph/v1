@@ -1,9 +1,4 @@
-/* ============================================================
-   Receipt styles (receipt.js)
-   - On screen: the receipt shown in the POS "Transaction Receipt" window.
-   - On paper: the print-only 80mm output (see @media print at the bottom).
-   Both use the SAME markup, so what you see is what prints.
-   ============================================================ */
+/* Receipt styles (receipt.js) - On screen: the receipt shown in the POS... */
 
 .receipt {
     font-family: 'Courier New', Courier, monospace;
@@ -73,19 +68,15 @@
 #receipt-print-area { display: none; }
 
 @media print {
-    /* 2mm margins; the paper SIZE comes from the printer (choose the 80mm
-       roll in the print dialog / printer preferences). */
+    /* 2mm margins; the paper SIZE comes from the printer */
     @page { margin: 2mm; }
 
-    /* Hide everything on the page except the receipt. Scoped to
-       body.printing-receipt, which receipt.js only sets for the duration
-       of a receipt print -- an ordinary Ctrl+P is unaffected. */
+    /* Hide everything on the page except the receipt. */
     body.printing-receipt > *:not(#receipt-print-area) {
         display: none !important;
     }
 
-    /* Some pages (POS, Reports) lock the body to the screen height with
-       overflow:hidden -- undo that so a tall receipt is never clipped. */
+    /* Some pages (POS, Reports) lock the body to the screen height... */
     html body.printing-receipt {
         height:     auto !important;
         min-height: 0 !important;
@@ -100,7 +91,7 @@
     #receipt-print-area .receipt {
         width:         72mm;
         max-width:     72mm;
-        margin:        0 auto;   /* centered on the page; on an 80mm roll the 2mm page margins leave it centered too */
+        margin:        0 auto;   /* centered on the page */
         padding:       0;
         border:        none;
         border-radius: 0;

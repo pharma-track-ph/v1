@@ -1,10 +1,4 @@
-// ============================================================
-// CashMovement Model
-// Cash In / Cash Out records against an open cash session.
-// Every movement records WHO requested it and WHO approved it —
-// for a cashier these are two different people (manager approval
-// required); for admin/owner they're the same person (self-authority).
-// ============================================================
+// CashMovement Model - Cash In / Cash Out records against an open cash session.
 const db = require('../config/db');
 
 const CashMovement = {

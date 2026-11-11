@@ -1,25 +1,4 @@
-// ============================================================
-// VAT / Senior-PWD math
-//
-// ONE place for the sale arithmetic, used by POS checkout (and reused
-// later by per-item Senior/PWD and Partial Void), so every part of the
-// app agrees to the centavo.
-//
-// Rules (agreed with the owner):
-//   - Prices are VAT-INCLUSIVE, VAT rate 12%.
-//   - A VATable line of price P holds net = P / 1.12 and VAT = P - net.
-//   - Tax-exempt brands carry no VAT.
-//   - Senior/PWD discount: for a VATable line, VAT is removed FIRST
-//     (P / 1.12), then 20% comes off that, and the line becomes
-//     VAT-exempt. The customer pays P / 1.12 * 0.8 = P * 5/7.
-//     For an already tax-exempt brand there is no VAT to remove, so only
-//     the 20% applies (customer pays P * 0.8).
-//
-// All arithmetic is in whole centavos (integers) so no floating-point
-// drift can creep into totals. Each line is rounded once, and order
-// totals are the SUM of the rounded lines, so VATable + VAT + exempt
-// always adds back to the total exactly.
-// ============================================================
+// VAT / Senior-PWD math - ONE place for the sale arithmetic, used by POS checkout
 
 const VAT_PERCENT = 12;
 
@@ -31,12 +10,6 @@ function centsToPesos(cents) {
     return Math.round(cents) / 100;
 }
 
-/**
- * @param {number}  grossCents  line price x quantity, in centavos (VAT-inclusive)
- * @param {object}  opts
- * @param {boolean} opts.taxExempt  the brand's Tax Exempt flag
- * @param {boolean} opts.seniorPwd  Senior/PWD discount applies to this line
- */
 function computeLine(grossCents, { taxExempt = false, seniorPwd = false } = {}) {
     const gross = Math.round(grossCents);
 
@@ -82,11 +55,7 @@ function computeLine(grossCents, { taxExempt = false, seniorPwd = false } = {}) 
     };
 }
 
-/**
- * Splits `totalCents` across rows in proportion to `weights`, using whole
- * centavos; the LAST row takes whatever is left so the pieces always sum
- * to exactly `totalCents`.
- */
+/** Splits `totalCents` across rows in proportion to `weights`, using whole centavos */
 function allocate(totalCents, weights) {
     if (!weights.length) return [];
     const weightSum = weights.reduce((a, b) => a + b, 0);
@@ -101,13 +70,7 @@ function allocate(totalCents, weights) {
     });
 }
 
-/**
- * @param {Array<{ rowGrossCents: number[], taxExempt: boolean, seniorPwd: boolean }>} lines
- *   One entry per CART LINE (a product family). A line that was filled from
- *   several batches (FEFO) passes one gross figure per batch row; the line
- *   is rounded once as a whole, then its discount is spread back over its
- *   rows so each stored order_items row gets its own discount_amount.
- */
+/** One entry per CART LINE (a product family). */
 function computeOrder(lines) {
     const totals = {
         grossCents: 0, discountCents: 0, totalCents: 0,

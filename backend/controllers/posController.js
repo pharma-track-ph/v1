@@ -1,7 +1,4 @@
-// ============================================================
-// POS Controller
-// Checkout with transaction, stock deduction, expiry block
-// ============================================================
+// POS Controller - Checkout with transaction, stock deduction, expiry block
 const db           = require('../config/db');
 const Product      = require('../models/Product');
 const Order        = require('../models/Order');
@@ -12,10 +9,7 @@ const CashMovement = require('../models/CashMovement');
 const { logAudit } = require('../middleware/authMiddleware');
 const { computeOrder, toCents, centsToPesos } = require('../utils/vat');
 
-// The reply for a sale whose reference was already saved: success, pointing at
-// the original order (a lost reply or a manual re-sync must never double-record
-// a sale). A reference belonging to a DIFFERENT cashier can't legitimately
-// happen with random references, so it is refused rather than answered.
+// The reply for a sale whose reference was already saved: success
 function duplicateSaleResponse(res, existing, requesterId) {
     if (Number(existing.cashier_id) !== Number(requesterId)) {
         return res.status(409).json({
@@ -34,11 +28,7 @@ function duplicateSaleResponse(res, existing, requesterId) {
     });
 }
 
-// mysql2 hands DATE columns back as JS Date objects. Comparing a Date to a
-// 'YYYY-MM-DD' string with <= is ALWAYS false (the string becomes NaN), so
-// the old expiry checks below never actually blocked anything. This turns a
-// DATE value into the pharmacy's own (Manila) calendar date as a string, so
-// two dates can be compared safely.
+// mysql2 hands DATE columns back as JS Date objects.
 function toManilaDateString(value) {
     const d = value instanceof Date ? value : new Date(value);
     if (isNaN(d.getTime())) return String(value);
@@ -59,11 +49,7 @@ function getManilaDateString() {
     }).format(new Date());
 }
 
-/**
- * Groups raw batch rows (from Product.findAllForPOS) into one card per
- * product name. Assumes rows are already ordered name ASC, expiry ASC.
- * Expired batches are never passed in here — the model query excludes them.
- */
+/** Groups raw batch rows (from Product.findAllForPOS) into one card per product... */
 function groupBatchesForPOS(rows) {
     const map = new Map();
 
@@ -96,13 +82,7 @@ function groupBatchesForPOS(rows) {
     });
 }
 
-/**
- * GET /api/pos/products
- * Search products available for sale.
- * Returns only non-expired, in-stock items, grouped one card per
- * product name (batches of the same product are combined and consumed
- * FEFO — first-expiry-first-out — at checkout time).
- */
+/** GET /api/pos/products - Search products available for sale. */
 const searchProducts = async (req, res, next) => {
     try {
         const { q = '', barcode = '' } = req.query;
@@ -113,14 +93,11 @@ const searchProducts = async (req, res, next) => {
                 return res.status(404).json({ success: false, message: 'Product not found for barcode.' });
             }
 
-            // Re-expand the scanned batch into its full product family so the
-            // barcode-scan path behaves identically to the search/grid path.
+            // Re-expand the scanned batch into its full product family
             const familyRows = await Product.findActiveNonExpiredByName(scanned.name);
             const grouped     = groupBatchesForPOS(familyRows);
 
-            // findByBarcode returns ONE row, which can be an expired or sold-out
-            // batch even when the brand has sellable ones -- so sellability is
-            // decided by the family query above, not by that single row.
+            // findByBarcode returns ONE row, which can be an expired or sold-out...
             if (!grouped.length) {
                 return res.status(404).json({
                     success: false,
@@ -138,46 +115,7 @@ const searchProducts = async (req, res, next) => {
     } catch (err) { next(err); }
 };
 
-/**
- * POST /api/pos/checkout
- * Processes the POS transaction.
- *
- * Request body:
- * {
- *   items: [{ product_id, batch_ids, quantity }],
- *   payment_method: 'cash',
- *   amount_tendered: 500,
- *   discount: 0,
- *   notes: '',
- *   cash_session_id: 12   // the OPEN register this sale belongs to
- * }
- *
- * ── Cash register gating ──────────────────────────────────────
- * A sale can only be completed while the cashier has an OPEN cash
- * session ("register"). The frontend sends the `cash_session_id` it
- * had cached at the moment Checkout was clicked — this matters for
- * offline mode: if a sale is queued while offline and only syncs
- * later (possibly after that shift has since closed and a new one
- * opened), we must NOT silently attach it to whatever session happens
- * to be open at sync time. Instead we verify the *specific* session ID
- * the sale was originally meant for is still open, and reject cleanly
- * if not, rather than misattributing it to the wrong shift's totals.
- *
- * The check is done via SELECT ... FOR UPDATE inside this transaction,
- * so it's impossible for a concurrent "Close Register" request to slip
- * in between the check and the order being created — whichever request
- * (checkout or close) begins its transaction first, InnoDB makes the
- * other one wait until the first commits, so there's no window where
- * a sale can be silently lost from a shift's totals.
- *
- * Cart lines represent a *product family* (grouped across batches in the
- * UI), not a single exact batch row. Each line carries an ordered
- * `batch_ids` list (soonest-expiring first / FEFO) built by
- * /api/pos/products. Stock is consumed from the earliest-expiring batch
- * first, spilling into the next batch only if needed — this keeps
- * unit_cost accurate per batch actually sold, so profit reporting stays
- * correct even when a single sale spans multiple batches.
- */
+/** POST /api/pos/checkout - Processes the POS transaction. */
 const checkout = async (req, res, next) => {
     const { items, payment_method = 'cash', amount_tendered, senior_pwd_all, discount = 0, notes = '', cash_session_id, client_ref, client_created_at } = req.body;
 
@@ -185,13 +123,7 @@ const checkout = async (req, res, next) => {
         return res.status(400).json({ success: false, message: 'Cart is empty.' });
     }
 
-    // -- Offline-sync duplicate guard --
-    // Every checkout carries a random reference (orders.client_ref is UNIQUE).
-    // If this exact sale was already saved -- typically because the first
-    // attempt reached the server but its reply was lost, so the browser queued
-    // and re-sent it -- answer with the ORIGINAL order instead of creating a
-    // second one. This runs before any stock check on purpose: the stock was
-    // already deducted the first time, so re-validating it could wrongly fail.
+    // Offline-sync duplicate guard - Every checkout carries a random reference
     let clientRef = null;
     if (client_ref !== undefined && client_ref !== null && client_ref !== '') {
         if (typeof client_ref !== 'string' || !/^[A-Za-z0-9_-]{8,64}$/.test(client_ref)) {
@@ -202,10 +134,10 @@ const checkout = async (req, res, next) => {
         if (alreadySaved) return duplicateSaleResponse(res, alreadySaved, req.user.id);
     }
 
-    // ── Step 1: Pre-validate & resolve all items across batches ──
+    // Step 1: Pre-validate & resolve all items across batches
     const resolvedItems = [];
-    const lineRows      = []; // one entry per cart line: the resolved batch rows that fill it
-    const lineSeniorFlags = []; // parallel to lineRows: was Senior/PWD ticked on that cart line?
+    const lineRows      = []; // one entry per cart line: the resolved batch rows...
+    const lineSeniorFlags = []; // parallel to lineRows: was Senior/PWD ticked on that cart...
     const today = getManilaDateString();
 
     for (const cartItem of items) {
@@ -224,8 +156,7 @@ const checkout = async (req, res, next) => {
             if (!product) continue;               // batch may have been removed since page load
             lastKnownName = product.name;
 
-            // Skip (don't hard-fail) batches that expired since the cart was built —
-            // the next batch in FEFO order will be tried instead.
+            // Skip (don't hard-fail) batches that expired since the cart was built
             if (toManilaDateString(product.expiry_date) <= today) continue;
             if (product.stock_quantity <= 0)  continue;
 
@@ -267,15 +198,11 @@ const checkout = async (req, res, next) => {
         return res.status(400).json({ success: false, message: 'Cart is empty.' });
     }
 
-    // Totals come from the shared VAT/Senior-PWD math (utils/vat.js). The
-    // server never trusts a discount AMOUNT from the client -- only whether
-    // the Senior/PWD (20%) toggle was on. An older offline-queued sale that
-    // still carries a plain discount amount is treated as "toggle on".
+    // Totals come from the shared VAT/Senior-PWD math (utils/vat.js).
     const seniorPwdAll = senior_pwd_all === true
         || (senior_pwd_all === undefined && (parseFloat(discount) || 0) > 0);
 
-    // Senior/PWD applies to a line when the 20% toggle covers the whole cart
-    // OR that line was ticked individually in the cart.
+    // Senior/PWD applies to a line when the 20% toggle covers the whole cart...
     const vat = computeOrder(lineRows.map((rows, i) => ({
         rowGrossCents: rows.map(r => toCents(r.unit_price) * r.quantity),
         taxExempt:     rows[0].is_tax_exempt === 1,
@@ -307,16 +234,12 @@ const checkout = async (req, res, next) => {
         });
     }
 
-    // ── Steps 2–6: Database transaction ──────────────────────
+    // Steps 2-6: Database transaction
     const connection = await db.getConnection();
     try {
         await connection.beginTransaction();
 
-        // Row-lock this cashier's open session for the duration of this
-        // transaction. If a concurrent Close Register request is also in
-        // flight, InnoDB serializes them — whichever started first wins,
-        // the other waits, so a sale can never be silently dropped from a
-        // shift's totals due to a timing coincidence.
+        // Row-lock this cashier's open session for the duration of this transaction.
         const openSession = await CashSession.lockOpenByCashier(req.user.id, connection);
 
         if (!openSession) {
@@ -329,11 +252,7 @@ const checkout = async (req, res, next) => {
             });
         }
 
-        // If the frontend had a specific session cached (the normal case,
-        // and the important case for offline-queued sales), it must match
-        // the session that's ACTUALLY open right now. A mismatch means the
-        // original shift this sale was meant for is no longer open — reject
-        // cleanly rather than silently attaching it to a different shift.
+        // If the frontend had a specific session cached
         if (cash_session_id && parseInt(cash_session_id) !== openSession.id) {
             await connection.rollback();
             return res.status(409).json({
@@ -344,10 +263,7 @@ const checkout = async (req, res, next) => {
             });
         }
 
-        // Offline sales keep the time they were actually made, but only when
-        // that time is plausible: not before this register session opened, and
-        // not in the future (2 minutes of clock drift allowed). Anything else
-        // falls back to the time of syncing. Online sales never send a time.
+        // Offline sales keep the time they were actually made, but only
         let saleDate = new Date();
         let usedClientTime = false;
         const clientTime = client_created_at ? new Date(client_created_at) : null;
@@ -360,8 +276,7 @@ const checkout = async (req, res, next) => {
             }
         }
 
-        // Re-check inside the locked transaction: a second request carrying
-        // the same reference may have committed while this one was waiting.
+        // Re-check inside the locked transaction: a second request carrying the same...
         if (clientRef) {
             const savedMeanwhile = await Order.findByClientRef(clientRef, connection);
             if (savedMeanwhile) {
@@ -388,8 +303,7 @@ const checkout = async (req, res, next) => {
             client_ref:     clientRef
         };
 
-        // The number is built from the sale's own date and sequence; if another
-        // cashier took the same number a moment ago, step past it and retry.
+        // The number is built from the sale's own date and sequence
         let order_number, orderId;
         for (let attempt = 0; ; attempt++) {
             order_number = await Order.generateOrderNumber(saleDate, connection, attempt);
@@ -423,7 +337,7 @@ const checkout = async (req, res, next) => {
 
         await connection.commit();
 
-        // ── Step 7: Return receipt ────────────────────────────
+        // Step 7: Return receipt
         await logAudit(req.user.id, 'CHECKOUT', 'orders', orderId, { order_number, total, tax, client_ref: clientRef, offline_sale_time: usedClientTime }, req.ip);
 
         res.status(201).json({
@@ -457,13 +371,7 @@ const checkout = async (req, res, next) => {
     }
 };
 
-/**
- * POST /api/pos/ai-suggest  [Mock endpoint for thesis demo]
- * Accepts a symptom string and returns a placeholder suggestion.
- * ── This is intentionally a mock. ──
- * In production, this would call an AI/ML model (e.g., a fine-tuned
- * classification model or RAG pipeline).
- */
+/** POST /api/pos/ai-suggest [Mock endpoint for thesis demo] Accepts a symptom... */
 const aiSuggest = async (req, res) => {
     const { symptoms = '' } = req.body;
 
@@ -500,12 +408,7 @@ const aiSuggest = async (req, res) => {
     });
 };
 
-/**
- * GET /api/pos/void-candidate
- * Returns just the single MOST RECENT transaction (kept for backward
- * compatibility) — new code should use GET /api/pos/void-candidates
- * instead, which returns a list to choose from.
- */
+/** GET /api/pos/void-candidate - Returns just the single MOST RECENT transaction */
 const getVoidCandidate = async (req, res, next) => {
     try {
         const order = await Order.findLastCompletedInSession();
@@ -520,16 +423,7 @@ const getVoidCandidate = async (req, res, next) => {
     } catch (err) { next(err); }
 };
 
-/**
- * GET /api/pos/void-candidates
- * Returns up to the last 50 completed transactions from the last
- * CALENDAR MONTH (see Order.js), from ANY cashier -- not just the
- * requester's own -- each with its item list attached, so someone with
- * void access can pick which one to void instead of only ever being able
- * to void the very last sale. Useful when a wrong item (e.g. the wrong
- * medicine) wasn't caught until later, possibly by a different cashier
- * than the one who made the sale.
- */
+/** GET /api/pos/void-candidates - Returns up to the last 50 completed... */
 const getVoidCandidates = async (req, res, next) => {
     try {
         const orders = await Order.findRecentCompletedInSession(50);
@@ -549,41 +443,14 @@ const getVoidCandidates = async (req, res, next) => {
     } catch (err) { next(err); }
 };
 
-/**
- * POST /api/pos/void
- * Voids a specific transaction (body: { order_id }), restoring stock to
- * the exact batches it was originally deducted from. Falls back to "the
- * last transaction" if no order_id is given, for backward compatibility
- * with anything still calling this the old way.
- *
- * ── Rules ──────────────────────────────────────────────────
- * - Scoped to a rolling ONE CALENDAR MONTH window, system-wide -- no
- *   longer restricted to "your own" transactions. Anyone with void access
- *   can void ANY cashier's completed sale from within that window, not
- *   just their own. Picking a SPECIFIC order_id doesn't relax the window
- *   at all -- it's checked with the exact same WHERE clause as "the last
- *   one" (see Order.findByIdInSession).
- * - Cashiers still cannot void on their own authority: an admin or
- *   super_admin ("owner") must approve by entering their own email +
- *   password in the request body (manager_email / manager_password),
- *   regardless of whose sale is being voided.
- * - Audit attribution: logged under req.user.id -- the person who actually
- *   PERFORMED the void -- not the order's original cashier, since those
- *   can now be different people. The order's original cashier name/id is
- *   recorded in `details` (original_cashier / original_cashier_id) so the
- *   trail still clearly shows whose sale it was, alongside approved_by
- *   when a cashier needed manager sign-off.
- * - Stock is restored per batch (order_items.product_id is the exact batch
- *   row consumed at checkout time), not just added back to "the product"
- *   generically — so batch-level stock stays accurate.
- */
+/** POST /api/pos/void - Voids a specific transaction (body: { order_id }) */
 const voidLastOrder = async (req, res, next) => {
     const isCashier = req.user.role === 'cashier';
     const { order_id } = req.body;
     let approverId   = null;  // stays null unless a cashier's void needed manager approval
     let approverName = null;
 
-    // ── Manager/owner override required for cashiers ──────────
+    // Manager/owner override required for cashiers
     if (isCashier) {
         const { manager_email, manager_password } = req.body;
 
@@ -597,8 +464,7 @@ const voidLastOrder = async (req, res, next) => {
         const manager = await User.findByEmail(manager_email);
 
         if (!manager || !['admin', 'super_admin'].includes(manager.role)) {
-            // 403, NOT 401: the browser treats any 401 as "your login expired" and
-            // signs you out, which is wrong for a mistyped MANAGER password.
+            // 403, NOT 401: the browser treats any 401 as "your login expired"...
             return res.status(403).json({ success: false, message: 'Invalid admin/owner credentials.' });
         }
 
@@ -613,10 +479,7 @@ const voidLastOrder = async (req, res, next) => {
 
     const connection = await db.getConnection();
     try {
-        // A specific order_id picks exactly that transaction (still fully
-        // scoped to the 1-month window — see Order.findByIdInSession);
-        // omitting it falls back to "the last one", for anything still
-        // calling this the old way.
+        // A specific order_id picks exactly that transaction
         const order = order_id
             ? await Order.findByIdInSession(order_id)
             : await Order.findLastCompletedInSession();
@@ -630,9 +493,7 @@ const voidLastOrder = async (req, res, next) => {
 
         await connection.beginTransaction();
 
-        // Restore stock to the exact batches originally consumed. A batch that was removed or
-        // deleted since gets its units back as an Item No. by expiry date instead (see
-        // Product.restoreVoidedStock), never onto a hidden record.
+        // Restore stock to the exact batches originally consumed.
         const stockNotes = [];
         for (const item of items) {
             stockNotes.push(await Product.restoreVoidedStock(connection, item.product_id, item.quantity));
@@ -650,9 +511,7 @@ const voidLastOrder = async (req, res, next) => {
             return res.status(409).json({ success: false, message: 'This transaction was already voided or refunded.' });
         }
 
-        // The money side: the refund leaves the voider's open register (and, when the sale sits
-        // in someone else's still-open register, goes back IN there). See recordVoidRefund. Refused
-        // here -- with everything above undone -- if the drawer cannot cover it.
+        // The money side: the refund leaves the voider's open register
         const refund = await recordVoidRefund(connection, { order, refundAmount: order.total, voider: req.user, approverId });
         if (!refund.ok) {
             await connection.rollback();
@@ -661,9 +520,7 @@ const voidLastOrder = async (req, res, next) => {
 
         await connection.commit();
 
-        // Attributed to whoever actually PERFORMED the void (req.user.id) --
-        // the order's original cashier is recorded separately in details,
-        // since the two can now be different people (see docstring above).
+        // Attributed to whoever actually PERFORMED the void
         await logAudit(req.user.id, 'VOID_ORDER', 'orders', order.id,
             {
                 order_number: order.order_number,
@@ -694,11 +551,7 @@ const voidLastOrder = async (req, res, next) => {
     }
 };
 
-// -- Partial Void ---------------------------------------------------
-// Same approval rule as a full void: a Pharmacy Assistant (cashier) cannot do
-// it on their own authority, an admin or owner must enter their own email and
-// password. Returns { approverId, approverName } (both null for admin/owner),
-// or null after sending the error response itself.
+// Partial Void - Same approval rule as a full void: a Pharmacy Assistant
 async function requireVoidApproval(req, res) {
     if (req.user.role !== 'cashier') return { approverId: null, approverName: null };
 
@@ -710,8 +563,7 @@ async function requireVoidApproval(req, res) {
 
     const manager = await User.findByEmail(manager_email);
     if (!manager || !['admin', 'super_admin'].includes(manager.role)) {
-        // 403, NOT 401: the browser treats any 401 as "your login expired" and
-        // signs you out, which is wrong for a mistyped MANAGER password.
+        // 403, NOT 401: the browser treats any 401 as "your login expired" and signs...
         res.status(403).json({ success: false, message: 'Invalid admin/owner credentials.' });
         return null;
     }
@@ -723,29 +575,7 @@ async function requireVoidApproval(req, res) {
     return { approverId: manager.id, approverName: manager.name };
 }
 
-/**
- * POST /api/pos/partial-void
- * Body: { order_id, items: [{ order_item_id, quantity }], manager_email?, manager_password? }
- *
- * Voids PART of a completed sale:
- *   - the ORIGINAL receipt becomes 'voided' (so it leaves sales and cash
- *     totals), exactly as a full void does;
- *   - only the voided quantities go back into stock, to the exact batch each
- *     was sold from;
- *   - a NEW receipt is issued for what remains, linked to the original through
- *     orders.parent_order_id. It keeps the original's date/time, cashier,
- *     payment method and register session, so that day's report and that
- *     session's totals stay right; its number continues that day's sequence;
- *   - VAT and Senior/PWD discounts are recomputed for the remaining quantities
- *     with the same math as checkout (utils/vat.js);
- *   - the voided amount is treated as an immediate refund: the new receipt
- *     shows tendered = its total and change = 0.00, and the refund amount is
- *     recorded in the audit log.
- * Same window as a full void (the last calendar month, any cashier's sale)
- * and the same approval rules. The original row is locked for the whole
- * transaction, so a full Void and a Partial Void of the same sale can never
- * both succeed.
- */
+/** POST /api/pos/partial-void - Body: { order_id, items: [{ order_item_id */
 const partialVoidOrder = async (req, res, next) => {
     const isCashier = req.user.role === 'cashier';
     const { order_id, items: selections } = req.body;
@@ -777,7 +607,7 @@ const partialVoidOrder = async (req, res, next) => {
         );
         const byId = new Map(itemRows.map(i => [i.id, i]));
 
-        // -- Validate what was chosen --
+        // Validate what was chosen
         const voidQty = new Map();   // order_items.id -> quantity being voided
         for (const sel of selections) {
             const item = byId.get(Number(sel.order_item_id));
@@ -807,10 +637,7 @@ const partialVoidOrder = async (req, res, next) => {
             });
         }
 
-        // -- What stays on the new receipt --
-        // Rows are grouped back into the cart lines they came from (one brand =
-        // one line; a line that was filled from several batches has several rows)
-        // so the discount is recomputed once per line, exactly as at checkout.
+        // What stays on the new receipt - Rows are grouped back into the cart lines...
         const keptRows = itemRows
             .map(i => ({ ...i, keepQty: i.quantity - (voidQty.get(i.id) || 0) }))
             .filter(i => i.keepQty > 0);
@@ -859,23 +686,20 @@ const partialVoidOrder = async (req, res, next) => {
         const refundCents     = Math.max(0, toCents(order.total) - vat.totals.totalCents);
         const refundAmount    = centsToPesos(refundCents);
 
-        // The money side (see recordVoidRefund). Done first, so a drawer that cannot cover the
-        // refund stops the void before anything else is changed.
+        // The money side (see recordVoidRefund).
         const refund = await recordVoidRefund(connection, { order, refundAmount, voider: req.user, approverId });
         if (!refund.ok) {
             await connection.rollback();
             return res.status(refund.status).json({ success: false, message: refund.message });
         }
 
-        // -- Stock: only the voided quantities go back, to their exact batch (a batch removed or
-        //    deleted since gets its units back as an Item No. by expiry date -- see
-        //    Product.restoreVoidedStock) --
+        // Stock: only the voided quantities go back, to their exact batch
         const stockNotes = [];
         for (const [itemId, qty] of voidQty) {
             stockNotes.push(await Product.restoreVoidedStock(connection, byId.get(itemId).product_id, qty));
         }
 
-        // -- The original leaves sales and cash totals --
+        // The original leaves sales and cash totals
         const [voided] = await connection.query(
             "UPDATE orders SET status = 'voided' WHERE id = ? AND status = 'completed'",
             [order.id]
@@ -885,7 +709,7 @@ const partialVoidOrder = async (req, res, next) => {
             return res.status(409).json({ success: false, message: 'This transaction was already voided or refunded.' });
         }
 
-        // -- The new receipt: original date/time, cashier, payment and session --
+        // The new receipt: original date/time, cashier, payment and session
         const saleDate = new Date(order.created_at);
         const header = {
             cashier_id:       order.cashier_id,
@@ -920,7 +744,7 @@ const partialVoidOrder = async (req, res, next) => {
         await OrderItem.createBulk(newOrderId, newItems, connection);
         await connection.commit();
 
-        // -- Audit trail: one entry on each receipt, pointing at the other --
+        // Audit trail: one entry on each receipt, pointing at the other
         const voidedItems = [...voidQty].map(([itemId, qty]) => {
             const it = byId.get(itemId);
             return { name: it.product_name, quantity: qty, amount: centsToPesos(toCents(it.unit_price) * qty) };
@@ -985,24 +809,7 @@ const partialVoidOrder = async (req, res, next) => {
     }
 };
 
-// ============================================================
-// The MONEY and STOCK side of a void (shared by the full and the partial void)
-// ============================================================
-// A void is a refund: the cash leaves a drawer. Where that is recorded:
-//   - the voider has NO open register ............ nothing is recorded (the void still happens)
-//   - the sale is in the voider's OWN open register  nothing extra: it simply drops out of that
-//                                                     register's cash sales, so its expected cash
-//                                                     already goes down
-//   - the sale is in an EARLIER, CLOSED register ... a CASH OUT in the voider's open register (the
-//                                                     closed register's saved figures are never touched)
-//   - the sale is in ANOTHER person's still-OPEN register ... the same CASH OUT, plus a matching
-//                                                     CASH IN in that register (it lost the sale from
-//                                                     its cash sales but kept the cash), so both
-//                                                     drawers balance at closing
-// A refund the voider's drawer cannot cover (more than it is expected to hold) is refused, by the
-// same rule Cash Out already follows. It runs INSIDE the void's transaction, so a refusal -- or
-// anything failing later -- undoes the movements together with everything else.
-// Returns { ok: true, info } or { ok: false, status, message } (the caller rolls back and answers).
+// The MONEY and STOCK side of a void (shared by the full and the partial void)...
 async function recordVoidRefund(connection, { order, refundAmount, voider, approverId }) {
     const refundCents = toCents(refundAmount);
     if (refundCents <= 0) return { ok: true, info: { recorded: false, reason: 'nothing_to_refund' } };
@@ -1010,7 +817,7 @@ async function recordVoidRefund(connection, { order, refundAmount, voider, appro
     const mine       = await CashSession.findOpenByCashier(voider.id, connection);
     const originalId = order.cash_session_id ? Number(order.cash_session_id) : null;
 
-    // lock the registers involved, lowest id first, so two voids crossing each other cannot deadlock
+    // lock the registers involved, lowest id first
     const wanted = [...new Set([mine && mine.id, originalId].filter(Boolean))].sort((a, b) => a - b);
     const locked = new Map();
     if (wanted.length) {
@@ -1029,7 +836,7 @@ async function recordVoidRefund(connection, { order, refundAmount, voider, appro
         return { ok: true, info: { recorded: false, reason: 'same_register' } };
     }
 
-    // can this drawer cover it? (the same rule as Cash Out)
+    // can this drawer cover it?
     const totals    = await CashSession.getLiveTotals(myRegister.id, connection);
     const available = parseFloat(myRegister.opening_cash) + totals.cash_sales + totals.cash_in - totals.cash_out;
     if (refundCents > toCents(available)) {
@@ -1081,8 +888,7 @@ async function recordVoidRefund(connection, { order, refundAmount, voider, appro
     };
 }
 
-// The sentence(s) added to a void's reply: what happened to the refund money and to any units that
-// could not simply go back onto their old batch.
+// The sentence(s) added to a void's reply: what happened to the refund money...
 function describeVoidExtras(refundInfo, stockNotes = []) {
     const parts = [];
     if (refundInfo && refundInfo.recorded) {

@@ -1,6 +1,4 @@
-// ============================================================
 // Order Model
-// ============================================================
 const db = require('../config/db');
 
 function getManilaDateString() {
@@ -13,17 +11,9 @@ function getManilaDateString() {
 }
 
 const Order = {
-    /**
-     * generateOrderNumber
-     * Format: ORD-YYYYMMDD-XXXX (sequential per day)
-     */
+    /** generateOrderNumber - Format: ORD-YYYYMMDD-XXXX (sequential per day) */
     generateOrderNumber: async (saleDate = new Date(), executor = db, offset = 0) => {
-        // The number carries the date the sale HAPPENED (Manila time), and the
-        // sequence continues from the highest number already used with that
-        // date prefix. Counting by prefix (not by created_at = today) matters
-        // for an offline sale that syncs later: it is numbered for its own
-        // day and can never collide with a sale made today. `offset` lets the
-        // caller step past a number another cashier took at the same instant.
+        // The number carries the date the sale HAPPENED (Manila time)
         const dateStr = new Intl.DateTimeFormat('en-CA', {
             timeZone: 'Asia/Manila', year: 'numeric', month: '2-digit', day: '2-digit'
         }).format(saleDate).replace(/-/g, '');
@@ -59,8 +49,7 @@ const Order = {
             created_at = null, client_ref = null, parent_order_id = null
         } = orderData;
 
-        // created_at is only passed for an offline sale that keeps the time it
-        // was actually made; otherwise the database stamps the current time.
+        // created_at is only passed for an offline sale that keeps the time it...
         const [result] = await executor.query(
             `INSERT INTO orders
              (order_number, cashier_id, subtotal, discount, tax, total,
@@ -133,12 +122,7 @@ const Order = {
         return rows[0];
     },
 
-    // Always returns EXACTLY 12 entries: the 11 calendar months before the
-    // current one, plus the current month, oldest first. A month with no
-    // completed sales is included as revenue 0 / transactions 0, so a line
-    // chart over this never has gaps. "Current month" is worked out in
-    // Manila time (the pharmacy's timezone) rather than the Node server's
-    // own clock, so it cannot shift by a month near month-end on a UTC host.
+    // Always returns EXACTLY 12 entries: the 11 calendar months before the current one
     getMonthlySales: async () => {
         const MONTH_NAMES = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 
@@ -221,7 +205,7 @@ const Order = {
         return rows;
     },
 
-    // ── FIX: Added all non-aggregated columns to GROUP BY ────
+    // FIX: Added all non-aggregated columns to GROUP BY
     getRecentTransactions: async (limit = 5) => {
         const [rows] = await db.query(
             `SELECT o.id, o.order_number, o.total, o.payment_method,
@@ -240,18 +224,7 @@ const Order = {
         return rows;
     },
 
-    // -- Void support --------------------------------------------
-    // Scoped to a rolling ONE CALENDAR MONTH window from right now (e.g.
-    // if today is Aug 29, the cutoff is Jul 29) -- and, as of this
-    // change, no longer restricted to "your own" transactions. ANY
-    // cashier's completed sale from within that window is reachable by
-    // anyone with void access, not just the person who originally rang it
-    // up -- useful when a different cashier notices a prior mistake, or an
-    // admin/owner needs to review and correct something after the fact.
-    // Cashiers still can't act on their own authority though: an
-    // admin/owner must approve with their own credentials before ANY void
-    // goes through (see posController.js's voidLastOrder), regardless of
-    // whose sale it originally was.
+    // Void support - Scoped to a rolling ONE CALENDAR MONTH window from right now
     findLastCompletedInSession: async () => {
         const [rows] = await db.query(
             `SELECT o.*, u.name AS cashier_name
@@ -264,12 +237,7 @@ const Order = {
         return rows[0] || null;
     },
 
-    // Same scoping as above, but returns up to `limit` recent transactions
-    // instead of only the single most recent one -- lets the person pick
-    // WHICH one to void. Limit bumped up from the old 10 now that this
-    // covers a full month system-wide instead of one cashier's last 10
-    // sales, so genuinely older (but still in-window) transactions stay
-    // reachable through the list.
+    // Same scoping as above, but returns up to `limit` recent transactions instead...
     findRecentCompletedInSession: async (limit = 50) => {
         const [rows] = await db.query(
             `SELECT o.*, u.name AS cashier_name
@@ -283,11 +251,7 @@ const Order = {
         return rows;
     },
 
-    // Fetches ONE specific order by id, but only within the exact same
-    // scoping rules as above -- used when voiding a SPECIFIC chosen
-    // transaction rather than just "the last one", so the boundary is
-    // identical either way: still within the 1-month window, regardless
-    // of which one in the list gets picked or who rang it up.
+    // Fetches ONE specific order by id, but only within the exact same scoping rules...
     findByIdInSession: async (orderId) => {
         const [rows] = await db.query(
             `SELECT o.*, u.name AS cashier_name
@@ -302,10 +266,7 @@ const Order = {
         return rows[0] || null;
     },
 
-    // Same scoping as findByIdInSession, but run INSIDE an open transaction and
-    // locking the order row. A Partial Void uses it so that a full Void (or a
-    // second Partial Void) of the same sale cannot run at the same time: the
-    // second one waits, then finds the order no longer 'completed' and stops.
+    // Same scoping as findByIdInSession, but run INSIDE an open transaction...
     findByIdInSessionForUpdate: async (orderId, connection) => {
         const [rows] = await connection.query(
             `SELECT o.*, u.name AS cashier_name

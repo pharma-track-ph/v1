@@ -1,6 +1,4 @@
-/* ============================================================
-   Inventory Module Styles
-   ============================================================ */
+/* Inventory Module Styles */
 
 .inv-toolbar {
     display:     flex;
@@ -51,36 +49,8 @@
 .expiry-dot.blue   { background: var(--info); }
 .expiry-dot.green  { background: var(--success); }
 
-/* -- Inventory table: fixed column widths -- */
-/* Scoped to .inventory-table specifically, NOT the shared .table class --
-   .table is used on every other page (Reports, Users, Audit Logs, Backup,
-   Dashboard), each with a different number of columns and different
-   content shapes. Forcing table-layout:fixed onto .table globally would
-   force even-width columns on all of those too, since none of them have
-   a matching colgroup -- this stays scoped so nothing else changes.
-
-   Root cause of the column-width jumping: with the default
-   table-layout:auto, column widths are computed from actual cell content,
-   so an empty/short result set (e.g. a filter that matches 0 or 1 rows)
-   left only the header text to size against, and widths visibly jumped
-   around between filter changes. table-layout:fixed plus an explicit
-   colgroup makes column widths constant regardless of what's in the
-   table body.
-
-   min-width bumped from 1000px to 1150px, and the colgroup percentages
-   rebalanced (see inventory.html) -- at 1000px, Batch No. (11%, ~110px)
-   silently ellipsis-truncated real batch numbers like "BATCH-OMP-001",
-   and Actions (9%, ~90px) was nowhere near wide enough for Edit+Delete
-   together, so the buttons visually spilled out past the table -- and
-   past the browser viewport, since Actions is the last column, with no
-   scrollbar able to reach them because the table's LAYOUT width (as far
-   as the browser's overflow calculation was concerned) never actually
-   grew to include that spillover. Both columns now get real width so
-   nothing needs to overflow in the first place; if a narrower window
-   still doesn't fit all 1150px, .table-container's existing
-   overflow-x:auto (global.css) now has genuine extra table width to
-   scroll to, since it's real layout width this time, not just visually-
-   painted overflow. */
+/* Inventory table: fixed column widths */
+/* Scoped to .inventory-table specifically, NOT the shared .table class .table... */
 .inventory-table {
     width:        100%;
     table-layout: fixed;
@@ -94,26 +64,14 @@
     white-space:   nowrap;
 }
 
-/* Actions holds two real buttons, not text -- overflow:hidden above would
-   CLIP the second button (Delete) instead of ellipsis-truncating it,
-   which is exactly what was happening. Buttons need to stay fully
-   visible regardless of column width, so this column is excluded from
-   the truncation rule above. Status (the badge column, 6th of 7) gets
-   the same treatment -- a single badge like "Expiring in 3 Months" is
-   still one unbroken run of text that the ellipsis rule would otherwise
-   clip mid-word once it doesn't fit the column's fixed width; letting it
-   wrap instead keeps the whole label readable. */
+/* Actions holds two real buttons, not text */
 .inventory-table td:last-child,
 .inventory-table td:nth-child(6) {
     overflow:    visible;
     white-space: normal;
 }
 
-/* Product Name cells stack two lines (name + generic name subtitle) inside
-   one <td> -- the td-level nowrap above only stops the COLUMN from
-   stretching to fit unusually long content; each inner line still needs
-   its own overflow/ellipsis handling so a long name or generic name
-   truncates cleanly instead of overflowing its own line. */
+/* Product Name cells stack two lines (name + generic name subtitle) inside one... */
 .inventory-table td .fw-600,
 .inventory-table td .text-muted {
     display:       block;
@@ -128,14 +86,9 @@
     margin-top: 8px;
 }
 
-/* Expected import format for reference (see "Download Template" button
- * on the page for a ready-made .xlsx with these exact headers, or a
- * .csv with the same columns works too):
- * Brand Name,Generic Name,Category,Supplier,Selling Price,Cost,Low Stock Threshold,Description,Stock Quantity,Expiry Date
- * Paracetamol 500mg,Paracetamol,Analgesic,Unilab Inc.,6.50,3.00,20,Optional notes,100,2027-12-31
- */
+/* Expected import format for reference... */
 
-/* ── Barcode preview (Edit Product modal) ────────── */
+/* Barcode preview (Edit Product modal) */
 .barcode-preview-box {
     display:         flex;
     flex-direction:  column;
@@ -156,7 +109,7 @@
     letter-spacing: 1px;
 }
 
-/* ── Responsive ──────────────────────────────────────────── */
+/* Responsive */
 @media (max-width: 768px) {
     .inv-toolbar {
         display:   flex;
@@ -182,11 +135,10 @@
     }
 }
 
-/* -- Add/Edit Product modal: wider than the default .modal max-width
-   (600px), since it now also holds the Item No. list. -- */
+/* Add/Edit Product modal: wider than the default .modal max-width (600px) */
 .modal.modal-lg { max-width: 720px; }
 
-/* -- Item No. list (inside the Edit Product modal) -- */
+/* Item No. list (inside the Edit Product modal) */
 .item-list-section {
     margin-top: 8px;
 }
@@ -236,10 +188,7 @@
 
 .item-row-actions { display: flex; gap: 8px; flex-shrink: 0; }
 
-/* Shared by each item's inline Edit form AND the "+ Add Item No." form --
-   same small inline panel either way, just triggered from different
-   buttons and posting to a different endpoint (updateItem vs addItem in
-   inventory.js). */
+/* Shared by each item's inline Edit form AND the "+ Add Item No." form same small... */
 .item-row-form {
     display:        flex;
     align-items:    flex-end;
@@ -261,12 +210,7 @@
 
 #add-item-form { margin-top: 4px; }
 
-/* -- Item No. tags (every item gets one -- Expired/Out of Stock/Expiring
-   This Month/Expiring in 3 Months/Good) -- same small-pill look as
-   forecasting's .pred-tag, kept local here since this page doesn't load
-   that stylesheet. Colors match the main table's status badges exactly
-   (see global.css's .badge-danger/.badge-warning/etc.) for a uniform
-   look between the two. -- */
+/* Item No. tags... */
 .item-tag {
     display:       inline-block;
     padding:       2px 9px;
@@ -281,11 +225,7 @@
 .item-tag.expiring-3mo   { background: var(--info-light);    color: #0c7e9a; }
 .item-tag.good           { background: var(--success-light); color: var(--success); }
 
-/* -- Removed Item No. section -- items that are expired or out of stock
-   move here automatically as a reminder to physically clear them out.
-   "Remove" here is DISPLAY-ONLY (this session's modal state), never a
-   database delete -- see inventory.js. Slightly muted styling to read as
-   a distinct "needs attention" area, not just more of the same list. -- */
+/* Removed Item No. section */
 .removed-items-section {
     margin-top:    16px;
     padding-top:   14px;

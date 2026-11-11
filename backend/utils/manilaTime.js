@@ -1,17 +1,4 @@
-// ============================================================
-// Manila time, independent of the server's own time zone
-// ============================================================
-// PharmaTrack runs in Manila time. Your own computer is already set to it, but a
-// hosted server (Render) normally runs in UTC, 8 hours behind. Code that asks the
-// server's clock for "the hour", "the day" or "midnight" (getHours(), getDate(),
-// setHours(0,0,0,0) ...) therefore gave different answers on the two machines:
-// export times 8 hours off, a date shown as the previous day, an Item No. flipping to
-// "expired" at 8 AM instead of at midnight.
-//
-// Everything here asks for Manila's wall-clock explicitly, so the result is the same
-// on any machine. (The database side is already correct: every connection sets
-// time_zone = '+08:00' -- see config/db.js.) Manila has no daylight saving, so the
-// offset is always +08:00.
+// Manila time, independent of the server's own time zone PharmaTrack runs in Manila...
 
 const TZ = 'Asia/Manila';
 
@@ -38,7 +25,7 @@ function parts(value = new Date()) {
     return { year: p.year, month: p.month, day: p.day, hour: p.hour % 24, minute: p.minute, second: p.second };
 }
 
-// "2026-10-25" -- the calendar date in Manila
+// "2026-10-25" - the calendar date in Manila
 function dateString(value = new Date()) {
     const p = parts(value);
     return `${p.year}-${pad(p.month)}-${pad(p.day)}`;

@@ -8,9 +8,7 @@
     <link rel="icon" type="image/png" href="../images/pharmatrack-logo.png">
     <link rel="stylesheet" href="../css/global.css">
     <style>
-        /* Small additions specific to the Forgot Password flow -- kept
-           inline since this page doesn't load a separate page-specific
-           stylesheet (everything else here reuses global.css). */
+        /* Small additions specific to the Forgot Password flow */
         .forgot-link {
             display: block;
             text-align: center;
@@ -72,7 +70,7 @@
         </div>
     </div>
 
-    <!-- ── Forgot Password modal (3 steps: email -> code -> new password) ── -->
+    <!-- Forgot Password modal (3 steps: email -> code -> new password) -->
     <div class="modal-overlay" id="forgot-password-modal">
         <div class="modal" style="max-width:380px">
             <div class="modal-header">
@@ -117,7 +115,7 @@
                     </p>
                     <div class="form-group">
                         <label class="form-label">New Password</label>
-                        <input type="password" id="fp-new-password" class="form-control" placeholder="Min. 8 characters" autocomplete="new-password">
+                        <input type="password" id="fp-new-password" class="form-control" placeholder="Min. 10 characters" autocomplete="new-password">
                     </div>
                     <div class="form-group">
                         <label class="form-label">Confirm New Password</label>
@@ -144,7 +142,7 @@
 
     <script src="../js/passwordToggle.js"></script>
     <script>
-        // ── Redirect if already logged in ────────────────────────
+        // Redirect if already logged in
         const CONFIG = {
             API_BASE: (() => {
                 const host = window.location.hostname;
@@ -194,19 +192,14 @@
             window.location.href = user.role === 'cashier' ? 'pos.html' : 'dashboard.html';
         }
 
-        // Shows WHY someone landed back here if they were just auto-logged-
-        // out (session expired, account deactivated, etc.) instead of the
-        // previous silent redirect with no explanation -- see main.js's
-        // Auth.logout(reason) and API.request's 401 handling. Read once and
-        // immediately cleared, so it never lingers or reappears on a later,
-        // unrelated visit to this page.
+        // Shows WHY someone landed back here if they were just auto-logged- out
         const logoutReason = sessionStorage.getItem('pharmatrack_logout_reason');
         if (logoutReason) {
             sessionStorage.removeItem('pharmatrack_logout_reason');
             Toast.show(logoutReason, 'info');
         }
 
-        // ── Login Form ────────────────────────────────────────────
+        // Login Form
         document.getElementById('login-form').addEventListener('submit', async (e) => {
             e.preventDefault();
 
@@ -244,11 +237,7 @@
             }
         });
 
-        // ── Forgot Password flow ──────────────────────────────────
-        // Three steps in one modal: email -> OTP -> new password. A
-        // successfully-verified OTP earns a short-lived resetToken (10 min)
-        // from the server -- THAT token is what actually authorizes step 3,
-        // not the OTP again, so the code can't be reused once verified.
+        // Forgot Password flow - Three steps in one modal: email -> OTP
         const fpModal        = document.getElementById('forgot-password-modal');
         let fpVerifiedEmail   = '';
         let fpResetToken      = '';
@@ -283,9 +272,7 @@
             fpOpen();
         });
         document.getElementById('btn-close-forgot').addEventListener('click', fpClose);
-        // Only the ✕ and "Back to Sign In" close this now -- clicking outside
-        // used to close it too, which was easy to trigger by accident mid-way
-        // through entering a code and lose progress.
+        // Only the ✕ and "Back to Sign In" close this now
 
         // Step 1 -> Step 2: request the code
         async function fpSendCode() {
@@ -299,14 +286,7 @@
             btn.disabled = true;
             btn.textContent = 'Sending…';
 
-            // try/catch here (and in every other step below) matters: without
-            // it, a request that fails at the NETWORK level -- a dropped
-            // connection, a host-level timeout, anything short of a clean
-            // JSON response -- throws out of the bare `await`, and the code
-            // that re-enables the button never runs. The button was
-            // observed stuck on "Sending…" forever this way even after the
-            // underlying cause (a Render env mismatch) was fixed, since nothing
-            // here was catching that class of failure to begin with.
+            // try/catch here (and in every other step below) matters: without it
             let result;
             try {
                 result = await API.post('/auth/forgot-password', { email });
@@ -415,7 +395,7 @@
             const btn = document.getElementById('fp-reset-password-btn');
             errorEl.textContent = '';
 
-            if (!newPassword || newPassword.length < 8) { errorEl.textContent = 'Password must be at least 8 characters.'; return; }
+            if (!newPassword || newPassword.length < 10) { errorEl.textContent = 'Password must be at least 10 characters.'; return; }
             if (newPassword !== confirmPassword)         { errorEl.textContent = 'Passwords do not match.'; return; }
 
             btn.disabled = true;

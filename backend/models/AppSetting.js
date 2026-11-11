@@ -1,10 +1,4 @@
-// ============================================================
-// AppSetting Model
-// Small key-value store for app-wide configurable settings (e.g. the
-// scheduled backup time). Deliberately generic/reusable rather than a
-// one-off column somewhere, so future settings don't need their own
-// migration each time.
-// ============================================================
+// AppSetting Model - Small key-value store for app-wide configurable settings
 const db = require('../config/db');
 
 const AppSetting = {

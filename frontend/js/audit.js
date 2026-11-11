@@ -1,19 +1,14 @@
-// ============================================================
-// PharmaTrack – audit.js
-// Audit log viewer: paginated table, filters, CSV export
-// Accessible by: Owner (sees every entry) and Admin (sees ONLY entries made by
-// Pharmacists -- enforced in the server's query, not just hidden here)
-// ============================================================
+// PharmaTrack - audit.js - Audit log viewer: paginated table, filters
 document.addEventListener('DOMContentLoaded', () => {
-    if (!Auth.requireAuth(['admin', 'super_admin'])) return;   // Admin sees only what Pharmacists did (enforced by the server)
+    if (!Auth.requireAuth(['admin', 'super_admin'])) return;   // Admin sees only what Pharmacists did
 
-    // ── State ────────────────────────────────────────────────
+    // State
     let allLogs      = [];
     let filteredLogs = [];
-    let auditSort     = null; // set once the table's sortable headers are wired up (see loadAuditLogs)
+    let auditSort     = null; // set once the table's sortable headers are wired up
     let auditPaginate = null; // set once, right alongside auditSort (see loadAuditLogs)
 
-    // ── DOM ──────────────────────────────────────────────────
+    // DOM
     const tbody        = document.getElementById('audit-tbody');
     const pagination   = document.getElementById('pagination');
     const searchInput  = document.getElementById('audit-search');
@@ -23,10 +18,10 @@ document.addEventListener('DOMContentLoaded', () => {
     const clearBtn     = document.getElementById('btn-clear-filters');
     const refreshBtn   = document.getElementById('btn-refresh');
 
-    // ── Boot ─────────────────────────────────────────────────
+    // Boot
     loadAuditLogs();
 
-    // ── Event listeners ───────────────────────────────────────
+    // Event listeners
     searchInput?.addEventListener('input',    applyFilters);
     actionFilter?.addEventListener('change',  applyFilters);
     entityFilter?.addEventListener('change',  applyFilters);
@@ -34,19 +29,14 @@ document.addEventListener('DOMContentLoaded', () => {
     clearBtn?.addEventListener('click',       clearFilters);
     refreshBtn?.addEventListener('click',     loadAuditLogs);
 
-    // Suggests by cashier/user name -- the field most audit searches are
-    // actually looking for ("who did this"). It won't suggest matches by
-    // action/entity text, but the box still filters by all three once you
-    // hit Enter or keep typing, same as before.
+    // Suggests by cashier/user name
     SearchSuggest.attach(searchInput, {
         getItems:    () => allLogs,
         getLabel:    l => l.user_name || '',
         getSubLabel: l => (l.action || '').replace(/_/g, ' ')
     });
 
-    // ── Export dropdown (Excel / PDF / Word) ────────────
-    // Mirrors whatever filters are currently applied on screen, so the
-    // export always matches what's actually visible in the table.
+    // Export dropdown (Excel / PDF / Word) - Mirrors whatever filters are currently...
     const exportToggleBtn = document.getElementById('btn-export-toggle');
     const exportMenu       = document.getElementById('export-menu');
 
@@ -82,7 +72,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!ok) Toast.show('Export failed. Check your connection.', 'error');
     }
 
-    // ── Load audit logs from API ──────────────────────────────
+    // Load audit logs from API
     async function loadAuditLogs() {
         if (tbody) {
             tbody.innerHTML = `<tr><td colspan="6" class="text-center" style="padding:40px">
@@ -105,14 +95,7 @@ document.addEventListener('DOMContentLoaded', () => {
         allLogs = data.data || [];
         renderStats();
 
-        // Sorting operates on allLogs ITSELF (not the paginated/filtered
-        // view rendered below) -- Array.filter() preserves source order,
-        // so sorting the underlying array once means every subsequent
-        // search/action/entity/date filter change automatically inherits
-        // whatever order is currently active. getData (not a plain array)
-        // keeps this correct even though `allLogs` gets REASSIGNED on
-        // every reload above -- see TableSort's own comment for why a
-        // plain array reference would go stale here.
+        // Sorting operates on allLogs ITSELF...
         if (!auditSort) {
             auditSort = TableSort.attach(document.querySelector('#audit-table thead'), {
                 getData: () => allLogs,
@@ -121,16 +104,13 @@ document.addEventListener('DOMContentLoaded', () => {
                     if (key === 'entity_id')  return row.entity_id != null ? String(row.entity_id) : null;
                     return (row[key] || '').toString().toLowerCase();
                 },
-                onSorted: applyFilters // already re-derives filteredLogs, resets to page 1, and re-renders
+                onSorted: applyFilters // already re-derives filteredLogs, resets to page 1
             });
         } else {
             auditSort.resort();
         }
 
-        // Paginate operates on filteredLogs (the current search/filter
-        // view), NOT allLogs -- attached once, same guard as auditSort
-        // above, since re-attaching on every load would double up the
-        // Prev/Next/page-number click listeners on the same controls.
+        // Paginate operates on filteredLogs (the current search/filter view)
         if (!auditPaginate) {
             auditPaginate = Paginate.attach(pagination, {
                 getData:  () => filteredLogs,
@@ -141,7 +121,7 @@ document.addEventListener('DOMContentLoaded', () => {
         applyFilters();
     }
 
-    // ── Stats bar ─────────────────────────────────────────────
+    // Stats bar
     function renderStats() {
         const today = new Date().toISOString().split('T')[0];
 
@@ -161,7 +141,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (statDeletes) statDeletes.textContent = deleteCount;
     }
 
-    // ── Filtering ─────────────────────────────────────────────
+    // Filtering
     function applyFilters() {
         const term   = searchInput?.value.toLowerCase().trim() || '';
         const action = actionFilter?.value || '';
@@ -181,9 +161,7 @@ document.addEventListener('DOMContentLoaded', () => {
             return matchText && matchAction && matchEntity && matchDate;
         });
 
-        // resetToFirstPage() re-slices filteredLogs for page 1 and calls
-        // renderTable via Paginate's onRender -- a new filter value has no
-        // obvious meaning for whatever page you were previously on.
+        // resetToFirstPage() re-slices filteredLogs for page 1 and calls renderTable...
         auditPaginate.resetToFirstPage();
     }
 
@@ -195,10 +173,7 @@ document.addEventListener('DOMContentLoaded', () => {
         applyFilters();
     }
 
-    // Display-only maps -- underlying values in the database/logic (role, entity) never
-    // change, only what's shown on screen here. Role names come from the shared
-    // roleLabel() in main.js, so this page always agrees with every other screen (an
-    // empty role shows as blank).
+    // Display-only maps - underlying values in the database/logic
 
     const ENTITY_LABELS = {
         products:       'Product',
@@ -215,7 +190,7 @@ document.addEventListener('DOMContentLoaded', () => {
         return ENTITY_LABELS[entity] || entity.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
     }
 
-    // ── Render table ──────────────────────────────────────────
+    // Render table
     function renderTable(pageItems) {
         if (!tbody) return;
 
@@ -257,9 +232,7 @@ document.addEventListener('DOMContentLoaded', () => {
             </tr>`;
         }).join('');
 
-        // Wire expand buttons -- keyed by the log's own id now (stable
-        // regardless of sort order or which page it's on), not a computed
-        // page-relative index the way this used to work.
+        // Wire expand buttons
         tbody.querySelectorAll('.btn-expand').forEach(btn => {
             btn.addEventListener('click', () => {
                 const id        = btn.dataset.id;
@@ -273,7 +246,7 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    // ── Action badge ──────────────────────────────────────────
+    // Action badge
     function getActionBadge(action) {
         if (!action) return '<span class="action-badge DEFAULT">—</span>';
 
@@ -288,7 +261,7 @@ document.addEventListener('DOMContentLoaded', () => {
         return `<span class="action-badge ${cls}">${escHtml(label)}</span>`;
     }
 
-    // ── Format details JSON ───────────────────────────────────
+    // Format details JSON
     function detailGrid(rows) {
         return `<div class="detail-grid">${rows.map(([label, value]) =>
             `<div class="detail-row-item"><span class="detail-label">${label}</span><span class="detail-value">${value}</span></div>`
@@ -346,8 +319,7 @@ document.addEventListener('DOMContentLoaded', () => {
             }
             if (parsed.original_cashier) rows.push(['Rung Up By', escHtml(parsed.original_cashier)]);
             if (parsed.approved_by)      rows.push(['Approved By', escHtml(parsed.approved_by)]);
-            // What happened to the refund money and to any units that could not simply go back onto
-            // their old batch (recorded by the server when the void happened)
+            // What happened to the refund money and to any units that could not...
             if (parsed.refund) {
                 const rf = parsed.refund;
                 if (rf.recorded) {
@@ -417,9 +389,7 @@ document.addEventListener('DOMContentLoaded', () => {
             ]);
         }
 
-        // Inventory removals. REMOVE_ITEM keeps the batch in the database (flagged removed);
-        // DELETE_ITEM / DELETE_PRODUCT are the real deletes. Each says WHAT, so it can be
-        // matched against the physical stock.
+        // Inventory removals.
         if (action === 'REMOVE_ITEM') {
             const why = String(parsed.reason || '');
             return detailGrid([
@@ -473,9 +443,6 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         // Generic fallback for any action without a dedicated handler above
-        // (e.g. UPDATE_USER falls through to here) -- role-shaped keys are
-        // translated the same way the main table's role badge is, so a raw
-        // "super_admin"/"admin" value never leaks through untranslated.
         return detailGrid(Object.entries(parsed).map(function(entry) {
             const k = entry[0], v = entry[1];
             if (k === 'role' || k.endsWith('_role')) {
@@ -486,14 +453,11 @@ document.addEventListener('DOMContentLoaded', () => {
         }));
     }
 
-    // ── Pagination ────────────────────────────────────────────
-    // Pagination is now handled entirely by main.js's shared Paginate
-    // helper (see loadAuditLogs, where it's attached) -- this page-
-    // specific version is gone.
+    // Pagination - Pagination is now handled entirely by main.js's shared Paginate...
 
 });
 
-// ── Utilities ─────────────────────────────────────────────────
+// Utilities
 function escHtml(str) {
     return String(str ?? '')
         .replace(/&/g, '&amp;')

@@ -1,8 +1,6 @@
-/* ============================================================
-   PharmaTrack – Forecasting Module Styles
-   ============================================================ */
+/* PharmaTrack - Forecasting Module Styles */
 
-/* ── Trending Section ────────────────────────────────────── */
+/* Trending Section */
 .trending-section {
     background: var(--white);
     border-radius: 16px;
@@ -69,7 +67,7 @@
 
 .trend-value { font-size: 1rem; font-weight: 700; color: var(--primary); }
 
-/* ── Restock Suggestions ─────────────────────────────────── */
+/* Restock Suggestions */
 .restock-suggestions {
     background: var(--white);
     border-radius: 16px;
@@ -108,7 +106,7 @@
 .restock-action { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
 .restock-action .restock-qty { font-weight: 700; color: var(--primary); white-space: nowrap; font-size: 0.88rem; }
 
-/* ── Forecast Panel ──────────────────────────────────────── */
+/* Forecast Panel */
 .forecast-panel {
     background: var(--white);
     border-radius: 16px;
@@ -158,7 +156,7 @@
     border-color: var(--primary);
 }
 
-/* ── Algorithm Cards ─────────────────────────────────────── */
+/* Algorithm Cards */
 .algorithm-selector { margin-bottom: 24px; }
 .algorithm-selector > .input-label { margin-bottom: 12px; }
 
@@ -188,10 +186,10 @@
 .algo-name   { font-weight: 700; color: var(--dark); font-size: 0.9rem; }
 .algo-card.active .algo-name { color: var(--primary); }
 
-/* ── Action Row ──────────────────────────────────────────── */
+/* Action Row */
 .action-row { display: flex; gap: 16px; align-items: center; flex-wrap: wrap; }
 
-/* ── Forecast Horizon Selector ───────────────────────────── */
+/* Forecast Horizon Selector */
 .horizon-selector { margin-bottom: 20px; }
 
 .horizon-btn {
@@ -259,7 +257,7 @@
 /* Alpha/beta hint text */
 .alpha-hint { font-size: 0.72rem; color: var(--secondary); margin-top: 4px; }
 
-/* ── What We Found Card (now also carries product info + quick stats) ── */
+/* What We Found Card (now also carries product info + quick stats) */
 .pattern-detection-card {
     background: linear-gradient(135deg, #1a237e 0%, #1565c0 100%);
     border-radius: 16px;
@@ -279,10 +277,7 @@
 
 .pdc-product-info h4 { font-size: 1.25rem; font-weight: 700; color: white; margin-bottom: 4px; }
 
-/* .product-category normally sits on a light card (see e.g. Inventory) --
-   here it's on the dark gradient instead, so it needs its own translucent
-   treatment rather than the default light-gray-background/dark-text
-   look. */
+/* .product-category normally sits on a light card */
 .pattern-detection-card .product-category {
     background: rgba(255,255,255,0.18);
     color:      white;
@@ -315,7 +310,7 @@
 .pattern-info .pattern-value { font-size: 1.2rem; font-weight: 700; }
 .pattern-info .pattern-sub   { font-size: 0.7rem; opacity: 0.7; }
 
-/* ── Forecast Chart Card ─────────────────────────────────── */
+/* Forecast Chart Card */
 .forecast-chart-card {
     background: var(--white);
     border-radius: 16px;
@@ -350,7 +345,7 @@
 
 .forecast-chart-container { position: relative; height: 360px; }
 
-/* ── How to Read This Chart box ────────────────────────────── */
+/* How to Read This Chart box */
 .chart-guide {
     background: #f8f9fa;
     border-radius: 8px;
@@ -364,7 +359,7 @@
 
 .chart-guide strong { color: var(--dark); }
 
-/* ── Predictions Grid ────────────────────────────────────── */
+/* Predictions Grid */
 .predictions-section { margin-bottom: 24px; }
 .predictions-section h4 { font-size: 1rem; font-weight: 700; color: var(--dark); margin-bottom: 8px; }
 .predictions-section p  { font-size: 0.8rem; color: var(--secondary); margin-bottom: 16px; }
@@ -382,7 +377,7 @@
 .pred-tag.warning  { background: #ffc107; color: #664d03; }
 .pred-tag.good     { background: #198754; color: white; }
 
-/* ── Recommendation Card ─────────────────────────────────── */
+/* Recommendation Card */
 .recommendation-card {
     background: linear-gradient(135deg, #0d6efd 0%, #0099ff 100%);
     border-radius: 16px;
@@ -417,7 +412,7 @@
 .rec-action .rec-message  { font-size: 1.1rem; font-weight: 600; margin-bottom: 4px; }
 .rec-action .rec-deadline { font-size: 0.9rem; opacity: 0.8; }
 
-/* ── Historical Data Table (collapsible) ─────────────────── */
+/* Historical Data Table (collapsible) */
 .data-details {
     background: var(--white);
     border-radius: 16px;
@@ -468,7 +463,7 @@
 
 .pg-info { font-size: 0.82rem; color: var(--secondary); font-weight: 600; }
 
-/* ── Comparison Modal ────────────────────────────────────── */
+/* Comparison Modal */
 #comparison-modal.modal-overlay {
     position: fixed;
     inset: 0;
@@ -478,31 +473,7 @@
     justify-content: center;
     z-index: 1000;
     padding: 20px;
-    /* Scoped to #comparison-modal specifically -- this used to be a bare
-       .modal-overlay selector, which meant it ALSO applied to every OTHER
-       .modal-overlay on this page, including the shared modals main.js
-       injects everywhere (Edit Profile, its Change Password OTP step,
-       Manager Approval). Since those all rely on global.css's .active
-       class to toggle opacity/visibility, and this rule hardcoded
-       opacity:1; visibility:visible UNCONDITIONALLY, every one of THOSE
-       modals was forced permanently visible the moment it was first
-       created on this page -- opening looked normal (display:flex was
-       already true), but clicking Close (which only removes .active) did
-       nothing, since this page's own override kept winning the cascade
-       regardless. Scoping to the ID this was actually written for fixes
-       that without touching the comparison modal's own behavior at all.
-
-       This page's own .modal-overlay is a SEPARATE rule from global.css's
-       .active-toggled opacity/visibility version -- explicitly reset here
-       since global.css's base .modal-overlay defaults to opacity:0;
-       visibility:hidden and only reveals via an .active class this page's
-       JS never adds (forecasting.js only ever toggles the shared .hidden
-       utility class). Without this reset those two properties from
-       global.css still won the cascade (never overridden here), so this
-       modal was actually already display:flex the moment .hidden was
-       removed -- just permanently invisible and non-interactive
-       underneath, which is why "Compare All Methods" looked like it did
-       nothing at all. */
+    /* Scoped to #comparison-modal specifically */
     opacity: 1;
     visibility: visible;
 }
@@ -545,7 +516,7 @@
     font-size: 0.875rem;
 }
 
-/* ── Loading placeholder ─────────────────────────────────── */
+/* Loading placeholder */
 .loading-placeholder {
     text-align: center;
     padding: 40px;
@@ -553,7 +524,7 @@
     font-size: 0.9rem;
 }
 
-/* ── Algorithm explainer banner ─────────────────────────── */
+/* Algorithm explainer banner */
 .algo-explainer {
     background: linear-gradient(135deg, #f0f7ff 0%, #e8f0fe 100%);
     border: 1px solid #b6d0fe;
@@ -570,26 +541,22 @@
 .algo-explainer-text h4 { font-size: 0.9rem; font-weight: 700; color: var(--primary); margin-bottom: 6px; }
 .algo-explainer-text p  { font-size: 0.8rem; color: var(--secondary); line-height: 1.5; margin: 0; }
 
-/* ── Utility ─────────────────────────────────────────────── */
+/* Utility */
 .hidden             { display: none !important; }
 
 input[type="range"] { width: 100%; margin: 6px 0; accent-color: var(--primary); }
 
 details summary { padding: 8px 0; user-select: none; }
 
-/* ── Responsive ──────────────────────────────────────────── */
+/* Responsive */
 @media (max-width: 768px) {
     .selector-row        { grid-template-columns: 1fr; }
 
-    /* #forecast-product is hidden (see forecasting.html) -- this only
-       affects #product-search now, which just takes the full row width
-       via flex:1 below. */
+    /* forecast-product is hidden (see forecasting.html) */
     .searchable-select   { flex-direction: row; }
     .searchable-select > * { flex: 1; min-width: 0; }
 
-    /* All 4 quick filter buttons stay on one row -- more compact padding
-       so they actually fit rather than wrapping. Shared with the Forecast
-       Horizon buttons below, which benefit from the same compacting. */
+    /* All 4 quick filter buttons stay on one row */
     .filter-buttons {
         flex-wrap: nowrap;
     }
@@ -603,9 +570,7 @@ details summary { padding: 8px 0; user-select: none; }
         justify-content: center;
     }
 
-    /* 3 method cards side by side instead of stacked -- much more
-       feasible now that each card is just a name, not a whole
-       icon+description+badge block. */
+    /* 3 method cards side by side instead of stacked */
     .algorithm-cards     { grid-template-columns: repeat(3, 1fr); gap: 6px; }
     .algo-card           { padding: 12px 6px; min-height: 48px; }
     .algo-name           { font-size: 0.72rem; }
@@ -628,9 +593,7 @@ details summary { padding: 8px 0; user-select: none; }
         gap:                   8px;
     }
 
-    /* Compact, centered, icon-on-top layout -- same idea as Dashboard's
-       KPI cards -- rather than the desktop card's wide icon-left/
-       stats-right layout, which doesn't fit two cards per row. */
+    /* Compact, centered, icon-on-top layout - same idea as Dashboard's KPI cards */
     .trending-card {
         padding:    10px 8px;
         text-align: center;
@@ -675,8 +638,7 @@ details summary { padding: 8px 0; user-select: none; }
     .btn-outline-secondary { text-align: center; justify-content: center; }
     .forecast-chart-container { height: 280px; }
 
-    /* Restored and redesigned to match the same compact 2-column style as
-       Trending Products above, instead of being hidden entirely. */
+    /* Restored and redesigned to match the same compact 2-column style... */
     .restock-suggestions { padding: 14px; margin-bottom: 14px; }
     .restock-suggestions h4 { margin-bottom: 10px; }
 
@@ -734,12 +696,8 @@ details summary { padding: 8px 0; user-select: none; }
     }
 }
 
-/* -- Dark mode overrides -- */
-/* .trending-card's gradient mixed a hardcoded light color (#eef4ff) with
-   var(--white) -- var(--white) correctly goes dark in dark mode, but the
-   hardcoded half doesn't, leaving text (which correctly follows
-   var(--dark), now light-colored) sitting unreadably on the half that's
-   still light. This is the specific bug reported. */
+/* Dark mode overrides */
+/* .trending-card's gradient mixed a hardcoded light color */
 body.dark-mode .trending-card {
     background:   linear-gradient(135deg, #1e2a45 0%, var(--white) 100%);
     border-color: #2d3a5c;

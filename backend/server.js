@@ -1,15 +1,7 @@
-// ============================================================
-// PharmaTrack – Main Server Entry Point
-// Node.js + Express.js
-// ============================================================
+// PharmaTrack - Main Server Entry Point - Node.js + Express.js
 require('dotenv').config();
 
-// Render's containers only have IPv4 outbound routing -- without this,
-// Node (18+) can resolve Gmail's SMTP host to an IPv6 address first and
-// then fail with ENETUNREACH or hang until a connection timeout, even
-// though the exact same code works fine locally (which has real IPv6
-// routing). Forcing IPv4 first makes nodemailer (and anything else that
-// does outbound DNS/connections) skip the unreachable IPv6 address.
+// Render's containers only have IPv4 outbound routing
 const dns = require('dns');
 dns.setDefaultResultOrder('ipv4first');
 
@@ -27,41 +19,30 @@ const posRoutes         = require('./routes/posRoutes');
 const reportRoutes      = require('./routes/reportRoutes');
 const forecastingRoutes = require('./routes/forecastingRoutes');
 const backupRoutes      = require('./routes/backupRoutes');
-const publicRoutes      = require('./routes/publicRoutes');
 const { scheduleDailyBackup } = require('./utils/backupScheduler');
+const { allowedOrigins }      = require('./utils/corsOrigins');
 
 const app  = express();
 const PORT = process.env.PORT || 5000;
 const FRONTEND_DIR = path.resolve(__dirname, '../frontend');
 
-// ── Trust proxy (required for Railway) ───────────────────────
+// Trust proxy (required for Railway)
 app.set('trust proxy', 1);
 
-// ── Security middleware ──────────────────────────────────────
+// Security middleware
 app.use(helmet({
     contentSecurityPolicy: false
 }));
 
-// ── CORS ─────────────────────────────────────────────────────
+// CORS - Only the real PharmaTrack addresses in production
 app.use(cors({
-    origin: [
-        'http://localhost:3000',
-        'http://127.0.0.1:3000',
-        'http://localhost:5000',
-        'http://127.0.0.1:5000',
-        'http://localhost:5500',
-        'http://127.0.0.1:5500',
-        'http://localhost',
-        'https://pharma-track-v2.onrender.com',
-        'https://pharma-track-ph.onrender.com',
-        'null'
-    ],
+    origin: allowedOrigins(),
     credentials: true,
     methods: ['GET','POST','PUT','DELETE','PATCH','OPTIONS'],
     allowedHeaders: ['Content-Type','Authorization']
 }));
 
-// ── Global rate limiter ──────────────────────────────────────
+// Global rate limiter
 const globalLimiter = rateLimit({
     windowMs: 15 * 60 * 1000,
     max: 500,
@@ -70,47 +51,36 @@ const globalLimiter = rateLimit({
 });
 app.use(globalLimiter);
 
-// ── Auth rate limiter (stricter for login) ───────────────────
-const authLimiter = rateLimit({
-    windowMs: 15 * 60 * 1000,
-    max: 20,
-    message: { success: false, message: 'Too many login attempts. Try again in 15 minutes.' }
-});
+// Auth rate limiter (stricter for login) - The login / password-reset limits now sit...
 
-// ── Body parsing ─────────────────────────────────────────────
+// Body parsing
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
-// ── HTTP request logging (dev only) ──────────────────────────
+// HTTP request logging (dev only)
 if (process.env.NODE_ENV === 'development') {
     app.use(morgan('dev'));
 }
 
-// ── Serve frontend static files ───────────────────────────────
+// Serve frontend static files
 app.use(express.static(FRONTEND_DIR));
 
-// Redirect root to login page.
-// IMPORTANT: this must be a real HTTP redirect, not res.sendFile() —
-// sendFile() would serve login.html's CONTENT while the browser's address
-// bar stays at '/', which breaks every relative link/redirect inside the
-// page (e.g. 'pos.html' resolves to '/pos.html' instead of '/pages/pos.html').
+// Redirect root to login: a real redirect (not sendFile) keeps relative links working
 app.get('/', (req, res) => {
     res.redirect('/pages/login.html');
 });
 
-// ── Static files for uploaded CSVs ───────────────────────────
-app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
+// ...
 
-// ── API Routes ────────────────────────────────────────────────
-app.use('/api/auth',        authLimiter, authRoutes);
+// API Routes
+app.use('/api/auth',        authRoutes);
 app.use('/api/inventory',   inventoryRoutes);
 app.use('/api/pos',         posRoutes);
 app.use('/api/reports',     reportRoutes);
 app.use('/api/forecasting', forecastingRoutes);
 app.use('/api/backup',      backupRoutes);
-app.use('/api/public',      publicRoutes);
 
-// ── Health check ─────────────────────────────────────────────
+// Health check
 app.get('/api/health', (req, res) => {
     res.json({
         success: true,
@@ -133,28 +103,18 @@ app.get('/pages/:page', (req, res) => {
     });
 });
 
-// ── 404 handler ───────────────────────────────────────────────
+// 404 handler
 app.use((req, res) => {
     res.status(404).json({ success: false, message: `Route ${req.originalUrl} not found` });
 });
 
-// ── Global error handler ──────────────────────────────────────
+// Global error handler
 app.use((err, req, res, next) => {
     console.error('[ERROR]', err.stack);
 
     const statusCode = err.statusCode || 500;
 
-    // Only pass the real error message through to the client for errors
-    // that were deliberately thrown with a safe, user-facing message
-    // (statusCode < 500 -- validation/business-rule errors like "Cannot
-    // modify your own account here."). Anything else -- an unexpected
-    // exception, a DB connection failure, etc. -- can contain internal
-    // details (hostnames, SQL, stack info) that should never reach the
-    // client. Those get a generic message instead; the real detail is
-    // already in the server log line above for debugging.
-    // A short error CODE (e.g. ER_BAD_NULL_ERROR, ECONNRESET) is safe to show and
-    // lets whoever sees the message name the problem; the full detail (SQL, stack)
-    // still only goes to the server log above.
+    // Only pass the real error message through to the client for errors that were...
     const reason = (statusCode >= 500 && typeof err.code === 'string' && /^[A-Z0-9_]{3,40}$/.test(err.code))
         ? err.code
         : null;
@@ -171,7 +131,7 @@ app.use((err, req, res, next) => {
     });
 });
 
-// ── Start server ──────────────────────────────────────────────
+// Start server
 app.listen(PORT, () => {
     console.log(`✅  PharmaTrack API running on http://localhost:${PORT}`);
     console.log(`    Frontend:    http://localhost:${PORT}/pages/login.html`);

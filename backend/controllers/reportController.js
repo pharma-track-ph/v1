@@ -1,8 +1,4 @@
-// ============================================================
-// Report Controller
-// Sales summaries, expired inventory report, void report,
-// register report, CSV export
-// ============================================================
+// Report Controller - Sales summaries, expired inventory report, void report
 const Order       = require('../models/Order');
 const Product     = require('../models/Product');
 const CashSession  = require('../models/CashSession');
@@ -15,22 +11,17 @@ function buildPeriodLabel(start_date, end_date) {
     return start_date ? `From ${start_date}` : `Until ${end_date}`;
 }
 
-// -- Who a report is allowed to show ---------------------------------
+// Who a report is allowed to show
 const isCashier = req => req.user.role === 'cashier';
 
 // The user id a report must be restricted to, or null for "everyone".
-// A Pharmacy Assistant (cashier) is ALWAYS restricted to themselves, taken
-// from their login token -- any user_id they put in the URL is ignored, so
-// this can't be bypassed from the browser. Admin and Owner may narrow a
-// report to one person with ?user_id=.
 function scopedUserId(req) {
     if (isCashier(req)) return req.user.id;
     const id = parseInt(req.query.user_id, 10);
     return Number.isInteger(id) && id > 0 ? id : null;
 }
 
-// For export titles: the name of the person an Admin/Owner filtered by (null
-// when nothing was filtered, or for a Pharmacy Assistant's own report).
+// For export titles: the name of the person an Admin/Owner filtered by
 async function filteredUserName(req, userId) {
     if (!userId || isCashier(req)) return null;
     const [rows] = await db.query('SELECT name FROM users WHERE id = ? LIMIT 1', [userId]);
@@ -39,8 +30,7 @@ async function filteredUserName(req, userId) {
 
 const withUser = (title, name) => name ? `${title} (${name})` : title;
 
-// Columns that reveal what the pharmacy pays for stock or earns. A Pharmacy
-// Assistant never receives them -- not in the data and not in exports.
+// Columns that reveal what the pharmacy pays for stock or earns.
 const COST_COLUMN_LABELS = ['Purchase Cost', 'Profit', 'Cost (₱)', 'Value Lost'];
 
 function withoutCostColumns(columns, rows) {
@@ -51,17 +41,14 @@ function withoutCostColumns(columns, rows) {
     };
 }
 
-/**
- * GET /api/reports/sales
- * Returns sales data filtered by date range, including items sold per order.
- */
+/** GET /api/reports/sales - Returns sales data filtered by date range */
 const getSalesReport = async (req, res, next) => {
     try {
         const { start_date, end_date, limit = 500, offset = 0 } = req.query;
         const userId   = scopedUserId(req);
         const hideCost = isCashier(req);
 
-        // ── Main orders query ─────────────────────────────────
+        // Main orders query
         let sql = `
             SELECT o.id, o.order_number, o.cashier_id, o.subtotal, o.discount,
                    o.vatable_sales, o.vat_exempt_sales,
@@ -102,7 +89,7 @@ const getSalesReport = async (req, res, next) => {
             });
         }
 
-        // ── Fetch items for all orders in one query ───────────
+        // Fetch items for all orders in one query
         const orderIds = orders.map(o => o.id);
         const placeholders = orderIds.map(() => '?').join(',');
         const [items] = await db.query(
@@ -136,8 +123,7 @@ const getSalesReport = async (req, res, next) => {
             transaction_count: acc.transaction_count + 1
         }), { total_sales: 0, total_cost: 0, total_profit: 0, total_discount: 0, transaction_count: 0 });
 
-        // A Pharmacy Assistant never receives purchase cost or profit -- they are
-        // removed here on the server, not just hidden on the page.
+        // A Pharmacy Assistant never receives purchase cost or profit
         if (hideCost) {
             ordersWithItems.forEach(o => { delete o.purchase_cost; delete o.profit; });
             delete totals.total_cost;
@@ -149,8 +135,7 @@ const getSalesReport = async (req, res, next) => {
     } catch (err) { next(err); }
 };
 
-// What every Sales export contains (PDF, Excel, Word, CSV): no Purchase Cost
-// and no Profit, for any role. pdfWidth values are relative weights.
+// What every Sales export contains (PDF, Excel, Word, CSV)
 const SALES_EXPORT_COLUMNS = [
     { label: 'Order #',      excelWidth: 20, pdfWidth: 100 },
     { label: 'Date/Time',    excelWidth: 26, pdfWidth: 118 },
@@ -171,15 +156,7 @@ const SALES_COLUMNS = [
     { label: 'Profit',             excelWidth: 12, pdfWidth: 60  }
 ];
 
-/**
- * GET /api/reports/sales/export/:format (excel|pdf|word)
- * Exports the same date range currently applied on screen. Purchase Cost
- * and Profit are computed the same way as the on-screen Sales Report
- * (getSalesReport above) — cost is summed from each line item's snapshot
- * unit_cost and is NEVER discounted, since a discount reduces revenue,
- * not what the pharmacy actually paid for the stock. A bold "TOTAL
- * PROFIT" row is appended under the Profit column once all rows are in.
- */
+/** GET /api/reports/sales/export/:format - cost is never discounted */
 const exportSalesReport = async (req, res, next) => {
     try {
         const { start_date, end_date } = req.query;
@@ -200,9 +177,7 @@ const exportSalesReport = async (req, res, next) => {
 
         const [orders] = await db.query(sql, params);
 
-        // Purchase Cost and Profit are NOT part of any Sales export (PDF, Excel,
-        // Word or CSV) -- for every role. The report screen still shows them to
-        // Admin and Owner; the export is the document that gets handed around.
+        // Purchase Cost and Profit are NOT part of any Sales export
         const rows = orders.map(o => [
             o.order_number, formatShortDateTime(o.created_at), o.cashier_name,
             `₱${Number(o.subtotal).toFixed(2)}`,
@@ -212,9 +187,7 @@ const exportSalesReport = async (req, res, next) => {
 
         const scopeName = await filteredUserName(req, userId);
 
-        // The total sales amount sits alone under the Total column -- just the
-        // figure, no "TOTAL" label -- the same way the old export put the
-        // total profit under the Profit column.
+        // The total sales amount sits alone under the Total column
         let totalsRow = null;
         if (orders.length) {
             const totalSales = orders.reduce((s, o) => s + parseFloat(o.total || 0), 0);
@@ -234,18 +207,7 @@ const exportSalesReport = async (req, res, next) => {
     } catch (err) { next(err); }
 };
 
-/**
- * GET /api/reports/expired
- * Returns all expired products with estimated value lost.
- * Excludes batches that have hit 0 stock — once a batch is fully sold out
- * there's no remaining stock to have gone to waste, so it's shown as
- * "Out of Stock" elsewhere in the app instead of counting as an expiry
- * loss here.
- * Query params (optional):
- *   months=1|3|6   — only products that expired within the last N*30 days
- *   start_date/end_date — custom range, filtered on the actual expiry_date
- * With no params, returns everything expired (all time) — same as before.
- */
+/** GET /api/reports/expired - Returns all expired products with estimated value... */
 const getExpiredReport = async (req, res, next) => {
     try {
         const { months, start_date, end_date } = req.query;
@@ -274,8 +236,7 @@ const getExpiredReport = async (req, res, next) => {
 
         const totalLoss = rows.reduce((s, r) => s + parseFloat(r.value_lost), 0);
 
-        // A Pharmacy Assistant never receives what the stock cost or the value
-        // lost -- those fields are removed from the data itself, not just hidden.
+        // A Pharmacy Assistant never receives what the stock cost or the value lost
         const hideCost = isCashier(req);
         const data     = hideCost ? rows.map(({ cost, value_lost, ...rest }) => rest) : rows;
         const summary  = hideCost
@@ -297,9 +258,7 @@ const EXPIRED_COLUMNS = [
     { label: 'Value Lost',    excelWidth: 13, pdfWidth: 70 }
 ];
 
-/**
- * GET /api/reports/expired/export/:format (excel|pdf|word)
- */
+/** GET /api/reports/expired/export/:format (excel|pdf|word) */
 const exportExpiredReport = async (req, res, next) => {
     try {
         const { months, start_date, end_date } = req.query;
@@ -349,10 +308,7 @@ const exportExpiredReport = async (req, res, next) => {
     } catch (err) { next(err); }
 };
 
-/**
- * GET /api/reports/dashboard-kpis
- * Returns all KPI values for the dashboard in a single call.
- */
+/** GET /api/reports/dashboard-kpis - Returns all KPI values for the dashboard... */
 const getDashboardKPIs = async (req, res, next) => {
     try {
         const [todaySales, monthly, topProducts, recent, alertData] = await Promise.all([
@@ -369,8 +325,7 @@ const getDashboardKPIs = async (req, res, next) => {
             })()
         ]);
 
-        // Attach item-level detail to each recent transaction so the
-        // dashboard can show the same expandable row pattern as Reports.
+        // Attach item-level detail to each recent transaction
         let recentWithItems = recent;
         if (recent.length) {
             const orderIds = recent.map(o => o.id);
@@ -393,9 +348,7 @@ const getDashboardKPIs = async (req, res, next) => {
         res.json({
             success: true,
             data: {
-                // Profit is worked out from PURCHASE COST, which a Pharmacy Assistant never sees
-                // (Reports already withholds it from them). It is left out here on the server for
-                // that role, so it cannot be read from the page's data either.
+                // Profit is worked out from PURCHASE COST
                 today: isCashier(req) ? (({ total_profit, ...rest }) => rest)(todaySales) : todaySales,
                 monthly_revenue: monthly,
                 top_products: topProducts,
@@ -406,16 +359,10 @@ const getDashboardKPIs = async (req, res, next) => {
     } catch (err) { next(err); }
 };
 
-/**
- * GET /api/reports/void
- * Returns all voided transactions, with who voided them and when
- * (from audit_logs), plus items sold per order (same expand pattern
- * as the Sales Report).
- * `voided_by_name` now correctly reflects the CASHIER whose transaction
- * it was (see posController.js's voidLastOrder) rather than the approving
- * admin/owner — the approver's name lives inside audit_logs.details as
- * `approved_by` instead, for a cashier-requested void.
- */
+// When a void happened (a void with no log entry falls back to its sale date)
+const VOID_WHEN = 'COALESCE(al.created_at, o.created_at)';
+
+/** GET /api/reports/void - Returns all voided transactions, newest void first */
 const getVoidReport = async (req, res, next) => {
     try {
         const { start_date, end_date, limit = 500, offset = 0 } = req.query;
@@ -439,13 +386,12 @@ const getVoidReport = async (req, res, next) => {
         `;
         const params = [];
 
-        if (start_date) { sql += ' AND DATE(o.created_at) >= ?'; params.push(start_date); }
-        if (end_date)   { sql += ' AND DATE(o.created_at) <= ?'; params.push(end_date);   }
-        // A person's void report = voids of sales they rang up OR voids they
-        // performed themselves (the audit entry's user is whoever performed it)
+        if (start_date) { sql += ` AND DATE(${VOID_WHEN}) >= ?`; params.push(start_date); }
+        if (end_date)   { sql += ` AND DATE(${VOID_WHEN}) <= ?`; params.push(end_date);   }
+        // A person's void report = voids of sales they rang up OR voids they...
         if (userId)     { sql += ' AND (o.cashier_id = ? OR al.user_id = ?)'; params.push(userId, userId); }
 
-        sql += ' ORDER BY o.created_at DESC LIMIT ? OFFSET ?';
+        sql += ` ORDER BY ${VOID_WHEN} DESC, o.id DESC LIMIT ? OFFSET ?`;
         params.push(parseInt(limit), parseInt(offset));
 
         const [orders] = await db.query(sql, params);
@@ -470,8 +416,7 @@ const getVoidReport = async (req, res, next) => {
             itemsByOrder[item.order_id].push(item);
         });
 
-        // The audit entry written at void time says whether this was a PARTIAL
-        // void (and what was voided, the refund, and the replacement receipt).
+        // The audit entry written at void time says whether this was a PARTIAL void
         const ordersWithItems = orders.map(o => {
             let details = o.void_details;
             if (typeof details === 'string') { try { details = JSON.parse(details); } catch { details = null; } }
@@ -493,7 +438,7 @@ const getVoidReport = async (req, res, next) => {
 
 const VOID_COLUMNS = [
     { label: 'Order #',            excelWidth: 20, pdfWidth: 90  },
-    { label: 'Date/Time',           excelWidth: 26, pdfWidth: 108 },
+    { label: 'Sold At',             excelWidth: 26, pdfWidth: 108 },
     { label: 'Processed By',        excelWidth: 22, pdfWidth: 95  },
     { label: 'Voided By',           excelWidth: 18, pdfWidth: 90  },
     { label: 'Voided At',           excelWidth: 26, pdfWidth: 108 },
@@ -501,9 +446,7 @@ const VOID_COLUMNS = [
     { label: 'Details',             excelWidth: 36, pdfWidth: 150 }
 ];
 
-/**
- * GET /api/reports/void/export/:format (excel|pdf|word)
- */
+/** GET /api/reports/void/export/:format (excel|pdf|word) */
 const exportVoidReport = async (req, res, next) => {
     try {
         const { start_date, end_date } = req.query;
@@ -526,10 +469,10 @@ const exportVoidReport = async (req, res, next) => {
             WHERE o.status = 'voided'
         `;
         const params = [];
-        if (start_date) { sql += ' AND DATE(o.created_at) >= ?'; params.push(start_date); }
-        if (end_date)   { sql += ' AND DATE(o.created_at) <= ?'; params.push(end_date);   }
+        if (start_date) { sql += ` AND DATE(${VOID_WHEN}) >= ?`; params.push(start_date); }
+        if (end_date)   { sql += ` AND DATE(${VOID_WHEN}) <= ?`; params.push(end_date);   }
         if (userId)     { sql += ' AND (o.cashier_id = ? OR al.user_id = ?)'; params.push(userId, userId); }
-        sql += ' ORDER BY o.created_at DESC';
+        sql += ` ORDER BY ${VOID_WHEN} DESC, o.id DESC`;
 
         const [orders] = await db.query(sql, params);
 
@@ -563,14 +506,7 @@ const exportVoidReport = async (req, res, next) => {
     } catch (err) { next(err); }
 };
 
-/**
- * GET /api/reports/register
- * Every cash register session (open or closed), newest first: who opened
- * it, who approved the open (if a cashier needed approval — null for
- * historical sessions from before that feature existed, or when an
- * admin/owner opened it on their own authority), the opening amount, and
- * the same for the close side (expected/actual/variance/approver).
- */
+/** GET /api/reports/register - Every cash register session (open or closed) */
 const getRegisterReport = async (req, res, next) => {
     try {
         const { start_date, end_date, limit = 500, offset = 0 } = req.query;
@@ -611,9 +547,7 @@ const REGISTER_COLUMNS = [
     { label: 'Closed Approved By', excelWidth: 18, pdfWidth: 62 }
 ];
 
-/**
- * GET /api/reports/register/export/:format (excel|pdf|word)
- */
+/** GET /api/reports/register/export/:format (excel|pdf|word) */
 const exportRegisterReport = async (req, res, next) => {
     try {
         const { start_date, end_date } = req.query;
@@ -652,13 +586,7 @@ const exportRegisterReport = async (req, res, next) => {
     } catch (err) { next(err); }
 };
 
-// For every register session in a report: what it EARNED and where its cash stands, plus the list
-// of its Cash In / Cash Out entries (refunds included). All sums are done in cents.
-//   - a CLOSED register uses the figures SAVED when it was closed (Expected, Counted, Variance) and
-//     works Cash Sales out from them (Expected - Opening - Cash In + Cash Out), so voiding an old
-//     sale later never changes a closed register's row (the refund shows in the register that paid it);
-//   - a register still OPEN (or one closed before closing figures were saved) is worked out LIVE
-//     from its sales and its Cash In / Cash Out.
+// For every register session in a report: what it EARNED and where its cash stands
 async function addRegisterTotals(sessions) {
     if (!sessions.length) return sessions;
 
@@ -726,12 +654,7 @@ async function addRegisterTotals(sessions) {
     });
 }
 
-/**
- * GET /api/reports/users  [Admin and Owner only -- see reportRoutes.js]
- * Feeds the "User" filter dropdown on the Reports page: every account that
- * could appear in a report, inactive ones included (their past sales still
- * show up). Names and roles only -- never emails or anything sensitive.
- */
+/** GET /api/reports/users [Admin and Owner only */
 const getReportUsers = async (req, res, next) => {
     try {
         const [rows] = await db.query(
@@ -741,16 +664,7 @@ const getReportUsers = async (req, res, next) => {
     } catch (err) { next(err); }
 };
 
-/**
- * GET /api/reports/partial-void/:orderId
- * The full story of ONE partial void, opened from either side: pass the
- * ORIGINAL (voided) sale's id or its REPLACEMENT receipt's id. Returns the
- * original sale, what was voided (per item: sold / voided / kept and the
- * voided amount), who voided it and when, and the replacement receipt with the
- * remaining total -- everything the "View Partial Void" popup shows.
- * A Pharmacy Assistant may only open one they rang up or performed
- * themselves (the same rule as the Void Report).
- */
+/** GET /api/reports/partial-void/:orderId - The full story of ONE partial void */
 const getPartialVoidDetails = async (req, res, next) => {
     try {
         const id = parseInt(req.params.orderId, 10);
@@ -763,8 +677,7 @@ const getPartialVoidDetails = async (req, res, next) => {
             return res.status(404).json({ success: false, message: 'Order not found.' });
         }
 
-        // Which side was opened? A replacement receipt points at its original
-        // (parent_order_id); an original is found by the receipt that points at it.
+        // Which side was opened?
         let originalId, replacementId;
         if (picked.parent_order_id) {
             originalId = picked.parent_order_id;
@@ -814,9 +727,7 @@ const getPartialVoidDetails = async (req, res, next) => {
         const originalItems = itemsOf(originalId);
         const keptItems     = itemsOf(replacementId);
 
-        // Per item: how many were sold, how many voided, how many kept. Worked
-        // out from the two receipts themselves, so it is right even if the audit
-        // entry is missing; the voided AMOUNT prefers what the audit entry recorded.
+        // Per item: how many were sold, how many voided, how many kept.
         const byName = new Map();
         originalItems.forEach(i => {
             const e = byName.get(i.product_name) || { name: i.product_name, sold: 0, kept: 0, gross: 0 };

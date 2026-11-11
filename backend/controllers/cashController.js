@@ -1,38 +1,4 @@
-// ============================================================
-// Cash Session Controller
-// Opening Cash / Cash In / Cash Out / Close Register
-//
-// Cash-only system — no GCash/Card tracking, since those payment
-// methods were never actually wired up in the POS UI.
-//
-// Manager approval (same pattern as Void): cashiers cannot open
-// their own drawer, Cash In, Cash Out, or Close without an
-// admin/owner entering their own credentials. Admins/owners act
-// on their own authority.
-//
-// ── Audit attribution ─────────────────────────────────────
-// Every audit log entry below is attributed to the CASHIER whose
-// action it actually is (req.user.id) — never to the approving
-// manager. The approver's name/id is included in the `details` JSON
-// instead. This was a real bug found in testing: an earlier version
-// logged these under the approver's id, so Close/Cash In/Cash Out
-// showed the admin/owner as the "User" in Audit Logs and the Register
-// Report, when the row genuinely belongs to the cashier whose shift
-// it was — the approver authorized it, they didn't perform it.
-//
-// ── Concurrency discipline ──────────────────────────────────
-// EVERY operation that reads/affects a session's money totals
-// (Checkout, Cash In, Cash Out, Close) locks that session row with
-// SELECT ... FOR UPDATE inside its own transaction FIRST, before
-// reading any totals. This was caught as a real bug during dry-run
-// testing: an earlier version of Close computed its "expected cash"
-// BEFORE acquiring a lock, so a concurrent Checkout landing in that
-// exact window could be silently excluded from the total even
-// though the sale itself was correctly saved. Locking consistently
-// across all four operations means InnoDB serializes them — whichever
-// one starts first fully completes (with a correct, consistent read
-// of totals) before the other can even begin its own read.
-// ============================================================
+// Cash Session Controller - Opening Cash / Cash In / Cash Out / Close Register...
 const db           = require('../config/db');
 const CashSession  = require('../models/CashSession');
 const CashMovement = require('../models/CashMovement');
@@ -41,12 +7,7 @@ const { logAudit } = require('../middleware/authMiddleware');
 
 const ELEVATED_ROLES = ['admin', 'super_admin'];
 
-/**
- * Verifies manager/owner credentials supplied in the request body.
- * Returns the manager's user row on success, or null on failure.
- * Used for Open, Cash In, Cash Out, and Close Register when the
- * requester is a cashier — mirrors the exact same check used for Void.
- */
+/** Verifies manager/owner credentials supplied in the request body. */
 async function verifyManagerApproval(body) {
     const { manager_email, manager_password } = body;
     if (!manager_email || !manager_password) return null;
@@ -58,12 +19,7 @@ async function verifyManagerApproval(body) {
     return matches ? manager : null;
 }
 
-/**
- * GET /api/pos/cash-session/current
- * Returns the requesting cashier's OPEN session with live totals,
- * or { data: null } if they don't have one open.
- * Read-only — no lock needed, this is just a status display.
- */
+/** GET /api/pos/cash-session/current - Returns the requesting cashier's OPEN... */
 const getCurrentSession = async (req, res, next) => {
     try {
         const session = await CashSession.findOpenByCashier(req.user.id);
@@ -81,13 +37,7 @@ const getCurrentSession = async (req, res, next) => {
     } catch (err) { next(err); }
 };
 
-/**
- * POST /api/pos/cash-session/open
- * Body: { opening_cash, manager_email?, manager_password? }
- * Requires manager approval when the requester is a cashier — same
- * pattern as Cash In/Out/Close, so an owner/admin is aware every time a
- * shift starts, not just when it's closed or cash moves.
- */
+/** POST /api/pos/cash-session/open - Body: { opening_cash, manager_email? */
 const openSession = async (req, res, next) => {
     const { opening_cash } = req.body;
     const openingCash = parseFloat(opening_cash);
@@ -97,13 +47,12 @@ const openSession = async (req, res, next) => {
     }
 
     const isCashier = req.user.role === 'cashier';
-    let approver = null; // stays null for self-authority (admin/owner) and for the audit "details" field
+    let approver = null; // stays null for self-authority (admin/owner)...
 
     if (isCashier) {
         approver = await verifyManagerApproval(req.body);
         if (!approver) {
-            // 403, NOT 401: the browser treats any 401 as "your login expired" and
-            // signs you out, which is wrong for a mistyped MANAGER password.
+            // 403, NOT 401: the browser treats any 401 as "your login expired"...
             return res.status(403).json({ success: false, message: 'Invalid admin/owner credentials.' });
         }
     }
@@ -112,9 +61,7 @@ const openSession = async (req, res, next) => {
     try {
         await connection.beginTransaction();
 
-        // Row-locked check-then-insert prevents a double-click (or two
-        // rapid requests) from both seeing "no open session" and both
-        // creating one — only one wins the lock at a time.
+        // Row-locked check-then-insert prevents a double-click
         const existing = await CashSession.lockOpenByCashier(req.user.id, connection);
         if (existing) {
             await connection.rollback();
@@ -127,8 +74,7 @@ const openSession = async (req, res, next) => {
         const sessionId = await CashSession.create(req.user.id, openingCash, approver?.id ?? null, connection);
         await connection.commit();
 
-        // Attributed to the cashier (req.user.id), not the approver — see
-        // file header. Approver's name/id lives in details instead.
+        // Attributed to the cashier (req.user.id), not the approver - see file header.
         await logAudit(req.user.id, 'OPEN_CASH_SESSION', 'cash_sessions', sessionId,
             {
                 opening_cash: openingCash,
@@ -145,12 +91,7 @@ const openSession = async (req, res, next) => {
     }
 };
 
-/**
- * POST /api/pos/cash-session/cash-in
- * POST /api/pos/cash-session/cash-out
- * Body: { amount, reason, manager_email?, manager_password? }
- * Shared implementation — only the movement `type` differs.
- */
+/** POST /api/pos/cash-session/cash-in - POST /api/pos/cash-session/cash-out Body */
 function makeMovementHandler(type) {
     return async (req, res, next) => {
         const { amount, reason } = req.body;
@@ -171,7 +112,7 @@ function makeMovementHandler(type) {
         if (isCashier) {
             const manager = await verifyManagerApproval(req.body);
             if (!manager) {
-                // 403, not 401 (a 401 would sign the cashier out) -- see openSession
+                // 403, not 401 (a 401 would sign the cashier out) - see openSession
                 return res.status(403).json({ success: false, message: 'Invalid admin/owner credentials.' });
             }
             approverId   = manager.id;
@@ -182,18 +123,14 @@ function makeMovementHandler(type) {
         try {
             await connection.beginTransaction();
 
-            // Lock the session row FIRST — see file header comment on why
-            // this ordering matters for every money-affecting operation.
+            // Lock the session row FIRST
             const session = await CashSession.lockOpenByCashier(req.user.id, connection);
             if (!session) {
                 await connection.rollback();
                 return res.status(404).json({ success: false, message: 'You do not have an open register.' });
             }
 
-            // Cash Out can never remove more than what's actually expected
-            // to be in the drawer right now — prevents the expected balance
-            // from going nonsensically negative. Computed inside the same
-            // locked transaction so it reflects a consistent snapshot.
+            // Cash Out can never remove more than what's actually expected to be...
             if (type === 'CASH_OUT') {
                 const totals = await CashSession.getLiveTotals(session.id, connection);
                 const availableNow = parseFloat(session.opening_cash) + totals.cash_sales + totals.cash_in - totals.cash_out;
@@ -217,9 +154,7 @@ function makeMovementHandler(type) {
 
             await connection.commit();
 
-            // Attributed to the cashier who requested it (req.user.id), not
-            // the approver — see file header. Approver's name/id (when
-            // there is one) lives in details instead.
+            // Attributed to the cashier who requested it (req.user.id)
             await logAudit(req.user.id, type, 'cash_movements', movementId,
                 {
                     amount: parsedAmount,
@@ -241,14 +176,7 @@ function makeMovementHandler(type) {
 const cashIn  = makeMovementHandler('CASH_IN');
 const cashOut = makeMovementHandler('CASH_OUT');
 
-/**
- * POST /api/pos/cash-session/close
- * Body: { actual_cash, manager_email?, manager_password? }
- * Requires manager approval when the requester is a cashier — same
- * pattern as Cash In/Out, since finalizing a shift with a shortage or
- * overage is exactly the kind of moment an owner should be aware of
- * as it happens, not discover later in a report.
- */
+/** POST /api/pos/cash-session/close - Body: { actual_cash, manager_email? */
 const closeSession = async (req, res, next) => {
     const { actual_cash } = req.body;
     const actualCash = parseFloat(actual_cash);
@@ -264,7 +192,7 @@ const closeSession = async (req, res, next) => {
     if (isCashier) {
         const manager = await verifyManagerApproval(req.body);
         if (!manager) {
-            // 403, not 401 (a 401 would sign the cashier out) -- see openSession
+            // 403, not 401 (a 401 would sign the cashier out) - see openSession
             return res.status(403).json({ success: false, message: 'Invalid admin/owner credentials.' });
         }
         approverId   = manager.id;
@@ -275,9 +203,7 @@ const closeSession = async (req, res, next) => {
     try {
         await connection.beginTransaction();
 
-        // Lock FIRST, then compute totals, all inside this one transaction —
-        // this is the exact fix for the race condition caught during
-        // dry-run testing (see file header comment).
+        // Lock FIRST, then compute totals, all inside this one transaction
         const session = await CashSession.lockOpenByCashier(req.user.id, connection);
         if (!session) {
             await connection.rollback();
@@ -297,17 +223,14 @@ const closeSession = async (req, res, next) => {
         }, connection);
 
         if (!affected) {
-            // Should be unreachable given the lock above, but kept as a
-            // defensive guard in case of an unexpected state.
+            // Should be unreachable given the lock above
             await connection.rollback();
             return res.status(409).json({ success: false, message: 'This register was already closed.' });
         }
 
         await connection.commit();
 
-        // Attributed to the cashier whose shift this is (req.user.id), not
-        // the approver — see file header. Approver's name/id (when there is
-        // one) lives in details instead.
+        // Attributed to the cashier whose shift this is (req.user.id)
         await logAudit(req.user.id, 'CLOSE_CASH_SESSION', 'cash_sessions', session.id,
             {
                 expected: expectedRounded,

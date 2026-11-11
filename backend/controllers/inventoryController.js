@@ -1,23 +1,11 @@
-// ============================================================
-// Inventory Controller
-// Full CRUD for products (grouped by Brand Name) + Item No. management
-// + CSV import + alert counts
-//
-// "Product" here means a BRAND (e.g. "Paracetamol 500mg"), rolled up
-// from one or more underlying batch rows -- see Product.js's "Brand-level
-// grouping" section for how that rollup works. Each brand's Item No.
-// entries are the individual batch rows underneath it.
-// ============================================================
+// Inventory Controller - Full CRUD for products (grouped by Brand Name) + Item No...
 const Product      = require('../models/Product');
 const { logAudit } = require('../middleware/authMiddleware');
 const fs           = require('fs');
 const path         = require('path');
 const ExcelJS      = require('exceljs');
 
-// Turns the model's known, user-facing errors into proper replies (400 for bad
-// input, 409 for a clash such as a duplicate brand or a barcode already used by
-// another brand). Returns true if it answered. Before this, Add Item No. simply
-// passed a database refusal on as a vague server error.
+// Turns the model's known, user-facing errors into proper replies
 function sendKnownError(res, err) {
     if (err.code === 'INVALID_INPUT') {
         res.status(400).json({ success: false, message: err.message, ...(err.details && { details: err.details }) });
@@ -34,12 +22,7 @@ function sendKnownError(res, err) {
     return false;
 }
 
-/**
- * GET /api/inventory
- * Returns one summary row per Brand Name, with a rolled-up stock_status
- * (see Product._rollUpGroup) and has_item_expiring_this_month/3mo flags.
- * Query params: search, category, status
- */
+/** GET /api/inventory - Returns one summary row per Brand Name */
 const getProducts = async (req, res, next) => {
     try {
         const { search = '', category = '', status = '' } = req.query;
@@ -48,12 +31,7 @@ const getProducts = async (req, res, next) => {
     } catch (err) { next(err); }
 };
 
-/**
- * GET /api/inventory/:id
- * Full detail for the Edit modal: top-level (shared) fields plus every
- * Item No. entry for that brand. :id can be ANY row belonging to the
- * brand -- the group is always re-resolved by its current name.
- */
+/** GET /api/inventory/:id - Full detail for the Edit modal: top-level */
 const getProduct = async (req, res, next) => {
     try {
         const group = await Product.findGroupById(req.params.id);
@@ -62,14 +40,7 @@ const getProduct = async (req, res, next) => {
     } catch (err) { next(err); }
 };
 
-/**
- * POST /api/inventory  [Admin+]
- * "Add Product" -- a brand-new medicine, captured once: its shared
- * details plus its very first Item No. (stock_quantity + expiry_date) in
- * the same request. If no barcode is supplied, one is auto-generated and
- * persisted immediately after insert, so every product always has a
- * scannable code from the moment it's created.
- */
+/** POST /api/inventory [Admin+] - "Add Product" - a brand-new medicine */
 const createProduct = async (req, res, next) => {
     try {
         const id = await Product.createGroup(req.body);
@@ -86,13 +57,7 @@ const createProduct = async (req, res, next) => {
     }
 };
 
-/**
- * PUT /api/inventory/:id  [Admin+]
- * Edits the brand's SHARED/top-level fields -- cascades across every
- * Item No. row in the group (see Product.updateGroupFields for why).
- * Does not touch stock_quantity/expiry_date on any individual item --
- * those go through the addItem/updateItem/deleteItem endpoints below.
- */
+/** PUT /api/inventory/:id [Admin+] - Edits the brand's SHARED/top-level fields */
 const updateProduct = async (req, res, next) => {
     try {
         const before = await Product.findGroupById(req.params.id);
@@ -111,15 +76,10 @@ const updateProduct = async (req, res, next) => {
     }
 };
 
-/**
- * DELETE /api/inventory/:id  [Admin+]
- * Soft-deletes the WHOLE brand -- every Item No. under it at once.
- * Preserves historical order records, same as before.
- */
+/** DELETE /api/inventory/:id [Admin+] - Soft-deletes the WHOLE brand */
 const deleteProduct = async (req, res, next) => {
     try {
-        // Note what is being deleted BEFORE it is gone, so the audit entry says which product,
-        // how many Item Nos and how many units it had.
+        // Note what is being deleted BEFORE it is gone
         const before   = await Product.findGroupById(req.params.id);
         const affected = await Product.softDeleteGroup(req.params.id);
         if (!affected) return res.status(404).json({ success: false, message: 'Product not found.' });
@@ -131,11 +91,7 @@ const deleteProduct = async (req, res, next) => {
     } catch (err) { next(err); }
 };
 
-/**
- * POST /api/inventory/:id/items  [Admin+]
- * "Add Item No." -- logs a new restock shipment (quantity + expiry) for
- * an EXISTING brand, cloning its shared details automatically.
- */
+/** POST /api/inventory/:id/items [Admin+] - "Add Item No." - logs a new restock... */
 const addItem = async (req, res, next) => {
     try {
         const { stock_quantity, expiry_date } = req.body;
@@ -151,8 +107,7 @@ const addItem = async (req, res, next) => {
         const name = await Product._resolveGroupName(req.params.id);
         if (!name) return res.status(404).json({ success: false, message: 'Product not found.' });
 
-        // A restock whose expiry date matches an existing Item No. of this brand
-        // tops THAT Item No. up, instead of creating a second one for the same date.
+        // A restock whose expiry date matches an existing Item No. of this brand...
         const sameDate = await Product.findItemByBrandAndExpiry(name, expiry_date, qty);
         if (sameDate) {
             await Product.addStockToItem(sameDate.id, qty);
@@ -181,10 +136,7 @@ const addItem = async (req, res, next) => {
     }
 };
 
-/**
- * PUT /api/inventory/items/:itemId  [Admin+]
- * Edits ONE Item No.'s stock_quantity/expiry_date.
- */
+/** PUT /api/inventory/items/:itemId [Admin+] - Edits ONE Item No.'s... */
 const updateItem = async (req, res, next) => {
     try {
         const { stock_quantity, expiry_date } = req.body;
@@ -205,12 +157,7 @@ const updateItem = async (req, res, next) => {
     } catch (err) { next(err); }
 };
 
-/**
- * DELETE /api/inventory/items/:itemId  [Admin+]
- * Removes ONE Item No. Blocked if it's the last remaining active item
- * for its brand -- delete the whole product instead if it's no longer
- * carried at all.
- */
+/** DELETE /api/inventory/items/:itemId [Admin+] - Removes ONE Item No. Blocked... */
 const deleteItem = async (req, res, next) => {
     try {
         const result = await Product.deleteItem(req.params.itemId);
@@ -224,20 +171,12 @@ const deleteItem = async (req, res, next) => {
 
         await logAudit(req.user.id, 'DELETE_ITEM', 'products', req.params.itemId,
             { product: result.name, item_no: result.itemNo, units: result.units, expiry_date: result.expiry_date }, req.ip);
-        // group_id: a row of this product that is still live, so the Edit window (which remembers
-        // the product by ONE row's id) can carry on if the row it remembered was the one deleted.
+        // group_id: a row of this product that is still live, so the Edit window
         res.json({ success: true, message: 'Item removed.', group_id: await Product.findGroupIdByName(result.name) });
     } catch (err) { next(err); }
 };
 
-/**
- * POST /api/inventory/items/:itemId/remove  [Admin+]
- * "Remove" on an EXPIRED Item No., or one with no units left (the Edit window's "Removed
- * Item No." list). NOTHING IS ERASED: the batch stays in the database, flagged as removed (see
- * Product.removeItem), and the product itself stays in Inventory -- deleting the product is
- * the separate Delete button. Logged in the Audit Logs with what was removed, so it can be
- * matched against the physical stock.
- */
+/** POST /api/inventory/items/:itemId/remove [Admin+] "Remove" on an EXPIRED Item... */
 const removeItem = async (req, res, next) => {
     try {
         const r = await Product.removeItem(req.params.itemId);
@@ -262,7 +201,7 @@ const removeItem = async (req, res, next) => {
         res.json({
             success: true,
             last_item: r.lastItem,
-            group_id: await Product.findGroupIdByName(r.name),   // a still-live row of this product (see deleteItem)
+            group_id: await Product.findGroupIdByName(r.name),   // a still-live row of this product
             message: r.lastItem
                 ? `Item No. ${r.itemNo} removed. The product stays in Inventory with no Item No. -- use Add Item No. when new stock arrives.`
                 : `Item No. ${r.itemNo} removed.`
@@ -270,12 +209,7 @@ const removeItem = async (req, res, next) => {
     } catch (err) { next(err); }
 };
 
-/**
- * GET /api/inventory/alerts/summary
- * Returns low stock/near-expiry/etc. counts (recomputed from the same
- * grouped rollup Inventory itself uses, so header badges never disagree
- * with what filtering Inventory actually returns) and the category list.
- */
+/** GET /api/inventory/alerts/summary - Returns low stock/near-expiry/etc. counts */
 const getAlertSummary = async (req, res, next) => {
     try {
         const [counts, categories] = await Promise.all([
@@ -286,35 +220,7 @@ const getAlertSummary = async (req, res, next) => {
     } catch (err) { next(err); }
 };
 
-// ============================================================
-// Inventory Import (CSV or Excel)
-// ============================================================
-// Accepts EITHER a .csv or a .xlsx/.xls upload -- an Excel file is
-// parsed directly (via ExcelJS, already a project dependency for
-// exports) into the same row shape a CSV would produce, so everything
-// below this point never needs to know which format the file actually
-// was.
-//
-// Uses the CURRENT Brand Name / Item No. column format (matching the
-// rest of the app since the Inventory restructure), not the old flat
-// batch_number format this endpoint originally shipped with:
-//   Brand Name, Generic Name, Category, Supplier, Selling Price, Cost,
-//   Low Stock Threshold, Description, Stock Quantity, Expiry Date
-// (see IMPORT_COLUMNS below, and GET /import/template for a ready-made
-// file with these exact headers).
-//
-// Per row: Brand Name doesn't exist yet -> "Add Product" (create the
-// brand + its first Item No.). Brand Name already exists -> "Add Item
-// No." (just a restock -- the row's Stock Quantity/Expiry Date become a
-// new Item No., the EXISTING product's shared fields are left alone). If
-// a row's other fields (Category, Price, etc.) don't match what's
-// already stored for that brand, that's reported back as a mismatch
-// rather than silently overwritten -- a bulk import has no per-row
-// confirmation step, so silently changing a live product's price because
-// of a stale/typo'd spreadsheet cell would be too risky. Edit the
-// product directly (or fix the file and re-import) if the shared
-// fields genuinely need updating.
-// ============================================================
+// Inventory Import (CSV or Excel) - Accepts EITHER a .csv or a .xlsx/.xls upload
 
 const IMPORT_COLUMNS = [
     'Brand Name', 'Generic Name', 'Category', 'Supplier',
@@ -322,16 +228,12 @@ const IMPORT_COLUMNS = [
     'Stock Quantity', 'Expiry Date'
 ];
 
-// "Brand Name", "brand_name", "BrandName", "Brand" all resolve to the
-// same canonical key -- the uploaded file doesn't have to match the
-// template's exact header wording/casing to be recognized.
+// "Brand Name", "brand_name", "BrandName", "Brand" all resolve to the same canonical...
 function normalizeHeader(h) {
     return String(h || '').toLowerCase().replace(/[^a-z0-9]/g, '');
 }
 
-// Expiry dates must be a real calendar date written YYYY-MM-DD. (An Excel date
-// cell is already turned into that form by parseImportFile.) Returns the
-// normalized string, or null if it is missing / not a real date.
+// Expiry dates must be a real calendar date written YYYY-MM-DD.
 function parseImportDate(value) {
     const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(value ?? '').trim());
     if (!m) return null;
@@ -341,8 +243,7 @@ function parseImportDate(value) {
     return `${m[1]}-${m[2]}-${m[3]}`;
 }
 
-// Two category lists are the same when they hold the same names, ignoring
-// order and capitals (so "Analgesic; Antipyretic" equals "antipyretic|Analgesic").
+// Two category lists are the same when they hold the same names
 function sameCategoryList(a, b) {
     const key = (v) => Product.splitCategories(v).map(s => s.toLowerCase()).sort().join('|');
     return key(a) === key(b);
@@ -361,10 +262,7 @@ const HEADER_ALIASES = {
     expirydate: 'expiry_date', expiry: 'expiry_date'
 };
 
-// Parses either format into { header: [...], rows: [[...], ...] } --
-// plain strings throughout (Excel dates included, normalized to
-// YYYY-MM-DD), so the row-building logic in importCSV below is
-// completely format-agnostic.
+// Parses either format into { header: [...], rows: [[...]
 async function parseImportFile(filePath, originalName) {
     const ext = path.extname(originalName).toLowerCase();
 
@@ -381,7 +279,7 @@ async function parseImportFile(filePath, originalName) {
             if (raw.every(v => v == null || v === '')) continue; // skip fully blank rows
             rows.push(raw.map(v => {
                 if (v instanceof Date) return v.toISOString().split('T')[0];
-                if (v && typeof v === 'object' && 'result' in v) return String(v.result ?? ''); // formula cell
+                if (v && typeof v === 'object' && 'result' in v) return String(v.result ?? '');
                 return String(v ?? '').trim();
             }));
         }
@@ -397,19 +295,21 @@ async function parseImportFile(filePath, originalName) {
     };
 }
 
-/**
- * POST /api/inventory/import  [Admin+]
- * Accepts a .csv or .xlsx upload, see the section comment above for the
- * expected format and per-row Add Product / Add Item No. behavior.
- */
+/** POST /api/inventory/import [Admin+] - Accepts a .csv or .xlsx upload */
 const importCSV = async (req, res, next) => {
     try {
         if (!req.file) {
             return res.status(400).json({ success: false, message: 'No file uploaded.' });
         }
 
-        const { header, rows } = await parseImportFile(req.file.path, req.file.originalname);
-        fs.unlinkSync(req.file.path);
+        // The uploaded file is read once and then deleted
+        let parsed;
+        try {
+            parsed = await parseImportFile(req.file.path, req.file.originalname);
+        } finally {
+            try { fs.unlinkSync(req.file.path); } catch (e) { /* already gone */ }
+        }
+        const { header, rows } = parsed;
 
         const canonicalHeader = header.map(h => HEADER_ALIASES[normalizeHeader(h)] || null);
 
@@ -422,9 +322,7 @@ const importCSV = async (req, res, next) => {
             });
         }
 
-        // Template check, part 2: columns in the file that the importer does NOT
-        // recognize (a stray "Unit" column, a misspelled header) are listed in
-        // the result instead of being silently ignored.
+        // Template check, part 2: columns in the file that the importer does NOT...
         const ignoredColumns = header.filter((h, i) => String(h || '').trim() && !canonicalHeader[i]);
 
         if (!rows.length) {
@@ -449,12 +347,12 @@ const importCSV = async (req, res, next) => {
             const name   = String(row.brand_name || '').trim();
             const fail   = (msg) => results.errors.push(`Row ${rowNum}${name ? ` (${name})` : ''}: ${msg}`);
 
-            // ---- validate every field first, so a bad row is reported WITH the reason ----
+            // validate every field first, so a bad row is reported WITH the reason
             if (!name) { fail('Brand Name is required.'); continue; }
 
             let category;
             try {
-                // several categories are separated with ; (or |) -- never a comma, which would split the CSV cell
+                // several categories are separated with ; (or |)
                 category = Product.normalizeCategories(String(row.category || '').split(/[;|]/));
             } catch (e) {
                 fail(e.message === 'Choose at least one category.' ? 'Category is required (separate several with ;).' : e.message);
@@ -508,8 +406,7 @@ const importCSV = async (req, res, next) => {
                 const existingId = await Product.findGroupIdByName(name);
 
                 if (existingId) {
-                    // The product exists: this row is a RESTOCK. Its other fields are never
-                    // written over the live product -- a difference is reported instead.
+                    // The product exists: this row is a RESTOCK.
                     const existingGroup = await Product.findGroupById(existingId);
                     const mismatches = [];
                     if (existingGroup) {
@@ -526,7 +423,7 @@ const importCSV = async (req, res, next) => {
                         );
                     }
 
-                    // Same expiry date as an existing Item No. -> ADD to it; otherwise a new Item No.
+                    // Same expiry date as an existing Item No. -> ADD to it
                     const sameDate = await Product.findItemByBrandAndExpiry(name, expiry);
                     if (sameDate) {
                         await Product.addStockToItem(sameDate.id, qty);
@@ -566,13 +463,7 @@ const importCSV = async (req, res, next) => {
     } catch (err) { next(err); }
 };
 
-/**
- * GET /api/inventory/import/template  [Admin+]
- * Downloadable .xlsx with the exact column headers importCSV expects --
- * header row only, no example data, so it's a genuinely clean starting
- * point to fill in rather than something that needs a placeholder row
- * deleted first.
- */
+/** GET /api/inventory/import/template [Admin+] - Downloadable .xlsx... */
 const getImportTemplate = async (req, res, next) => {
     try {
         const workbook = new ExcelJS.Workbook();
@@ -585,8 +476,7 @@ const getImportTemplate = async (req, res, next) => {
             cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF0D6EFD' } };
         });
 
-        // Second sheet: how to fill it in. The FIRST sheet stays header-only (that
-        // is the one the importer reads), so it can be filled in straight away.
+        // Second sheet: how to fill it in.
         const help = workbook.addWorksheet('How to fill');
         help.columns = [{ header: 'Column', width: 24 }, { header: 'Required?', width: 18 }, { header: 'What to enter', width: 100 }];
         help.getRow(1).eachCell(cell => {
@@ -616,13 +506,7 @@ const getImportTemplate = async (req, res, next) => {
     } catch (err) { next(err); }
 };
 
-/**
- * GET /api/inventory/:id/barcode  [Admin+]
- * Returns the product's barcode, auto-generating and persisting one
- * first if it doesn't already have one (see Product.ensureBarcode).
- * Used by the Edit Product modal to guarantee a real, scannable value
- * always exists before rendering the barcode image.
- */
+/** GET /api/inventory/:id/barcode [Admin+] - Returns the product's barcode */
 const getBarcode = async (req, res, next) => {
     try {
         const barcode = await Product.ensureBarcode(req.params.id);
@@ -632,23 +516,14 @@ const getBarcode = async (req, res, next) => {
         res.json({ success: true, barcode });
     } catch (err) {
         if (err.code === 'ER_DUP_ENTRY') {
-            // Astronomically unlikely (see ensureBarcode comment), but handled
-            // cleanly rather than surfacing a raw SQL error.
+            // Astronomically unlikely (see ensureBarcode comment)
             return res.status(409).json({ success: false, message: 'Could not generate a unique barcode. Please set one manually.' });
         }
         next(err);
     }
 };
 
-/**
- * Manage Categories  [Admin+]
- * GET  /api/inventory/categories           every category with how many brands use it
- * POST /api/inventory/categories           { name }             add a category (not used by any product yet)
- * POST /api/inventory/categories/rename    { from, to }
- * POST /api/inventory/categories/delete    { names: [a, b, ...] }
- * Each change rewrites the category list of every product that has the old
- * name(s), in ONE transaction (see Product.replaceCategories), and is audited.
- */
+/** Manage Categories [Admin+] - GET /api/inventory/categories every category... */
 const listCategories = async (req, res, next) => {
     try {
         res.json({ success: true, data: await Product.getCategorySummary() });
@@ -691,8 +566,7 @@ const addCategory = async (req, res, next) => {
     }
 };
 
-// Delete one or several categories at once. Refused (changing nothing) if a
-// product would be left with no category -- see Product.deleteCategories.
+// Delete one or several categories at once.
 const deleteCategories = async (req, res, next) => {
     try {
         const names = cleanNames(req.body.names);

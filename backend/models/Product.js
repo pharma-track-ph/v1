@@ -1,10 +1,8 @@
-// ============================================================
-// Product Model
-// Core inventory entity. Includes expiry, batch, supplier.
-// ============================================================
+// Product Model - Core inventory entity.
 const db = require('../config/db');
 const AppSetting = require('./AppSetting');
 const manilaTime = require('../utils/manilaTime');
+const { plainTextProblem } = require('../utils/inputGuards');
 
 const Product = {
     findAll: async ({ search = '', category = '', status = '' } = {}) => {
@@ -37,28 +35,19 @@ const Product = {
         if (status) {
             switch (status) {
                 case 'low_stock':
-                    // Independent of expiry now -- a product can be both
-                    // low-stock AND expiring soon at once; this matches
-                    // regardless of what its single row badge shows.
+                    // Independent of expiry now
                     sql += ' AND stock_quantity > 0 AND stock_quantity <= low_stock_threshold';
                     break;
                 case 'expiring':
-                    // A batch that's sold out (stock 0) is never "expiring soon"
-                    // from a business standpoint — there's no stock left to lose.
+                    // A batch that's sold out (stock 0) is never "expiring soon"...
                     sql += ' AND expiry_date >= CURDATE() AND DATEDIFF(expiry_date, CURDATE()) <= 30 AND stock_quantity > 0';
                     break;
                 case 'expiring_3mo':
-                    // Deliberately INCLUSIVE of the 1-month tier (0-90 days),
-                    // not just the 31-90 day band the per-row badge shows —
-                    // this is meant as a broader "anything needing attention
-                    // in the next 3 months" net, not a mutually-exclusive
-                    // badge match.
+                    // Deliberately INCLUSIVE of the 1-month tier (0-90 days)
                     sql += ' AND expiry_date >= CURDATE() AND DATEDIFF(expiry_date, CURDATE()) <= 90 AND stock_quantity > 0';
                     break;
                 case 'expired':
-                    // Once a batch hits 0 stock it's "Sold Out", not "Expired" —
-                    // there's nothing left that could still spoil/be wasted, so
-                    // it should never show up in an expired-inventory view.
+                    // Once a batch hits 0 stock it's "Sold Out", not "Expired"
                     sql += ' AND expiry_date < CURDATE() AND stock_quantity > 0';
                     break;
                 case 'out_of_stock':
@@ -70,19 +59,11 @@ const Product = {
             }
         }
 
-        // Out-of-stock items sort to the very bottom regardless of their
-        // expiry_date -- otherwise a sold-out batch with a past expiry date
-        // would sort as if it were the MOST urgently expiring item (since a
-        // plain expiry_date ASC sort treats "in the past" as "earliest"),
-        // when it's actually a Out of Stock status, not an expiry concern at
-        // all. Everything else keeps the original expiry_date/name order.
+        // Out-of-stock items sort to the very bottom regardless of their expiry_date
         let orderBy = 'CASE WHEN stock_quantity <= 0 THEN 1 ELSE 0 END';
 
         if (search) {
-            // Same relevance ranking as findAllForPOS — a short/common search
-            // term shouldn't look like it barely filtered anything just
-            // because it matches dozens of products somewhere in the middle
-            // of their name/generic name.
+            // Same relevance ranking as findAllForPOS
             orderBy += `,
                 CASE
                     WHEN name LIKE ?         THEN 0
@@ -130,10 +111,7 @@ const Product = {
              (batch_number, name, generic_name, category, supplier, description,
               barcode, price, cost, stock_quantity, low_stock_threshold, expiry_date, is_tax_exempt)
              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-            // batch_number is a legacy column (Item Nos. replaced it). It is stored as an
-            // EMPTY string, not NULL, so the insert works whether the live column is
-            // nullable or NOT NULL (a NULL into a NOT NULL column made EVERY Add Product
-            // and Add Item No. fail with "Column 'batch_number' cannot be null").
+            // batch_number is a legacy column (Item Nos. replaced it).
             [batch_number ?? '', name, generic_name, category, supplier, description,
              barcode, price, cost, stock_quantity, low_stock_threshold, expiry_date, is_tax_exempt ? 1 : 0]
         );
@@ -180,10 +158,7 @@ const Product = {
     },
 
     getLowStockCount: async () => {
-        // Independent of expiry now (see inventoryController.js's getProducts
-        // for the full explanation) -- a product can be both low-stock AND
-        // expiring soon at the same time, and should count here regardless
-        // of what its single row badge happens to show.
+        // Independent of expiry now...
         const [rows] = await db.query(
             `SELECT COUNT(*) AS count FROM products
              WHERE is_active = 1
@@ -194,9 +169,7 @@ const Product = {
     },
 
     getNearExpiryCount: async () => {
-        // Excludes sold-out batches (stock 0) — see findAll's CASE priority:
-        // out_of_stock now outranks near_expiry, so a 0-stock batch should
-        // never be double-counted here too.
+        // Excludes sold-out batches (stock 0)
         const [rows] = await db.query(
             `SELECT COUNT(*) AS count FROM products
              WHERE is_active = 1
@@ -207,11 +180,7 @@ const Product = {
         return rows[0].count;
     },
 
-    // "Expiring in 3 Months" header alert / filter count — deliberately
-    // INCLUSIVE of the 1-month tier (0-90 days), matching the filter's own
-    // inclusive semantics in inventoryController.js's getProducts(), so
-    // clicking this alert and seeing the resulting list always agree on
-    // the same number.
+    // "Expiring in 3 Months" header alert / filter count
     getExpiring3MonthsCount: async () => {
         const [rows] = await db.query(
             `SELECT COUNT(*) AS count FROM products
@@ -224,10 +193,7 @@ const Product = {
     },
 
     getExpiredCount: async () => {
-        // Once a batch's stock hits 0 it's "Sold Out", not "Expired" — see
-        // findAll's CASE priority (out_of_stock is checked before expired).
-        // There's no remaining stock left to have gone to waste, so it
-        // shouldn't count towards (or appear in) the expired-inventory view.
+        // Once a batch's stock hits 0 it's "Sold Out", not "Expired"
         const [rows] = await db.query(
             `SELECT COUNT(*) AS count FROM products
              WHERE is_active = 1 AND expiry_date < CURDATE() AND stock_quantity > 0`
@@ -236,9 +202,7 @@ const Product = {
     },
 
     getOutOfStockCount: async () => {
-        // Out of stock is now the TOP-priority status (see findAll's CASE) —
-        // a 0-stock batch is "Sold Out" regardless of its expiry date, so no
-        // expiry-related conditions apply here anymore.
+        // Out of stock is now the TOP-priority status (see findAll's CASE)
         const [rows] = await db.query(
             `SELECT COUNT(*) AS count FROM products
              WHERE is_active = 1 AND stock_quantity <= 0`
@@ -246,13 +210,7 @@ const Product = {
         return rows[0].count;
     },
 
-    // ── POS-specific fetch: only active, non-expired batches ──
-    // Used by /api/pos/products so the POS never has to know about
-    // expired stock at all — filtering happens once, here.
-    // Only batches that can actually be SOLD right now: active, NOT expired
-    // (a batch is not sellable on its expiry date itself, matching checkout),
-    // and with stock left. A brand whose batches are all sold out or expired
-    // therefore has no rows here and does not appear as a POS card at all.
+    // POS-specific fetch: only active, non-expired batches Used by /api/pos/products
     findAllForPOS: async (search = '') => {
         let sql = `
             SELECT *,
@@ -268,13 +226,7 @@ const Product = {
             const like = `%${search}%`;
             params.push(like, like, like, search);
 
-            // A short or common search term (e.g. just "a") can match
-            // dozens of products via a substring buried in the middle of a
-            // name or generic name, which makes the search look like it
-            // barely filtered anything even though it technically did. This
-            // ranks products whose name/generic name STARTS WITH the term
-            // above everything else, so the most relevant matches always
-            // surface first regardless of how short the search is.
+            // A short or common search term (e.g. just "a") can match dozens...
             sql += ` ORDER BY
                         CASE
                             WHEN name LIKE ?         THEN 0
@@ -292,8 +244,6 @@ const Product = {
     },
 
     // All active, non-expired batches sharing an exact product name.
-    // Used to re-group a single barcode-scanned batch back into its
-    // product family (so POS behaviour stays consistent either way).
     findActiveNonExpiredByName: async (name) => {
         const [rows] = await db.query(
             `SELECT *,
@@ -306,20 +256,7 @@ const Product = {
         return rows;
     },
 
-    // ============================================================
-    // Categories (several per product)
-    // ============================================================
-    // A product's categories live in the SAME `category` column, as a list
-    // joined with '|' (e.g. "Analgesic|Antipyretic"). '|' is refused inside a
-    // category NAME, so a name can never be mistaken for the separator. A
-    // product with ONE category is stored exactly as it always was, so every
-    // existing row keeps working untouched.
-    // The longest a product's combined category list may be. This is NOT a fixed
-    // number: it is read from the real `category` column (refreshCategoryLimit),
-    // so it is 80 until the column is widened with
-    //     ALTER TABLE products MODIFY category VARCHAR(255) NOT NULL;
-    // and 255 right after -- no code change and no restart needed (it re-checks
-    // the column at most every 30 seconds). 80 is only the safe starting value.
+    // Categories (several per product) - A product's categories live in the SAME...
     MAX_CATEGORY_LENGTH: 80,
     _limitCheckedAt: 0,
 
@@ -343,11 +280,16 @@ const Product = {
         return err;
     },
 
+    // Brand names, generic names, suppliers and categories are plain words that show...
+    _assertPlainText: (label, value) => {
+        const problem = plainTextProblem(label, value);
+        if (problem) throw Product._invalid(problem);
+    },
+
     splitCategories: (value) =>
         String(value ?? '').split('|').map(s => s.trim()).filter(Boolean),
 
-    // Accepts an array, or a string (one name, or an already-joined list), and
-    // returns the canonical stored string. Throws INVALID_INPUT on bad input.
+    // Accepts an array, or a string (one name, or an already-joined list)
     normalizeCategories: (input) => {
         const raw = Array.isArray(input) ? input : Product.splitCategories(input);
         const seen = new Set();
@@ -356,6 +298,7 @@ const Product = {
             const name = String(item ?? '').trim().replace(/\s+/g, ' ');
             if (!name) continue;
             if (name.includes('|'))  throw Product._invalid('Category names cannot contain the | character.');
+            Product._assertPlainText('Category names', name);
             if (name.length > 60)    throw Product._invalid(`"${name.slice(0, 20)}..." is too long for a category name (60 characters max).`);
             const key = name.toLowerCase();
             if (seen.has(key)) continue;
@@ -370,19 +313,14 @@ const Product = {
         return joined;
     },
 
-    // SQL for "has this category" -- an exact match on one entry of the list,
-    // so a product shows under EACH of its categories and "Pain" never matches
-    // "Pain Relief". Appends its parameter to `params`.
+    // SQL for "has this category"
     _categoryClause: (category, params) => {
         const escaped = String(category).replace(/[\\%_]/g, ch => '\\' + ch);
         params.push(`%|${escaped}|%`);
         return " AND CONCAT('|', category, '|') LIKE ? ESCAPE '\\\\'";
     },
 
-    // The barcode is shared by every Item No. of ONE brand (that is how scanning
-    // finds the brand), but must never be shared between two DIFFERENT brands.
-    // The database used to enforce this with a UNIQUE index; that index had to
-    // go so "Add Item No." could copy the brand's barcode, so it is checked here.
+    // The barcode is shared by every Item No. of ONE brand
     assertBarcodeFree: async (barcode, brandName) => {
         if (!barcode) return;
         const [rows] = await db.query(
@@ -396,10 +334,7 @@ const Product = {
         }
     },
 
-    // "Extra" categories: names added in Manage Categories BEFORE any product uses
-    // them (a category is otherwise only stored on products, so an unused one would
-    // not exist anywhere). They are kept in the EXISTING app_settings table under
-    // this key -- no new table or column.
+    // "Extra" categories: names added in Manage Categories BEFORE any product uses...
     EXTRA_CATEGORIES_KEY: 'inventory_extra_categories',
 
     getExtraCategories: async () => {
@@ -415,7 +350,6 @@ const Product = {
     },
 
     // Every distinct category: each entry of each product's list, plus the extra
-    // (not-yet-used) ones, sorted
     getCategories: async () => {
         const [rows] = await db.query('SELECT DISTINCT category FROM products WHERE is_active = 1');
         const byKey = new Map();
@@ -429,7 +363,6 @@ const Product = {
     },
 
     // For the Manage Categories window: each category with how many BRANDS use it
-    // (0 for one that was added but is not used yet)
     getCategorySummary: async () => {
         const [rows] = await db.query('SELECT name, category FROM products WHERE is_active = 1 ORDER BY id ASC');
         const seenBrand = new Set();
@@ -453,7 +386,7 @@ const Product = {
     // Adds a category name to the list without attaching it to any product yet
     addCategoryName: async (name) => {
         await Product.refreshCategoryLimit();
-        const clean = Product.splitCategories(Product.normalizeCategories([name]))[0];   // validates: not empty, no '|', 60 chars max
+        const clean = Product.splitCategories(Product.normalizeCategories([name]))[0];   // validates: not...
         const existing = await Product.getCategories();
         if (existing.some(c => c.toLowerCase() === clean.toLowerCase())) {
             throw Product._invalid(`"${clean}" already exists.`);
@@ -464,17 +397,14 @@ const Product = {
         return clean;
     },
 
-    // Deletes categories: removes each from every product that has it, and from
-    // the extra list. A product must always keep AT LEAST ONE category, so if
-    // any product would be left with none, NOTHING is deleted and the message
-    // names those products. One transaction.
+    // Deletes categories: removes each from every product that has it
     deleteCategories: async (names) => {
         const keys = new Set(names.map(n => String(n).trim().toLowerCase()).filter(Boolean));
         if (!keys.size) throw Product._invalid('Choose the categories to delete.');
 
         const [rows] = await db.query('SELECT id, name, category FROM products WHERE is_active = 1');
         const changes = [];
-        const blocked = new Map();      // product name -> the categories it has (all of them are being deleted)
+        const blocked = new Map();      // product name -> the categories it has
         for (const r of rows) {
             const tokens = Product.splitCategories(r.category);
             if (!tokens.some(t => keys.has(t.toLowerCase()))) continue;
@@ -517,12 +447,7 @@ const Product = {
         return { rows: changes.length };
     },
 
-    // Rename / Merge / Split in ONE operation: every active product that has any
-    // category in `from` loses them and gets the categories in `to` instead (no
-    // duplicates; the new ones take the place of the first removed one).
-    //   Rename: from [X]    to [Y]       Merge: from [X, Y] to [Z]
-    //   Split:  from [X]    to [A, B]
-    // Runs in one transaction. Returns how many rows were changed.
+    // Rename / Merge / Split in ONE operation: every active product that has any...
     replaceCategories: async (from, to) => {
         await Product.refreshCategoryLimit();
         const fromKeys = new Set(from.map(x => String(x).trim().toLowerCase()));
@@ -564,8 +489,7 @@ const Product = {
             connection.release();
         }
 
-        // A renamed category that was only on the extra list (no product uses it
-        // yet) is renamed there too, with no duplicates.
+        // A renamed category that was only on the extra list
         const extras = await Product.getExtraCategories();
         if (extras.some(e => fromKeys.has(e.toLowerCase()))) {
             const seen = new Set(); const next = []; let placed = false;
@@ -580,12 +504,6 @@ const Product = {
     },
 
     // Bulk upsert from CSV import.
-    // Matches on BOTH batch_number AND expiry_date — a shared batch number
-    // with a DIFFERENT expiry date is treated as a distinct physical batch
-    // (e.g. a re-used or mistyped lot code from the supplier), not the same
-    // stock. That case becomes a new row instead of silently overwriting the
-    // expiry date on existing stock, which would misrepresent how soon the
-    // OLDER units actually expire.
     bulkUpsert: async (items) => {
         const results = { inserted: 0, updated: 0, errors: [] };
 
@@ -598,8 +516,6 @@ const Product = {
 
                 if (existing.length) {
                     // True match on batch + expiry: safe to merge quantity.
-                    // Update by the specific row id (not by batch_number again)
-                    // so this can never accidentally touch more than one row.
                     await db.query(
                         `UPDATE products SET
                             stock_quantity = stock_quantity + ?,
@@ -621,13 +537,7 @@ const Product = {
         return results;
     },
 
-    // Auto-generates and PERSISTS a barcode for a product that doesn't have
-    // one yet, so every product always has something scannable. Format:
-    // "PT" + zero-padded product id (e.g. PT000042) — structurally distinct
-    // from real manufacturer barcodes (which are numeric-only, e.g. EAN-13),
-    // so there's no risk of ever colliding with a real, manually-entered one.
-    // Since it's derived from the unique primary key, it can never collide
-    // with another product's generated code either.
+    // Auto-generates and PERSISTS a barcode for a product that doesn't have one yet
     ensureBarcode: async (id) => {
         const [rows] = await db.query('SELECT barcode FROM products WHERE id = ?', [id]);
         if (!rows.length) return null;
@@ -639,36 +549,9 @@ const Product = {
         return generated;
     },
 
-    // ============================================================
-    // Brand-level grouping (Inventory restructure -- "Option B")
-    // ============================================================
-    // The `products` table itself is UNCHANGED -- still one row per
-    // physical batch, own stock_quantity/expiry_date, same as POS's
-    // groupBatchesForPOS() (posController.js) already treats it. Nothing
-    // below adds a new table; it groups these same rows by `name` for the
-    // Inventory page's "Brand Name -> Item No. list" view, using the
-    // exact grouping key POS already relies on for FEFO.
-    //
-    // A brand's shared/top-level fields (generic_name, category, supplier,
-    // barcode, price, cost, low_stock_threshold, description) are expected
-    // to be IDENTICAL across every row in its group -- editing them from
-    // the UI writes to every row in the group at once (updateGroupFields),
-    // so they can never legitimately drift apart. Everywhere below that
-    // needs to read them back uses the group's lowest-id (earliest-
-    // created) row as the representative -- which, conveniently, is also
-    // "Item No. 1".
-    //
-    // batch_number is no longer set on new rows created through any of
-    // these (Item No. is a purely computed row-order index now, never
-    // typed by a user) -- see the Inventory Restructure section in the
-    // handoff doc for what's intentionally NOT covered here yet (the
-    // rename of "Batch No./Product Name" elsewhere in the app, and the
-    // CSV import rewrite), both deferred on purpose.
-    // ============================================================
+    // Brand-level grouping (Inventory restructure - "Option B") The `products` table...
 
-    // All active rows for a brand-name group, oldest-created first, so
-    // "Item No. 1" stays stable/consistent across calls rather than being
-    // re-numbered by an unrelated sort like expiry_date.
+    // All active rows for a brand-name group, oldest-created first
     _fetchGroupRowsByName: async (name) => {
         const [rows] = await db.query(
             `SELECT *, DATEDIFF(expiry_date, CURDATE()) AS days_until_expiry
@@ -680,10 +563,7 @@ const Product = {
         return rows;
     },
 
-    // Resolves a brand group from ANY one of its rows' ids -- the id acts
-    // as a stable "pointer" into the group without needing a new brand-
-    // level id column; whichever row is passed in, the group is always
-    // re-derived from its CURRENT name, never a client-supplied one.
+    // Resolves a brand group from ANY one of its rows' ids
     _resolveGroupName: async (anyRowId) => {
         const [rows] = await db.query(
             'SELECT name FROM products WHERE id = ? AND is_active = 1 LIMIT 1',
@@ -692,11 +572,7 @@ const Product = {
         return rows.length ? rows[0].name : null;
     },
 
-    // Reverse of _resolveGroupName -- given a Brand Name, returns the
-    // group's representative row id (lowest id, i.e. "Item No. 1"), or
-    // null if no active brand with that exact name (case-insensitive)
-    // exists. Used by CSV/Excel import to decide "Add Product" (brand-new)
-    // vs "Add Item No." (restock an existing brand) per row.
+    // Reverse of _resolveGroupName
     findGroupIdByName: async (name) => {
         const [rows] = await db.query(
             'SELECT id FROM products WHERE LOWER(name) = LOWER(?) AND is_active = 1 ORDER BY id ASC LIMIT 1',
@@ -706,47 +582,17 @@ const Product = {
     },
 
     // Rolls a group of batch rows up into one Brand-Name-level summary.
-    //   - Out of Stock / Low Stock / In Stock is computed from the COMBINED
-    //     stock of the non-expired rows only -- an expired row's leftover
-    //     stock_quantity was never sellable, so it shouldn't count toward
-    //     "do we have enough to sell". This also means a brand where every
-    //     single Item No. is expired (so there are zero non-expired rows to
-    //     sum) naturally comes out to combinedStock=0 and shows "Out of
-    //     Stock" -- there's no separate "Expired" BRAND-level status
-    //     anymore. From a "can I sell this right now" standpoint an
-    //     entirely-expired brand and a genuinely sold-out one are the same
-    //     thing to a cashier; the distinction between "expired" and
-    //     "depleted" only matters at the INDIVIDUAL ITEM level (for
-    //     deciding what to physically discard vs reorder), which is
-    //     exactly what all_items_expired and _toItemSummary's is_expired
-    //     flag are for -- the Status FILTER dropdown's "Expired" option
-    //     still works, just checks all_items_expired instead of a
-    //     stock_status value that no longer exists.
-    //   - "Expiring this month / in 3 months" is deliberately NOT part of
-    //     this rollup either -- it's tagged per Item No. instead (see
-    //     _toItemSummary), so a brand can show fully "In Stock" overall
-    //     while one specific item is individually flagged for FEFO
-    //     attention, exactly as specified.
-    // A product whose LAST batch was removed keeps one empty stand-in batch, so the product
-    // itself stays in Inventory (see removeItem). It is marked in batch_number, has no units and
-    // a far-future date, and is invisible everywhere else: never listed as an Item No., never
-    // counted, never exported, never sold (the POS only lists batches with units left).
     NO_ITEM_MARK:   '(no item)',
     NO_ITEM_EXPIRY: '2099-12-31',
     _isPlaceholder: (r) => r.batch_number === Product.NO_ITEM_MARK,
 
-    // Expired = its date is before Manila's today (the same rule the roll-up below uses).
+    // Expired = its date is before Manila's today
     _isExpired: (r) => new Date(r.expiry_date) < manilaTime.midnight(),
 
     // Earliest expiry first; the same date -> the older record first.
     _byExpiry: (a, b) => (new Date(a.expiry_date) - new Date(b.expiry_date)) || (a.id - b.id),
 
-    // The two lists the Edit window shows, built the SAME way the screen builds them, so an
-    // "Item No. 2" in a message always means the Item No. 2 you can see:
-    //   "Item No. (restock batches)" -- still sellable: not expired and with units left
-    //   "Removed Item No."           -- expired, or no units left
-    // Each list is sorted by expiry date (earliest first) and numbered from 1.
-    // Returns Map(rowId -> { itemNo, list: 'active' | 'removed' }).
+    // The two lists the Edit window shows, built the SAME way the screen builds them
     numberItems: (rows) => {
         const real    = rows.filter(r => !Product._isPlaceholder(r));
         const removed = (r) => Product._isExpired(r) || r.stock_quantity <= 0;
@@ -757,16 +603,14 @@ const Product = {
     },
 
     _rollUpGroup: (allRows) => {
-        // "Today" is Manila's today (its midnight), on ANY server -- a hosted server in UTC
-        // used to flip an Item No. to expired at 8 AM Manila time instead of at midnight.
+        // "Today" is Manila's today (its midnight), on ANY server
         const today = manilaTime.midnight();
 
         // The stand-in batch (if any) carries the product's details but is not a batch.
         const rows  = allRows.filter(r => !Product._isPlaceholder(r));
-        const first = allRows[0]; // representative row for shared/top-level fields (its id is used for Edit/Delete)
+        const first = allRows[0]; // representative row for shared/top-level fields
 
-        // A product with no Item No. at all (its last batch was removed): nothing to sell and
-        // nothing that can expire.
+        // A product with no Item No. at all (its last batch was removed)
         if (!rows.length) {
             return {
                 id:                  first.id,
@@ -808,16 +652,7 @@ const Product = {
         const hasItemExpiringThisMonth = rows.some(r => r.days_until_expiry >= 0 && r.days_until_expiry <= 30 && r.stock_quantity > 0);
         const hasItemExpiring3mo        = rows.some(r => r.days_until_expiry >= 0 && r.days_until_expiry <= 90 && r.stock_quantity > 0);
 
-        // Single effective_status picked by STRICT priority, so a brand
-        // never simultaneously qualifies for two different filter
-        // categories -- e.g. a brand that's fully expired used to also
-        // match "Out of Stock" (since its combined non-expired stock IS
-        // 0), so it showed up under either filter. Expired now outranks
-        // Out of Stock, so it's Expired only. Hierarchy, highest first:
-        // expired > out_of_stock > near_expiry > expiring_3mo > low_stock
-        // > in_stock (the pure fallback -- only reached once nothing above
-        // applies, which is what keeps "In Stock" from also catching
-        // brands that are actually Low Stock/Expiring/etc.)
+        // Single effective_status picked by STRICT priority
         let effective_status;
         if (allItemsExpired)                       effective_status = 'expired';
         else if (stock_status === 'out_of_stock')   effective_status = 'out_of_stock';
@@ -826,15 +661,13 @@ const Product = {
         else if (stock_status === 'low_stock')      effective_status = 'low_stock';
         else                                          effective_status = 'in_stock';
 
-        // Earliest still-good expiry across the group -- a quick at-a-
-        // glance FEFO signal on the main table row, separate from (and in
-        // addition to) the per-item flags shown in the Edit modal.
+        // Earliest still-good expiry across the group
         const soonest = nonExpired.length
             ? nonExpired.reduce((a, b) => new Date(a.expiry_date) < new Date(b.expiry_date) ? a : b)
             : null;
 
         return {
-            id:                  first.id, // representative row id -- used for Edit/Delete actions
+            id:                  first.id, // representative row id - used for Edit/Delete actions
             name:                first.name,
             generic_name:        first.generic_name,
             category:            first.category,
@@ -854,9 +687,7 @@ const Product = {
             earliest_expiry_days_left: soonest ? soonest.days_until_expiry : null,
             has_item_expiring_this_month: hasItemExpiringThisMonth,
             has_item_expiring_3mo:        hasItemExpiring3mo,
-            // Expired units still sitting in the system (a batch can be expired while the
-            // product also has good stock): this is what the red "Expired stock" tag and the
-            // Expired filter look at. A fully expired product is covered by all_items_expired.
+            // Expired units still sitting in the system
             has_expired_stock: rows.some(r => !(new Date(r.expiry_date) >= today) && r.stock_quantity > 0),
             expired_units:     rows.filter(r => !(new Date(r.expiry_date) >= today)).reduce((s, r) => s + r.stock_quantity, 0)
         };
@@ -876,7 +707,7 @@ const Product = {
         };
     },
 
-    // GET /api/inventory -- one summary row per Brand Name.
+    // GET /api/inventory - one summary row per Brand Name.
     findAllGrouped: async ({ search = '', category = '', status = '' } = {}) => {
         let sql = `
             SELECT *, DATEDIFF(expiry_date, CURDATE()) AS days_until_expiry
@@ -904,17 +735,7 @@ const Product = {
 
         if (status) {
             const normalized = status === 'expiring' ? 'near_expiry' : status;
-            // A product shows under EVERY filter that applies to any of its Item Nos -- the
-            // conditions are independent, not a single pick:
-            //   Expired       any batch that is expired with units still in the system (the
-            //                 product may also have good stock), or every batch expired
-            //   Out of Stock  no sellable units left -- including a product whose only remaining
-            //                 stock has expired (it is both Expired and Out of Stock)
-            //   Low Stock, Expiring This Month, Expiring in 3 Months  as before (any Item No.)
-            //   In Stock      stays the strict one on purpose: "nothing here needs attention".
-            // effective_status is still what the single visible BADGE shows when no filter is
-            // chosen (see inventory.js's getStatusBadge); the red "Expired stock" tag covers the
-            // partly-expired case beside it.
+            // A product shows under EVERY filter that applies to any of its Item Nos
             summaries = summaries.filter(g => {
                 switch (normalized) {
                     case 'expired':      return g.all_items_expired || g.has_expired_stock;
@@ -922,11 +743,7 @@ const Product = {
                     case 'low_stock':    return g.stock_status === 'low_stock';
                     case 'near_expiry':  return g.has_item_expiring_this_month;
                     case 'expiring_3mo': return g.has_item_expiring_3mo;
-                    // "In Stock" stays the strict/exclusive one on purpose --
-                    // it's meant as "nothing here needs any attention at
-                    // all", so it should NOT match a brand that also has an
-                    // item expiring soon just because its raw stock level
-                    // happens to be fine.
+                    // "In Stock" stays the strict/exclusive one on purpose it's...
                     case 'in_stock':     return g.effective_status === 'in_stock' && !g.has_expired_stock;
                     default:             return true;
                 }
@@ -934,9 +751,7 @@ const Product = {
         }
 
         summaries.sort((a, b) => {
-            // Expired/out of stock sink to the bottom, same spirit as the
-            // old per-row sort -- then soonest-still-good-expiry first,
-            // then name.
+            // Expired/out of stock sink to the bottom
             const weight = s => (s === 'expired' || s === 'out_of_stock') ? 1 : 0;
             const wA = weight(a.effective_status), wB = weight(b.effective_status);
             if (wA !== wB) return wA - wB;
@@ -951,8 +766,7 @@ const Product = {
         return summaries;
     },
 
-    // GET /api/inventory/:id -- full detail for the Edit modal: top-level
-    // fields + every Item No. in the group, oldest-created first.
+    // GET /api/inventory/:id
     findGroupById: async (anyRowId) => {
         const name = await Product._resolveGroupName(anyRowId);
         if (!name) return null;
@@ -960,20 +774,17 @@ const Product = {
         if (!rows.length) return null;
 
         const summary = Product._rollUpGroup(rows);
-        // The Item Nos the Edit window lists: real batches only (never the stand-in batch),
-        // earliest expiry first -- so a new batch finds its place by date, not by when it was added.
+        // The Item Nos the Edit window lists: real batches only
         const items = rows.filter(r => !Product._isPlaceholder(r)).sort(Product._byExpiry).map(Product._toItemSummary);
         return { ...summary, items };
     },
 
-    // "Add Product" -- a brand-new medicine: its full shared details, plus
-    // its very first Item No. (stock_quantity + expiry_date) in one row.
-    // Blocked on a Brand Name that already exists (case-insensitive) among
-    // active products, rather than silently creating a same-named sibling
-    // row whose shared fields would be free to drift from the rest of
-    // that group until the next edit re-syncs them -- restocking an
-    // EXISTING brand should go through addItem below instead.
+    // "Add Product" - a brand-new medicine: its full shared details
     createGroup: async (data) => {
+        Product._assertPlainText('Brand name', data.name);
+        Product._assertPlainText('Generic name', data.generic_name);
+        Product._assertPlainText('Supplier', data.supplier);
+
         const [existing] = await db.query(
             'SELECT id FROM products WHERE LOWER(name) = LOWER(?) AND is_active = 1 LIMIT 1',
             [data.name]
@@ -984,8 +795,7 @@ const Product = {
             throw err;
         }
 
-        // Several categories per product, validated here -- the one place
-        // every create goes through.
+        // Several categories per product, validated here
         await Product.refreshCategoryLimit();
         const category = Product.normalizeCategories(data.categories ?? data.category);
         await Product.assertBarcodeFree(data.barcode, data.name);
@@ -993,17 +803,15 @@ const Product = {
         return Product.create({ batch_number: null, ...data, category });
     },
 
-    // Cascades a shared/top-level field edit across EVERY row in the
-    // group (see the section-level comment above for why this always
-    // writes ALL rows, not just the representative one). Resolves the
-    // group by the representative row's CURRENT name server-side, rather
-    // than trusting whatever name the client sends, so a rename is always
-    // keyed off what the group is ACTUALLY called right now.
+    // Cascades a shared/top-level field edit across EVERY row in the group
     updateGroupFields: async (anyRowId, data) => {
         const oldName = await Product._resolveGroupName(anyRowId);
         if (!oldName) return 0;
 
         const newName = data.name?.trim();
+        Product._assertPlainText('Brand name', newName);
+        Product._assertPlainText('Generic name', data.generic_name);
+        Product._assertPlainText('Supplier', data.supplier);
         if (newName && newName.toLowerCase() !== oldName.toLowerCase()) {
             const [existing] = await db.query(
                 'SELECT id FROM products WHERE LOWER(name) = LOWER(?) AND is_active = 1 LIMIT 1',
@@ -1016,12 +824,7 @@ const Product = {
             }
         }
 
-        // The Edit modal's form no longer has a barcode field at all (it's
-        // a read-only preview now) -- data.barcode is simply never sent.
-        // Falling back to `null` as the default here would silently WIPE
-        // the group's existing auto-generated barcode on every save, so
-        // the fallback is the group's CURRENT barcode instead, preserving
-        // it whenever the caller doesn't explicitly provide a new one.
+        // The Edit modal's form no longer has a barcode field at all
         const rows = await Product._fetchGroupRowsByName(oldName);
         const currentBarcode = rows[0]?.barcode ?? null;
 
@@ -1038,8 +841,7 @@ const Product = {
             : Product.normalizeCategories(data.categories ?? categoryInput);
         await Product.assertBarcodeFree(barcode, name);
 
-        // Tax Exempt applies to EVERY Item No. row of the brand, like the other
-        // shared fields. If the caller doesn't send it, keep what's stored now.
+        // Tax Exempt applies to EVERY Item No. row of the brand
         const taxExemptFlag = is_tax_exempt === undefined
             ? (rows[0]?.is_tax_exempt ? 1 : 0)
             : ((is_tax_exempt === true || is_tax_exempt === 1 || is_tax_exempt === '1') ? 1 : 0);
@@ -1054,11 +856,7 @@ const Product = {
         return result.affectedRows;
     },
 
-    // Soft-deletes the WHOLE brand -- every row in its group at once. The
-    // per-row softDelete() above is untouched and still used elsewhere;
-    // this is the group-level equivalent for the main table's Delete
-    // button, distinct from deleteItem below (which removes ONE Item No.
-    // and refuses to remove the last one).
+    // Soft-deletes the WHOLE brand - every row in its group at once.
     softDeleteGroup: async (anyRowId) => {
         const name = await Product._resolveGroupName(anyRowId);
         if (!name) return 0;
@@ -1069,11 +867,7 @@ const Product = {
         return result.affectedRows;
     },
 
-    // "Add Item No." -- a new restock row cloning the group's shared
-    // fields (read from the representative row) plus a fresh
-    // stock_quantity/expiry_date. Quantity and expiry are the ONLY things
-    // that change between restocks -- nothing about the product's own
-    // details needs re-entering.
+    // "Add Item No." - a new restock row cloning the group's shared fields
     addItem: async (anyRowId, { stock_quantity, expiry_date }) => {
         const name = await Product._resolveGroupName(anyRowId);
         if (!name) return null;
@@ -1097,8 +891,7 @@ const Product = {
             expiry_date
         });
 
-        // A real batch now exists, so the empty stand-in batch (kept only while a product had
-        // none) is no longer needed.
+        // A real batch now exists, so the empty stand-in batch
         await db.query(
             'UPDATE products SET is_active = 0 WHERE name = ? AND is_active = 1 AND batch_number = ?',
             [first.name, Product.NO_ITEM_MARK]
@@ -1107,11 +900,6 @@ const Product = {
     },
 
     // The Item No. of a brand that already has EXACTLY this expiry date, if any.
-    // A restock whose expiry date matches an existing Item No. tops THAT one up
-    // instead of creating a second Item No. for the same shipment date.
-    // Returns { id, itemNo, stock_quantity } or null. itemNo is the number the Edit window
-    // shows for that batch AFTER the top-up of `addQty` (an empty batch that gets units moves
-    // into the sellable list and is numbered there) -- see numberItems.
     findItemByBrandAndExpiry: async (name, expiryDate, addQty = 0) => {
         const rows = (await Product._fetchGroupRowsByName(name)).filter(r => !Product._isPlaceholder(r));
         const target = Product._ymd(expiryDate);
@@ -1135,9 +923,7 @@ const Product = {
         return result.affectedRows;
     },
 
-    // Edits just the stock_quantity/expiry_date of ONE existing Item No.
-    // -- everything else about the product lives on every sibling row,
-    // not this one specifically, so nothing else is touched here.
+    // Edits just the stock_quantity/expiry_date of ONE existing Item No. everything...
     updateItem: async (itemId, { stock_quantity, expiry_date }) => {
         const [result] = await db.query(
             'UPDATE products SET stock_quantity = ?, expiry_date = ? WHERE id = ? AND is_active = 1',
@@ -1146,11 +932,7 @@ const Product = {
         return result.affectedRows;
     },
 
-    // Deletes ONE Item No. -- blocked if it's the last remaining active
-    // item for its brand, so a brand's shared details (category, price,
-    // etc.) never end up orphaned with zero items under them. Deleting
-    // the WHOLE brand is a separate, explicit action (softDeleteGroup,
-    // via the main table's own Delete button).
+    // Deletes ONE Item No.
     deleteItem: async (itemId) => {
         const name = await Product._resolveGroupName(itemId);
         if (!name) return { affected: 0, blocked: false };
@@ -1174,16 +956,7 @@ const Product = {
         };
     },
 
-    // Puts units of a VOIDED sale back. Normally onto the batch they came from. If that batch is
-    // no longer live (removed or deleted since), the units are NOT sent to a hidden record --
-    // they come back as an Item No. in its place by expiry date:
-    //   - added to the Item No. that already has the same expiry date, if there is one;
-    //   - otherwise a new Item No. with that expiry date (the shared details -- price, barcode,
-    //     category -- come from the product as it is NOW; the removed batch row itself is left
-    //     untouched, so nothing recorded about it is lost);
-    //   - and if the PRODUCT itself was deleted, nothing is added (it was deleted on purpose).
-    // Runs inside the void's transaction (`connection`). Returns what happened, for the reply
-    // and the audit log: { status: 'restored' | 'merged' | 'revived' | 'product_deleted' | 'missing', name, qty, expiry }.
+    // Puts units of a VOIDED sale back.
     restoreVoidedStock: async (connection, productId, qty) => {
         const [rows] = await connection.query('SELECT * FROM products WHERE id = ? FOR UPDATE', [productId]);
         const row = rows[0];
@@ -1215,7 +988,7 @@ const Product = {
             [base.name, base.generic_name, base.category, base.supplier, base.description, base.barcode,
              base.price, base.cost, qty, base.low_stock_threshold, base.is_tax_exempt ? 1 : 0, row.expiry_date]
         );
-        // a real batch exists again, so the empty stand-in (kept only while there was none) retires
+        // a real batch exists again, so the empty stand-in
         await connection.query(
             'UPDATE products SET is_active = 0 WHERE LOWER(name) = LOWER(?) AND is_active = 1 AND batch_number = ?',
             [row.name, Product.NO_ITEM_MARK]
@@ -1223,14 +996,7 @@ const Product = {
         return { status: 'revived', name: row.name, qty, expiry };
     },
 
-    // "Remove" on an expired or empty Item No. (the Edit window's "Removed Item No." list).
-    // NOTHING IS ERASED: the batch row stays in the table with is_active = 2 ("removed, kept for
-    // the records"). Every query already tests is_active = 1, so a removed batch drops out of the
-    // lists, the stock totals, the reports, the exports and the POS without touching any of them
-    // (is_active = 0 stays "deleted"). If it was the product's LAST batch, one empty stand-in
-    // batch is added so the product itself stays in Inventory (Out of Stock) and can be
-    // restocked with "Add Item No."; deleting the product is a separate action (softDeleteGroup).
-    // Returns what the audit log needs.
+    // "Remove" on an expired or empty Item No...
     removeItem: async (itemId) => {
         const [found] = await db.query(
             `SELECT *, DATEDIFF(expiry_date, CURDATE()) AS days_until_expiry
@@ -1277,17 +1043,10 @@ const Product = {
         };
     },
 
-    // Same counts as the individual getters above, recomputed from the
-    // grouped rollup so the header alert badges (shown across the whole
-    // app) always agree with what the Inventory page itself now shows --
-    // e.g. "Low Stock: 3" means 3 BRANDS are low, matching what filtering
-    // Inventory by Low Stock returns, not 3 individual batches.
+    // Same counts as the individual getters above
     getGroupedAlertCounts: async () => {
         const summaries = await Product.findAllGrouped({});
-        // Matches the same independent-check logic as findAllGrouped's own
-        // status filter above (not effective_status) -- so "Low Stock: N"
-        // here always equals what clicking through to that filter actually
-        // returns, even for a brand that also has an item expiring soon.
+        // Matches the same independent-check logic as findAllGrouped's own status...
         return {
             low_stock:    summaries.filter(g => g.stock_status === 'low_stock').length,
             near_expiry:  summaries.filter(g => g.has_item_expiring_this_month).length,
@@ -1297,14 +1056,7 @@ const Product = {
         };
     },
 
-    // All active rows for the Inventory export, ordered:
-    //   1. Alphabetically by Brand Name (case-insensitive)
-    //   2. Within each brand's block, its expired/out-of-stock Item No.
-    //      entries FIRST (they need attention), then the rest in their
-    //      normal Item No. order (creation order) -- so a brand's rows
-    //      always appear consecutively in the report, in the same order
-    //      they're listed in the Edit modal, exactly matching how
-    //      exportController.js's inventory export needs them.
+    // All active rows for the Inventory export, ordered: 1.
     findAllForInventoryExport: async () => {
         const [rows] = await db.query(
             `SELECT *, DATEDIFF(expiry_date, CURDATE()) AS days_until_expiry
@@ -1336,18 +1088,7 @@ const Product = {
         return orderedRows;
     },
 
-    // Broader search than the Inventory page's own findAllGrouped -- also
-    // checks Category and Description, not just Brand/Generic Name/
-    // Barcode. Used ONLY by the public JotForm agent endpoint
-    // (publicController.js), deliberately kept separate from
-    // findAllGrouped rather than widening that one, since the search
-    // TERM here is very different in nature: JotForm translates a
-    // symptom/condition into a medical term first (e.g. "headache" ->
-    // "pain relief"), which is far more likely to match a CATEGORY
-    // ("Fever and Pain Relief") than a specific product's brand or
-    // generic name -- the Inventory page's own search box doesn't have
-    // that same need, and widening it too could surface unexpected
-    // results for a staff member typing a normal product search.
+    // Broader search than the Inventory page's own findAllGrouped
     findAllGroupedBroadSearch: async (search) => {
         const like = `%${search}%`;
         const [rows] = await db.query(

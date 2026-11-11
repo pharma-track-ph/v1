@@ -1,7 +1,4 @@
-// ============================================================
-// PharmaTrack – analytics.js
-// Dashboard KPIs and Chart.js visualizations
-// ============================================================
+// PharmaTrack - analytics.js - Dashboard KPIs and Chart.js visualizations
 document.addEventListener('DOMContentLoaded', async () => {
     if (!Auth.requireAuth()) return;
 
@@ -15,10 +12,9 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     const { today, monthly_revenue, top_products, recent_transactions, alerts } = data.data;
 
-    // ── KPI Cards ─────────────────────────────────────────────
+    // KPI Cards
     setKPI('kpi-sales-today',   Fmt.currency(today.total_sales));
-    // The server leaves profit out for a Pharmacy Assistant (it is worked out from purchase
-    // cost, which they never see). No profit figure -> no "Profit Today" card at all.
+    // The server leaves profit out for a Pharmacy Assistant
     if (today.total_profit === undefined || today.total_profit === null) {
         const profitCard = document.getElementById('kpi-card-profit');
         if (profitCard) profitCard.style.display = 'none';
@@ -34,9 +30,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         if (el) el.textContent = value;
     }
 
-    // ── KPI card click-through (role-gated) ───────────────────
-    // Sales/Profit → Reports (admin, super_admin only)
-    // Low Stock/Near Expiry → Inventory (admin, super_admin only)
+    // KPI card click-through (role-gated) - Sales/Profit -> Reports
     function goIfAllowed(path, allowedRoles) {
         const user = Auth.getUser();
         if (user && allowedRoles.includes(user.role)) {
@@ -59,7 +53,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         goIfAllowed('inventory.html?status=expiring', ['admin', 'super_admin']);
     });
 
-    // ── Monthly Revenue Bar Chart ─────────────────────────────
+    // Monthly Revenue Bar Chart
     const monthlyCtx = document.getElementById('chart-monthly-revenue')?.getContext('2d');
     if (monthlyCtx) {
         new Chart(monthlyCtx, {
@@ -91,10 +85,7 @@ document.addEventListener('DOMContentLoaded', async () => {
                     }
                 },
                 scales: {
-                    // Show EVERY month label. Chart.js hides some category labels
-                    // by default (autoSkip) when it thinks they are crowded, which
-                    // made a month look missing even though its point was there.
-                    // Labels rotate to fit instead of being dropped.
+                    // Show EVERY month label.
                     x: {
                         ticks: { autoSkip: false, maxRotation: 60, minRotation: 0 }
                     },
@@ -109,10 +100,10 @@ document.addEventListener('DOMContentLoaded', async () => {
         });
     }
 
-    // ── Top 5 Selling Products Pie Chart ─────────────────────
+    // Top 5 Selling Products Pie Chart
     const pieCtx = document.getElementById('chart-top-products')?.getContext('2d');
     if (pieCtx && !top_products.length) {
-        // No completed sales yet -- say so instead of leaving a blank canvas
+        // No completed sales yet - say so instead of leaving a blank canvas
         const emptyWrap = document.getElementById('chart-top-products')?.parentElement;
         if (emptyWrap) emptyWrap.innerHTML = '<div class="text-center text-muted" style="padding:60px 0">No sales yet.</div>';
     } else if (pieCtx) {
@@ -169,7 +160,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         });
     }
 
-    // ── Recent Transactions Table (expandable rows) ───────────
+    // Recent Transactions Table (expandable rows)
     const tbody = document.getElementById('recent-txn-tbody');
     if (tbody) {
         if (!recent_transactions.length) {
@@ -178,8 +169,8 @@ document.addEventListener('DOMContentLoaded', async () => {
             tbody.innerHTML = recent_transactions.map((t, idx) => `
                 <tr>
                     <td><button class="btn-expand" data-index="${idx}" title="View items sold">▶</button></td>
-                    <td class="fw-600">${t.order_number}</td>
-                    <td>${t.cashier_name}</td>
+                    <td class="fw-600">${escHtml(t.order_number)}</td>
+                    <td>${escHtml(t.cashier_name)}</td>
                     <td>${t.item_count} item(s)</td>
                     <td class="fw-600" style="color:var(--primary)">${Fmt.currency(t.total)}</td>
                     <td>${Fmt.datetime(t.created_at)}</td>

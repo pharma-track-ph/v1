@@ -1,4 +1,4 @@
-/* ── Backup & Restore page styles ──────────────────────── */
+/* Backup & Restore page styles */
 
 .backup-schedule-card {
     padding: 18px 20px;
@@ -89,7 +89,7 @@
     white-space: nowrap;
 }
 
-/* ── Responsive ──────────────────────────────────────────── */
+/* Responsive */
 @media (max-width: 768px) {
     .backup-schedule-card {
         padding:        14px 14px;

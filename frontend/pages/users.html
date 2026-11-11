@@ -107,8 +107,7 @@
                 </select>
             </div>
 
-            <!-- Add User button -- sits between the toolbar and the table,
-                 right-aligned. -->
+            <!-- Add User button - sits between the toolbar and the table -->
             <div class="page-header" style="justify-content:flex-end;margin-bottom:12px">
                 <button class="btn btn-primary" id="btn-add-user">＋ Add User</button>
             </div>
@@ -178,7 +177,7 @@
                 <div class="form-group" id="pw-group">
                     <label class="form-label" id="pw-label">Password *</label>
                     <input type="password" id="field-password" name="password" class="form-control"
-                           placeholder="Min. 8 characters" autocomplete="new-password">
+                           placeholder="Min. 10 characters" autocomplete="new-password">
                     <div class="pw-strength-bar"><div class="bar-fill" id="pw-bar"></div></div>
                     <div class="pw-strength-hint" id="pw-hint"></div>
 
@@ -196,13 +195,11 @@
                     </select>
                 </div>
 
-                <!-- Shown only when editing your OWN account -- explains why
-                     Role/Status above are greyed out (see users.js's
-                     openEditModal) -->
+                <!-- Shown only when editing your OWN account -->
                 <p class="hidden" id="self-edit-note" style="font-size:0.78rem;color:var(--secondary);margin-top:8px">
                     You are editing your own account. Changing your role or deactivating it signs you out and removes your Owner access. This is only allowed while at least one other Owner is active.
                 </p>
-                <!-- Shown only when reactivating ANOTHER Admin's deactivated account -->
+                <!-- Shown only when reactivating ANOTHER Admin's deactivated... -->
                 <p class="hidden" id="reactivate-note" style="font-size:0.78rem;color:var(--secondary);margin-top:8px">
                     This Owner account is deactivated. You can set it back to Active here. Nothing else about another Owner's account can be changed.
                 </p>
@@ -229,7 +226,7 @@
             <div class="form-group">
                 <label class="form-label">New Password *</label>
                 <input type="password" id="new-pw" class="form-control"
-                       placeholder="Min. 8 characters" autocomplete="new-password">
+                       placeholder="Min. 10 characters" autocomplete="new-password">
                 <div class="pw-strength-bar"><div class="bar-fill" id="pw-bar-2"></div></div>
                 <div class="pw-strength-hint" id="pw-hint-2"></div>
             </div>
@@ -275,9 +272,7 @@
     </div>
 </div>
 
-<!-- Action Verification (OTP) Modal -- generic, reused for Add User,
-     Change Password, and Delete/Deactivate. Description text is set from
-     JS per action (see users.js's startActionOtp). -->
+<!-- Action Verification (OTP) Modal -->
 <div class="modal-overlay" id="action-otp-modal">
     <div class="modal" style="max-width:400px">
         <div class="modal-header">

@@ -1,19 +1,21 @@
-// ============================================================
-// PharmaTrack – Database Connection + Auto Schema Init
-// Version: 2.0.0
-// Author: PharmaTrack Development Team
-// Last Modified: April 14, 2026
-// Description: Handles MySQL database connections and automatic schema initialization
-// ============================================================
+// PharmaTrack - Database Connection + Auto Schema Init Version: 2.0.0 Author
 const mysql = require('mysql2/promise');
 const fs = require('fs').promises;
 const path = require('path');
 
-// ============================================================
 // SECURITY: Disable multipleStatements in production
-// ============================================================
 const isProduction = process.env.NODE_ENV === 'production';
 const DB_TIMEZONE = '+08:00';
+
+// TLS to the database: verified against Aiven's CA certificate when it is available
+const { buildSslOptions } = require('../utils/dbSsl');
+const dbSsl = buildSslOptions();
+if (dbSsl.verified) {
+    console.log('[DB] TLS: the database server certificate is VERIFIED against the CA certificate.');
+} else {
+    console.warn('[DB] WARNING: the connection is encrypted but the database server certificate is NOT verified.');
+    console.warn('     Save Aiven\'s CA certificate as backend/config/aiven-ca.pem to turn verification on.');
+}
 
 const pool = mysql.createPool({
     host: process.env.DB_HOST,
@@ -26,20 +28,14 @@ const pool = mysql.createPool({
     queueLimit: 0,
     timezone: DB_TIMEZONE,
     multipleStatements: !isProduction,  // DISABLED in production for safety
-    ssl: {
-        rejectUnauthorized: false  // Required for Aiven self-signed certificate chain
-    },
-    // Keep-alive prevents Aiven (and most managed MySQL free tiers) from silently
-    // closing idle TCP connections, which otherwise surface as ECONNRESET on the
-    // next query using that pooled connection.
+    ssl: dbSsl.ssl,
+    // Keep-alive prevents Aiven (and most managed MySQL free tiers) from silently...
     enableKeepAlive: true,
     keepAliveInitialDelay: 10000,
     connectTimeout: 20000
 });
 
-// Pool-level errors (e.g. a connection reset by the server while idle) must be
-// handled here — otherwise Node treats them as unhandled 'error' events and the
-// process can crash, or the dead connection can linger in the pool.
+// Pool-level errors (e.g. a connection reset by the server while idle) must be...
 pool.on('error', (err) => {
     console.error('[DB POOL ERROR]', err.code || err.message);
 });
@@ -71,7 +67,7 @@ async function initSchema() {
         const missingTables = criticalTables.filter(table => !existingTables.includes(table));
 
         if (missingTables.length > 0) {
-            // PRODUCTION SAFETY: Prevent schema init in production without explicit permission
+            // PRODUCTION SAFETY: Prevent schema init in production without explicit...
             if (isProduction) {
                 console.error('❌ [PRODUCTION] CRITICAL: Missing tables detected in production database!');
                 console.error('   Missing tables:', missingTables.join(', '));

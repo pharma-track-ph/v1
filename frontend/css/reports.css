@@ -1,6 +1,4 @@
-/* ============================================================
-   Reports Module Styles
-   ============================================================ */
+/* Reports Module Styles */
 
 .report-tabs {
     display:       flex;
@@ -176,8 +174,7 @@
 .expired-stat-card .stat-label { font-size: 0.78rem; color: var(--danger); font-weight: 600; }
 .expired-stat-card .stat-value { font-size: 1.4rem; font-weight: 700; color: var(--danger); }
 
-/* User filter (Admin and Owner): a dropdown inside each report's toolbar,
-   next to the date filters */
+/* User filter (Admin and Owner): a dropdown inside each report's toolbar */
 .user-filter-inline {
     display:     flex;
     align-items: center;
@@ -197,8 +194,7 @@
     max-width: 100%;
 }
 
-/* Partial void links: the tag under an order number in the Sales Report, and
-   the Full/Partial label in the Void Report's Details column */
+/* Partial void links: the tag under an order number in the Sales Report */
 .replaces-tag {
     font-size:   0.68rem;
     font-weight: 600;
@@ -218,8 +214,7 @@
 .void-type-partial { background: var(--warning-light, #fff3cd); color: #8a6d00; }
 .void-type-full    { background: var(--danger-light);           color: var(--danger); }
 
-/* "View Partial Void" popup: original order, voided items, voided amount and
-   the remaining total (opened from the Sales Report and the Void Report) */
+/* "View Partial Void" popup: original order, voided items */
 .pvv-meta {
     font-size:   0.82rem;
     line-height: 1.7;
@@ -239,10 +234,7 @@
     padding-top:    14px;
 }
 
-/* Three labelled blocks. All three amounts are the SAME size (1.25rem, bold) -- the blocks are
-   told apart by their label, colour and border: what the sale originally came to, what goes
-   back to the customer, and the total of the new receipt. Label colours are the darker
-   shades on purpose: they need to be readable on the tinted background, not just look right. */
+/* Three labelled blocks. */
 .pvv-total-row {
     display:         flex;
     justify-content: space-between;
@@ -296,8 +288,7 @@ body.dark-mode .pvv-remaining .pvv-amount    { color: var(--success); }
     .pvv-amount    { font-size: 1.15rem; }
 }
 
-/* Items tables in the Sales Report and the Void Report: each item's own Senior/PWD discount,
-   its line total after that discount, and a Total row at the bottom that adds the line totals. */
+/* Items tables in the Sales Report and the Void Report */
 .item-disc { color: #a71d2a; font-weight: 600; }
 body.dark-mode .item-disc { color: var(--danger); }
 .item-total-row td {
@@ -306,9 +297,7 @@ body.dark-mode .item-disc { color: var(--danger); }
     border-top:  2px solid var(--gray-300);
 }
 
-/* Register Report: the breakdown under a row's arrow -- the sum that ends on the Expected cash,
-   then what was counted, then the Cash In / Cash Out entries. The wrapper turns text wrapping back
-   ON because the table this sits in is white-space: nowrap. */
+/* Register Report: the breakdown under a row's arrow */
 .reg-detail   { white-space: normal; padding: 4px 0; }
 .reg-equation { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; margin: 2px 0 10px; }
 .reg-term {
@@ -335,11 +324,10 @@ body.dark-mode .item-disc { color: var(--danger); }
 .reg-facts   { font-size: 0.8rem; color: var(--secondary); margin-bottom: 12px; }
 body.dark-mode .reg-out .reg-term-value { color: var(--danger); }
 
-/* Pharmacists never receive cost or profit figures from the server;
-   this hides the columns and cards that would otherwise sit empty. */
+/* Pharmacists never receive cost or profit figures from the server */
 body.hide-cost .cost-col { display: none !important; }
 
-/* ── Expandable order-item rows (Sales Report) ─────────────── */
+/* Expandable order-item rows (Sales Report) */
 .btn-expand {
     background:    none;
     border:        1px solid var(--gray-300);
@@ -362,7 +350,7 @@ body.hide-cost .cost-col { display: none !important; }
     padding:    12px 16px;
 }
 
-/* ── Responsive ──────────────────────────────────────────── */
+/* Responsive */
 @media (max-width: 768px) {
     .user-filter-inline { flex: 1 1 100%; width: 100%; }
     .user-filter-inline select { flex: 1; min-width: 0; width: 100%; }

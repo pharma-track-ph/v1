@@ -1,26 +1,16 @@
-// ============================================================
-// PharmaTrack – inventory.js
-// Inventory CRUD (Brand Name + Item No. list), expiry highlighting,
-// CSV import
-//
-// "Product" in this file means a BRAND (e.g. "Paracetamol 500mg"),
-// rolled up server-side from one or more underlying batch rows -- see
-// backend/models/Product.js's "Brand-level grouping" section for how
-// that works. Each brand's individual restock batches are its "Item
-// No." entries, managed from inside the Edit modal.
-// ============================================================
+// PharmaTrack - inventory.js - Inventory CRUD (Brand Name + Item No. list)
 document.addEventListener('DOMContentLoaded', () => {
     if (!Auth.requireAuth(['admin', 'super_admin'])) return;
 
-    // ── State ────────────────────────────────────────────────
+    // State
     let products     = [];   // grouped brand summaries (main table)
-    let invSort       = null; // set once the table's sortable headers are wired up (see loadProducts)
+    let invSort       = null; // set once the table's sortable headers are wired up
     let invPaginate   = null; // set once, alongside invSort (see loadProducts)
     let editingId     = null; // representative row id of the brand being edited
     let editingName   = '';   // that brand's name (shown in the Remove confirmation)
     let currentItems  = [];   // Item No. entries for the brand currently open in the modal
 
-    // ── DOM References ───────────────────────────────────────
+    // DOM References
     const tbody          = document.getElementById('inv-tbody');
     const searchInput    = document.getElementById('inv-search');
     const categoryFilter = document.getElementById('inv-filter-cat');
@@ -31,8 +21,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const importInput    = document.getElementById('csv-import-input');
     const submitBtn      = document.getElementById('btn-submit-product');
 
-    // ── Initial load ─────────────────────────────────────────
-    // A stored category list ("Analgesic|Antipyretic") shown the way people read it
+    // Initial load - A stored category list ("Analgesic|Antipyretic") shown the way...
     function fmtCategory(value) {
         return String(value ?? '').split('|').map(s => s.trim()).filter(Boolean).join(', ');
     }
@@ -48,12 +37,7 @@ document.addEventListener('DOMContentLoaded', () => {
         return dp[a.length][b.length];
     }
 
-    // -- Category picker (Add / Edit Product) --
-    // A product can have several categories. They are ticked from the list of
-    // categories already in use; a brand-new one is typed in and added. Typing
-    // something that looks like an existing category (a typo, a plural) shows a
-    // "Did you mean...?" choice first. The chosen categories are kept, joined
-    // with |, in the hidden #field-category input, which the form already reads.
+    // Category picker (Add / Edit Product) - A product can have several categories.
     const CategoryPicker = {
         known:    [],   // every category currently in use
         selected: [],   // the ones ticked for THIS product
@@ -77,8 +61,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         has(name) { return this.selected.some(s => s.toLowerCase() === name.toLowerCase()); },
 
-        // The dropdown list (filtered by what is typed in the input above it, each
-        // category with a checkbox) and the chips for what is ticked.
+        // The dropdown list...
         render() {
             const list  = this.el('category-list');
             const typed = (this.el('field-new-category')?.value || '').trim().replace(/\s+/g, ' ');
@@ -127,9 +110,7 @@ document.addEventListener('DOMContentLoaded', () => {
             this.sync();
         },
 
-        // The existing category a typed name most likely means, or null. Names that
-        // differ only by capitals, spaces, punctuation or a plural "s" count as the
-        // same; longer names also tolerate a small typo.
+        // The existing category a typed name most likely means, or null.
         findSimilar(name) {
             const norm = (s) => s.toLowerCase().replace(/[^a-z0-9]/g, '').replace(/s$/, '');
             const target = norm(name);
@@ -242,9 +223,7 @@ document.addEventListener('DOMContentLoaded', () => {
     };
     CategoryPicker.init();
 
-    // -- Manage Categories (rename / merge / split) --
-    // Every change rewrites the category of every product that uses it, so each
-    // one goes through the typed "confirm" step.
+    // Manage Categories (rename / merge / split) - Every change rewrites...
     const ManageCategories = {
         rows: [],
 
@@ -327,8 +306,7 @@ document.addEventListener('DOMContentLoaded', () => {
             document.getElementById('mc-delete').disabled = true;
         },
 
-        // A small window asking for one or more names. Resolves to an array of
-        // clean names, or null if cancelled.
+        // A small window asking for one or more names.
         askNames({ title, intro, labels, initial = [], confirmText = 'Continue', allowMore = false }) {
             return new Promise((resolve) => {
                 let overlay = document.getElementById('category-name-modal');
@@ -400,16 +378,14 @@ document.addEventListener('DOMContentLoaded', () => {
                 await loadCategories();     // the filter list and the picker
                 loadProducts();
             } else if (res?.details?.blocked?.length) {
-                // refused: some product would be left with no category -- say which ones
+                // refused: some product would be left with no category - say which ones
                 await this.showBlocked(res.details.blocked, payload.names);
             } else {
                 Toast.show(res?.message || 'The change could not be applied.', 'error');
             }
         },
 
-        // The server refused a Delete because products would be left with no category. This is
-        // a notice with one OK button (not a toast that vanishes), so it is actually read, and
-        // it names the products that depend on the category.
+        // The server refused a Delete because products would be left with no category.
         async showBlocked(blocked, askedNames) {
             const asked = (askedNames || []).filter(Boolean);
             const n = blocked.length;
@@ -471,7 +447,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     };
 
-    // -- Import Results window: what happened to every row --
+    // Import Results window: what happened to every row
     const ImportResults = {
         show(result) {
             if (!document.getElementById('import-result-modal')) {
@@ -504,8 +480,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     };
 
-    // Inventory changes the server refused (a product or restock that could not be
-    // saved) show here, in plain words -- not only on the POS page.
+    // Inventory changes the server refused...
     SyncIssues.mount('inventory');
 
     const urlStatus = new URLSearchParams(window.location.search).get('status');
@@ -514,10 +489,7 @@ document.addEventListener('DOMContentLoaded', () => {
     loadProducts();
     const categoriesReady = loadCategories();
 
-    // Forecasting's "Restock" button links here with ?edit=<product id>: open that product's
-    // Edit window straight away (where Add Item No. is). The parameter is then removed from the
-    // address, so reloading the page does not open it again. Anything that is not a plain number
-    // is ignored.
+    // Forecasting's "Restock" button links here with ?edit=<product id>
     const urlEdit = new URLSearchParams(window.location.search).get('edit');
     if (urlEdit && /^\d+$/.test(urlEdit)) {
         const cleaned = new URL(window.location.href);
@@ -526,7 +498,7 @@ document.addEventListener('DOMContentLoaded', () => {
         Promise.resolve(categoriesReady).then(() => openEditModal(parseInt(urlEdit, 10)));
     }
 
-    // ── Filters ──────────────────────────────────────────────
+    // Filters
     searchInput?.addEventListener('input',    debounce(loadProducts, 300));
     categoryFilter?.addEventListener('change', loadProducts);
     statusFilter?.addEventListener('change',   loadProducts);
@@ -537,7 +509,7 @@ document.addEventListener('DOMContentLoaded', () => {
         getSubLabel: p => `${fmtCategory(p.category)} \u00b7 ${p.item_count} item${p.item_count === 1 ? '' : 's'}`
     });
 
-    // ── Toolbar ───────────────────────────────────────────────
+    // Toolbar
     document.getElementById('btn-add-product')?.addEventListener('click', openAddModal);
     document.getElementById('btn-manage-categories')?.addEventListener('click', () => ManageCategories.open());
     document.getElementById('btn-import-csv')?.addEventListener('click', () => importInput?.click());
@@ -553,7 +525,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!ok) Toast.show('Could not download the template. Check your connection.', 'error');
     });
 
-    // ── Export dropdown (Excel / PDF / Word) ─────────────────
+    // Export dropdown (Excel / PDF / Word)
     const exportToggleBtn = document.getElementById('btn-export-toggle');
     const exportMenu       = document.getElementById('export-menu');
 
@@ -581,13 +553,7 @@ document.addEventListener('DOMContentLoaded', () => {
         word:  { path: 'word',  filename: 'PharmaTrack_Inventory_Report.docx' }
     };
 
-    // Uses fetch (not a plain <a href>) since the endpoint needs the
-    // Authorization header — same pattern as backup.js's download and this
-    // page's own CSV import.
-    // NOTE: the Inventory export itself (exportController.js) still uses
-    // the old "Batch No./Product Name" per-row terminology and layout --
-    // that's the deferred rename/export-update work (see the handoff
-    // doc), not part of this restructure.
+    // Uses fetch (not a plain <a href>) since the endpoint needs the Authorization...
     async function downloadExport(format) {
         const info = EXPORT_FILE_INFO[format];
         if (!info) return;
@@ -603,14 +569,12 @@ document.addEventListener('DOMContentLoaded', () => {
             });
 
             if (!res.ok) {
-                // A real endpoint failure sends a JSON error body -- read
-                // it instead of a generic message, same fix as
-                // main.js's shared API.request().
+                // A real endpoint failure sends a JSON error body
                 let message = 'Export failed.';
                 try {
                     const errBody = await res.json();
                     if (errBody?.message) message = errBody.message;
-                } catch (e) { /* not JSON -- keep the generic message */ }
+                } catch (e) { /* not JSON - keep the generic message */ }
                 Toast.show(message, 'error');
                 return;
             }
@@ -625,20 +589,17 @@ document.addEventListener('DOMContentLoaded', () => {
             a.remove();
             URL.revokeObjectURL(url);
         } catch (err) {
-            // Genuine network-level failure (fetch() itself rejected) --
-            // distinct from the clean-but-unsuccessful response above.
+            // Genuine network-level failure (fetch() itself rejected) distinct...
             Toast.show('Export failed. Check your connection.', 'error');
         }
     }
 
-    // ── Modal close ───────────────────────────────────────────
+    // Modal close
     document.querySelectorAll('.btn-close-modal').forEach(btn => {
         btn.addEventListener('click', () => Modal.close('product-modal'));
     });
 
-    // ─────────────────────────────────────────────────────────
     // LOAD PRODUCTS
-    // ─────────────────────────────────────────────────────────
     async function loadProducts() {
         const search   = searchInput?.value.trim() || '';
         const category = categoryFilter?.value     || '';
@@ -655,30 +616,19 @@ document.addEventListener('DOMContentLoaded', () => {
         products = data.data;
         if (totalCount) totalCount.textContent = products.length;
 
-        // Sort wiring is done ONCE -- re-attaching on every load (search/
-        // filter changes all re-fetch from the server) would double up
-        // click listeners on the same header cells. getData (not a plain
-        // array) means this stays correct even though `products` gets
-        // REASSIGNED to a new array on every load above -- see TableSort's
-        // own comment for why a plain array reference would go stale here.
+        // Sort wiring is done ONCE
         if (!invSort) {
             invSort = TableSort.attach(document.querySelector('.inventory-table thead'), {
                 getData: () => products,
                 getValue: (row, key) => {
                     if (key === 'stock_quantity' || key === 'price') return parseFloat(row[key] || 0);
                     if (key === 'earliest_expiry_days_left') {
-                        // No expiry left to compare (every item already
-                        // expired) sorts to the end regardless of
-                        // direction -- null is handled that way by
-                        // TableSort itself already.
+                        // No expiry left to compare (every item already expired)...
                         return row.earliest_expiry ? parseInt(row.earliest_expiry_days_left) : null;
                     }
                     return (row[key] || '').toString().toLowerCase();
                 },
-                // Goes through Paginate now, not straight to renderTable --
-                // sorting changes ORDER, and pagination needs to reslice
-                // against that new order, not just redraw whatever page
-                // was already showing against the OLD order.
+                // Goes through Paginate now, not straight to renderTable sorting...
                 onSorted: () => invPaginate.resetToFirstPage()
             });
         }
@@ -692,20 +642,11 @@ document.addEventListener('DOMContentLoaded', () => {
             });
         }
 
-        // Always -- TableSort's resort() unconditionally triggers onSorted
-        // at the end regardless of whether a sort is currently active (see
-        // that function's own implementation), which is exactly what's
-        // needed here either way: on the very first load, this is what
-        // produces the FIRST render at all (attach() alone doesn't render
-        // without a defaultKey, which this doesn't use); on every later
-        // load (a fresh search/filter/Refresh), this re-sorts the new data
-        // (a no-op if nothing's sorted) and resets to page 1 against it.
+        // Always - TableSort's resort() unconditionally triggers onSorted at the end...
         invSort.resort();
     }
 
-    // ─────────────────────────────────────────────────────────
     // RENDER TABLE
-    // ─────────────────────────────────────────────────────────
     function renderTable(data) {
         if (!tbody) return;
 
@@ -755,9 +696,7 @@ document.addEventListener('DOMContentLoaded', () => {
         tbody.querySelectorAll('.btn-delete').forEach(btn => {
             btn.addEventListener('click', () => confirmDelete(parseInt(btn.dataset.id)));
         });
-        // Touch-device equivalent of the two buttons above -- see
-        // .kebab-trigger in global.css, only ever visible where hover isn't
-        // available.
+        // Touch-device equivalent of the two buttons above
         tbody.querySelectorAll('.kebab-trigger').forEach(btn => {
             const id = parseInt(btn.dataset.id);
             attachKebabMenu(btn, [
@@ -767,17 +706,7 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    // Exactly ONE badge. When a specific status filter is active, every
-    // row already matches that condition (see loadProducts) -- show THAT
-    // status as the badge, matching what was actually searched for, rather
-    // than some other status that also happens to apply (filtering "Low
-    // Stock" but the row's badge saying "Expiring in 3 Months" instead
-    // looks like the filter didn't work, even though it did). With no
-    // filter active ("All Status"), falls back to the single-pick
-    // hierarchy from Product._rollUpGroup on the backend. Either way this
-    // is the MAIN TABLE badge only -- the Edit modal's per-Item-No. tags
-    // (getItemTagHtml below) always show that item's own real state,
-    // completely independent of whatever filter is active out here.
+    // Exactly ONE badge.
     function getStatusBadge(p) {
         const activeFilter = statusFilter?.value || '';
         if (activeFilter) {
@@ -803,10 +732,7 @@ document.addEventListener('DOMContentLoaded', () => {
         return map[p.effective_status] || `<span class="badge badge-secondary">${p.effective_status}</span>`;
     }
 
-    // The red "Expired stock" tag beside the status badge. A product can have good stock AND
-    // some expired units still waiting to be removed (its badge then says In Stock, Low Stock,
-    // Expiring...), so a second, red tag says so. Not shown when the badge already says
-    // Expired (no filter and every batch expired, or the Expired filter is on).
+    // The red "Expired stock" tag beside the status badge.
     function getExpiredTag(p) {
         if (!p.has_expired_stock) return '';
         const activeFilter = statusFilter?.value || '';
@@ -817,8 +743,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function getEarliestExpiryCell(p) {
         if (!p.earliest_expiry) {
-            // Every Item No. is expired -- nothing "still good" to show a
-            // date for; the Expired badge already covers this case.
+            // Every Item No. is expired
             return '<span class="text-muted">—</span>';
         }
         const daysLeft = parseInt(p.earliest_expiry_days_left);
@@ -842,9 +767,7 @@ document.addEventListener('DOMContentLoaded', () => {
         return '';
     }
 
-    // ─────────────────────────────────────────────────────────
     // CATEGORIES
-    // ─────────────────────────────────────────────────────────
     async function loadCategories() {
         const data = await OfflineAPI.get('/inventory/alerts/summary');
         if (!data?.success) return;
@@ -861,9 +784,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (keep && cats.includes(keep)) categoryFilter.value = keep;
     }
 
-    // ─────────────────────────────────────────────────────────
     // MODALS
-    // ─────────────────────────────────────────────────────────
     function openAddModal() {
         editingId    = null;
         currentItems = [];
@@ -880,10 +801,7 @@ document.addEventListener('DOMContentLoaded', () => {
     async function openEditModal(id) {
         editingId = id;
 
-        // Full group detail (shared fields + every Item No.) — fetched
-        // fresh rather than reused from the table's summary row, since the
-        // table only carries the ROLLED-UP numbers, not the individual
-        // items this modal needs to list.
+        // Full group detail (shared fields + every Item No.)
         const data = await API.get(`/inventory/${id}`);
         if (!data?.success) {
             Toast.show('Failed to load product.', 'error');
@@ -916,9 +834,7 @@ document.addEventListener('DOMContentLoaded', () => {
         renderItemList();
         Modal.open('product-modal');
 
-        // Barcode preview — every product always has a real, persisted
-        // barcode value: this endpoint auto-generates and saves one
-        // server-side if the product doesn't have one yet.
+        // Barcode preview - every product always has a real, persisted barcode value
         const barcodeValueText = document.getElementById('barcode-value-text');
         if (barcodeValueText) barcodeValueText.textContent = 'Loading barcode…';
 
@@ -943,9 +859,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    // ─────────────────────────────────────────────────────────
     // ITEM NO. LIST (inside the Edit modal)
-    // ─────────────────────────────────────────────────────────
     function formatLongDate(dateStr) {
         if (!dateStr) return '—';
         const d = new Date(dateStr);
@@ -953,27 +867,18 @@ document.addEventListener('DOMContentLoaded', () => {
         return d.toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
     }
 
-    // Accepts either a full ISO datetime or a plain YYYY-MM-DD and returns
-    // just the date part, for pre-filling a <input type="date">.
+    // Accepts either a full ISO datetime or a plain YYYY-MM-DD and returns just...
     function toDateInputValue(dateStr) {
         if (!dateStr) return '';
         return String(dateStr).split('T')[0];
     }
 
     // An item that's expired OR fully depleted moves out of the active
-    // "Item No. (restock batches)" list and into "Removed Item No." below.
-    // That section's "Remove" button really removes it (see removeItemRow) -- though
-    // nothing is erased from the database.
     function itemNeedsRemoval(item) {
         return item.is_expired || item.stock_quantity <= 0;
     }
 
-    // Every item gets exactly one tag -- Expired and Out of Stock take
-    // priority over the expiry-window tags (an expired OR depleted item
-    // isn't meaningfully "expiring soon" anymore, it already IS the
-    // concern), "Good" is shown even when nothing else applies so every
-    // row consistently has a tag rather than some having one and others
-    // not.
+    // Every item gets exactly one tag
     function getItemTagHtml(item) {
         if (item.is_expired)          return '<span class="item-tag expired">Expired</span>';
         if (item.stock_quantity <= 0) return '<span class="item-tag out-of-stock">Out of Stock</span>';
@@ -988,11 +893,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const removedSection   = document.getElementById('removed-items-section');
         if (!activeContainer || !removedContainer) return;
 
-        // Split first, then number EACH list independently (Item No. 1, 2,
-        // 3... within the active list, and separately within the removed
-        // list) -- renumbering happens automatically here every time this
-        // re-renders, so an edit/add/delete/dismiss never leaves a gap in
-        // either list.
+        // Split first, then number EACH list independently
         const activeItems  = currentItems.filter(i => !itemNeedsRemoval(i));
         const removedItems = currentItems.filter(itemNeedsRemoval);
 
@@ -1065,11 +966,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    // "Remove" on an expired or empty Item No. -- the moment a stock record is matched against
-    // what is physically on the shelf. NOTHING IS ERASED: the server keeps the batch in the
-    // database flagged as removed, and writes an Audit Logs entry (who, product, Item No.,
-    // units, expiry date). The product itself stays in Inventory even if this was its only
-    // Item No.; the separate Delete button on the main table deletes the product.
+    // "Remove" on an expired or empty Item No.
     async function removeItemRow(itemId) {
         const item = currentItems.find(i => String(i.id) === String(itemId));
         if (!item) return;
@@ -1150,8 +1047,7 @@ document.addEventListener('DOMContentLoaded', () => {
             if (result.group_id) editingId = result.group_id;
             await reloadEditingItems();
         } else {
-            // e.g. "can't delete the last remaining Item No." — surfaced
-            // as-is from the backend.
+            // e.g. "can't delete the last remaining Item No."
             Toast.show(result?.message || 'Failed to delete item.', 'error');
         }
     }
@@ -1167,8 +1063,7 @@ document.addEventListener('DOMContentLoaded', () => {
         loadProducts(); // main table's rolled-up stock/status may have changed
     }
 
-    // "+ Add Item No." — small inline form, same shape as each item's own
-    // Edit form, posting to a different endpoint (addItem vs updateItem).
+    // "+ Add Item No." - small inline form, same shape as each item's own Edit form
     document.getElementById('btn-add-item')?.addEventListener('click', () => {
         const form = document.getElementById('add-item-form');
         form?.classList.remove('hidden');
@@ -1203,9 +1098,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
 
-    // ─────────────────────────────────────────────────────────
     // FORM SUBMIT (Add Product / Save shared fields)
-    // ─────────────────────────────────────────────────────────
     async function handleFormSubmit() {
         const alwaysRequired = ['name', 'category', 'price', 'cost'];
         for (const field of alwaysRequired) {
@@ -1217,8 +1110,7 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         }
 
-        // Add mode only: the very first Item No. (quantity + expiry) is
-        // required alongside the product's own details.
+        // Add mode only: the very first Item No. (quantity + expiry) is required...
         if (!editingId) {
             const stockEl  = document.getElementById('field-stock_quantity');
             const expiryEl = document.getElementById('field-expiry_date');
@@ -1302,16 +1194,12 @@ document.addEventListener('DOMContentLoaded', () => {
             Modal.close('product-modal');
             loadProducts();
         } else {
-            // Covers the "Brand Name already exists" conflict from the
-            // backend (see Product.createGroup/updateGroupFields) as well
-            // as ordinary validation failures.
+            // Covers the "Brand Name already exists" conflict from the backend
             Toast.show(result?.message || 'Save failed. Check all fields and try again.', 'error');
         }
     }
 
-    // ─────────────────────────────────────────────────────────
     // DELETE (whole brand)
-    // ─────────────────────────────────────────────────────────
     async function confirmDelete(id) {
         const p = products.find(x => x.id === id);
         if (!p) return;
@@ -1334,18 +1222,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    // ─────────────────────────────────────────────────────────
-    // IMPORT (CSV or Excel)
-    // Accepts either format -- an .xlsx upload is parsed server-side into
-    // the same shape a CSV would produce (see inventoryController.js's
-    // parseImportFile). Expected columns: Brand Name, Generic Name,
-    // Category, Supplier, Selling Price, Cost, Low Stock Threshold,
-    // Description, Stock Quantity, Expiry Date -- see "Download Template"
-    // above for a ready-made file with these exact headers. A brand that
-    // doesn't exist yet is created; an existing brand just gets a new
-    // Item No. (restock) from that row's Stock Quantity/Expiry Date --
-    // its other fields are never silently overwritten by the import.
-    // ─────────────────────────────────────────────────────────
+    // IMPORT (CSV or Excel) - Accepts either format
     async function handleCSVImport(e) {
         const file = e.target.files[0];
         if (!file) return;
@@ -1377,12 +1254,7 @@ document.addEventListener('DOMContentLoaded', () => {
             Toast.show(result.message, 'success');
             ImportResults.show(result);   // what happened to every row, and why any row failed
 
-            // Field mismatches aren't errors -- the import still applied
-            // the row's Stock Quantity/Expiry Date as a restock, it just
-            // left that brand's other fields (Category, Price, etc.)
-            // untouched because the file's values for them didn't match
-            // what's already stored. Surfaced as a second toast so it's
-            // visible without blocking/failing the import over it.
+            // Field mismatches aren't errors
             const mismatches = result.data?.field_mismatches || [];
             if (mismatches.length) {
                 Toast.show(
@@ -1407,7 +1279,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 });
 
-// ── Utilities ─────────────────────────────────────────────────
+// Utilities
 function escHtml(str) {
     return String(str ?? '')
         .replace(/&/g, '&amp;')

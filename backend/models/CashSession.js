@@ -1,19 +1,8 @@
-// ============================================================
-// CashSession Model
-// Tracks a cashier's drawer from Open Register to Close Register.
-// Cash-only (no GCash/Card — those were never actually wired up
-// in this system, so there's nothing to track for them).
-// ============================================================
+// CashSession Model - Tracks a cashier's drawer from Open Register to Close Register.
 const db = require('../config/db');
 
 const CashSession = {
-    /**
-     * Returns the cashier's currently OPEN session, or null.
-     * A cashier should only ever have at most one OPEN session at a time —
-     * enforced in the controller (transaction + row lock) before insert,
-     * not by a database constraint, since MySQL can't easily express
-     * "unique while status = OPEN" as a plain UNIQUE key.
-     */
+    /** Returns the cashier's currently OPEN session, or null. */
     findOpenByCashier: async (cashierId, connection = null) => {
         const executor = connection || db;
         const [rows] = await executor.query(
@@ -35,13 +24,7 @@ const CashSession = {
         return rows[0] || null;
     },
 
-    /**
-     * @param {number|null} openedApprovedBy - the admin/owner who approved
-     *   this cashier opening their register, or null when the requester is
-     *   already an admin/owner (self-authority, same pattern as Cash In/Out
-     *   and Close) or for historical sessions from before this feature
-     *   existed.
-     */
+    /** this cashier opening their register, or null */
     create: async (cashierId, openingCash, openedApprovedBy, connection) => {
         const executor = connection || db;
         const [result] = await executor.query(
@@ -52,13 +35,7 @@ const CashSession = {
         return result.insertId;
     },
 
-    /**
-     * Live totals for an OPEN session — computed on demand from the actual
-     * orders/cash_movements rows, never from a running counter. This means
-     * a void automatically and correctly drops out of "cash sales" with no
-     * extra bookkeeping (voided orders simply don't match status='completed'
-     * in the SUM below), and Cash In/Out are always reflected immediately.
-     */
+    /** Live totals for an OPEN session */
     getLiveTotals: async (sessionId, connection = null) => {
         const executor = connection || db;
 
@@ -100,9 +77,7 @@ const CashSession = {
         return result.affectedRows; // 0 means it was already closed (race condition)
     },
 
-    // Row-lock helper for the open/close race conditions — call inside a
-    // transaction to safely check-then-act without a second concurrent
-    // request sneaking in between the check and the write.
+    // Row-lock helper for the open/close race conditions
     lockOpenByCashier: async (cashierId, connection) => {
         const [rows] = await connection.query(
             `SELECT * FROM cash_sessions WHERE cashier_id = ? AND status = 'OPEN' LIMIT 1 FOR UPDATE`,
@@ -111,11 +86,7 @@ const CashSession = {
         return rows[0] || null;
     },
 
-    /**
-     * GET /api/reports/register — every session (open or closed), newest
-     * first, with human-readable names for the cashier and both approvers
-     * (opening and closing) instead of raw user IDs.
-     */
+    /** GET /api/reports/register */
     findAllForReport: async ({ startDate, endDate, cashierId = null, limit = 500, offset = 0 } = {}) => {
         let sql = `
             SELECT cs.*,
@@ -132,8 +103,7 @@ const CashSession = {
 
         if (startDate) { sql += ' AND DATE(cs.opened_at) >= ?'; params.push(startDate); }
         if (endDate)   { sql += ' AND DATE(cs.opened_at) <= ?'; params.push(endDate);   }
-        // Narrow to ONE person's register sessions (a Pharmacy Assistant's own,
-        // or the User filter an Admin/Owner picked)
+        // Narrow to ONE person's register sessions
         if (cashierId) { sql += ' AND cs.cashier_id = ?';       params.push(cashierId); }
 
         sql += ' ORDER BY cs.opened_at DESC LIMIT ? OFFSET ?';

@@ -1,9 +1,7 @@
-// ============================================================
-// PharmaTrack – main.js
+// PharmaTrack - main.js
 // Global utilities: Auth, Navigation, Sidebar, Toasts, API
-// ============================================================
 
-// ── Configuration ─────────────────────────────────────────────
+// Configuration
 const CONFIG = {
     API_BASE: (() => {
         const host = window.location.hostname;
@@ -19,12 +17,9 @@ const CONFIG = {
     TOAST_TIMEOUT: 4000
 };
 
-// ── API Client ─────────────────────────────────────────────────
+// API Client
 const API = {
-    /**
-     * Generic fetch wrapper that attaches the JWT Authorization header
-     * and handles common error responses.
-     */
+    /** Generic fetch wrapper that attaches the JWT Authorization header... */
     async request(endpoint, options = {}) {
         const token = Auth.getToken();
         const defaultHeaders = { 'Content-Type': 'application/json' };
@@ -47,42 +42,25 @@ const API = {
             const res  = await fetch(`${CONFIG.API_BASE}${endpoint}`, config);
             clearTimeout(timeoutId);
 
-            // Parsed regardless of status -- a 400/403/409/etc. still has
-            // a real {success:false, message:'...'} body the caller needs
-            // to read (e.g. "Current password is incorrect", "Email
-            // already in use"). Previously only a 200 OK ever got its body
-            // read; every other status threw and lost that message to the
-            // generic "Connection error" catch below -- which is exactly
-            // why a validation failure kept looking identical to an actual
-            // dead server. Falls back to null only if the body genuinely
-            // isn't JSON.
+            // Parsed regardless of status
             let data = null;
-            try { data = await res.json(); } catch (e) { /* not JSON -- data stays null */ }
+            try { data = await res.json(); } catch (e) { /* not JSON - data stays null */ }
 
             if (res.status === 401) {
-                // Token expired/invalid/deactivated -- see
-                // authMiddleware.js's verifyToken for exactly which. The
-                // server's own message is passed through to the login page
-                // rather than silently redirecting with no explanation.
+                // Token expired/invalid/deactivated
                 Auth.logout(data?.message || 'Your session expired. Please log in again.');
                 return null;
             }
 
             if (!res.ok) {
-                // A real HTTP error, but WITH a parsed body -- return it as-
-                // is so the caller can read result.message, instead of
-                // throwing and losing it to the generic toast below.
+                // A real HTTP error, but WITH a parsed body
                 return data || { success: false, message: `HTTP ${res.status}: ${res.statusText}` };
             }
 
             return data;
 
         } catch (err) {
-            // A GENUINE network-level failure -- fetch() itself rejected
-            // (dropped connection, DNS failure, CORS) or the abort timeout
-            // above fired. This is the actual "server unreachable" case,
-            // distinct from the clean-but-unsuccessful HTTP responses
-            // handled above.
+            // A GENUINE network-level failure
             if (err.name === 'AbortError') {
                 console.error(`[API Timeout] ${endpoint}: Request took too long`);
                 Toast.show('Server not responding. Check your connection.', 'error');
@@ -100,10 +78,7 @@ const API = {
     delete(endpoint)           { return this.request(endpoint, { method: 'DELETE' }); },
     patch(endpoint, body)      { return this.request(endpoint, { method: 'PATCH',  body: JSON.stringify(body) }); },
 
-    /**
-     * Upload a file (FormData). Does NOT set Content-Type manually;
-     * the browser sets it with the correct multipart boundary.
-     */
+    /** Upload a file (FormData). */
     async upload(endpoint, formData) {
         const token = Auth.getToken();
         const headers = {};
@@ -120,7 +95,7 @@ const API = {
     }
 };
 
-// ── Auth Module ────────────────────────────────────────────────
+// Auth Module
 const Auth = {
     getToken() { return localStorage.getItem(CONFIG.TOKEN_KEY); },
     getUser()  { return JSON.parse(localStorage.getItem(CONFIG.USER_KEY) || 'null'); },
@@ -130,12 +105,7 @@ const Auth = {
         localStorage.setItem(CONFIG.USER_KEY,  JSON.stringify(user));
     },
 
-    // Merges a partial update (e.g. { name, avatar } after a profile edit)
-    // into the locally-stored user object, so the header/sidebar reflect
-    // the change immediately without needing to log out and back in --
-    // the JWT itself is untouched (still valid, still has the OLD name
-    // baked in, which is fine since nothing server-side trusts the JWT's
-    // name for anything beyond display convenience).
+    // Merges a partial update (e.g. { name, avatar } after a profile edit)...
     updateStoredUser(patch) {
         const user = this.getUser();
         if (!user) return;
@@ -147,23 +117,14 @@ const Auth = {
     logout(reason) {
         localStorage.removeItem(CONFIG.TOKEN_KEY);
         localStorage.removeItem(CONFIG.USER_KEY);
-        // The POS category filter is remembered per browser tab; signing out puts it back
-        // to "All Categories" for whoever signs in next.
+        // The POS category filter is remembered per browser tab
         try { sessionStorage.removeItem('pharmatrack_pos_category'); } catch (e) { /* nothing to clear */ }
-        // sessionStorage (not a URL param) since this needs to survive
-        // exactly one navigation and then be gone -- login.html reads and
-        // immediately clears it on load, so it never lingers or reappears
-        // on a later, unrelated visit to the login page.
+        // sessionStorage (not a URL param) since this needs to survive exactly one...
         if (reason) sessionStorage.setItem('pharmatrack_logout_reason', reason);
         window.location.href = '../pages/login.html';
     },
 
-    /**
-     * Guard function — call on every protected page.
-     * Redirects to login if no token; enforces role constraints.
-     *
-     * @param {string[]} allowedRoles - roles permitted on this page
-     */
+    /** Guard function - call on every protected page. */
     requireAuth(allowedRoles = []) {
         const token = this.getToken();
         const user  = this.getUser();
@@ -186,10 +147,7 @@ const Auth = {
         return true;
     },
 
-    /**
-     * Returns true if the current user has at least the given role level.
-     * Hierarchy: cashier < admin < super_admin
-     */
+    /** Returns true if the current user has at least the given role level. */
     hasRole(minRole) {
         const hierarchy = { cashier: 0, admin: 1, super_admin: 2 };
         const user = this.getUser();
@@ -198,7 +156,7 @@ const Auth = {
     }
 };
 
-// ── Toast Notification System ──────────────────────────────────
+// Toast Notification System
 const Toast = {
     container: null,
 
@@ -212,12 +170,7 @@ const Toast = {
         }
     },
 
-    /**
-     * show(message, type, title)
-     * @param {string} message
-     * @param {'success'|'error'|'warning'|'info'} type
-     * @param {string} [title]
-     */
+    /** show(message, type, title) */
     show(message, type = 'info', title = '') {
         if (!this.container) this.init();
 
@@ -225,12 +178,19 @@ const Toast = {
 
         const toast = document.createElement('div');
         toast.className = `toast ${type}`;
-        toast.innerHTML = `
-            <div>
-                <div class="toast-title">${title || defaultTitles[type]}</div>
-                <div class="toast-message">${message}</div>
-            </div>
-        `;
+
+        // TEXT only, never HTML: a message can carry names typed by people
+        const titleEl = document.createElement('div');
+        titleEl.className   = 'toast-title';
+        titleEl.textContent = title || defaultTitles[type];
+
+        const messageEl = document.createElement('div');
+        messageEl.className   = 'toast-message';
+        messageEl.textContent = message == null ? '' : String(message);
+
+        const body = document.createElement('div');
+        body.append(titleEl, messageEl);
+        toast.appendChild(body);
 
         this.container.appendChild(toast);
 
@@ -241,11 +201,9 @@ const Toast = {
     }
 };
 
-// ── Philippine Peso Formatter ──────────────────────────────────
+// Philippine Peso Formatter
 const Fmt = {
-    /**
-     * currency(value) → "₱1,234.50"
-     */
+    /** currency(value) -> "₱1,234.50" */
     currency(value) {
         return '₱' + parseFloat(value || 0).toLocaleString('en-PH', {
             minimumFractionDigits: 2,
@@ -253,11 +211,7 @@ const Fmt = {
         });
     },
 
-    /**
-     * date(dateStr) → "Mar 15, 2024"
-     * Accepts ISO date string or Date object.
-     * Always displays in Philippines timezone (UTC+8)
-     */
+    /** date(dateStr) -> "Mar 15, 2024" - Accepts ISO date string or Date object. */
     date(dateStr) {
         if (!dateStr) return '—';
         const d = new Date(dateStr);
@@ -269,10 +223,7 @@ const Fmt = {
         });
     },
 
-    /**
-     * datetime(dateStr) → "Mar 15, 2024, 2:30 PM"
-     * Always displays in Philippines timezone (UTC+8)
-     */
+    /** datetime(dateStr) -> "Mar 15, 2024, 2:30 PM" - Always displays in... */
     datetime(dateStr) {
         if (!dateStr) return '—';
         const d = new Date(dateStr);
@@ -288,7 +239,7 @@ const Fmt = {
     }
 };
 
-// ── Sidebar Navigation ─────────────────────────────────────────
+// Sidebar Navigation
 const Nav = {
     init() {
         this.buildUserInfo();
@@ -302,12 +253,7 @@ const Nav = {
         const user = Auth.getUser();
         if (!user) return;
 
-        // Display-only label — the underlying role value stays 'super_admin'/
-        // 'cashier' everywhere in code/DB/JWT; this only changes what's shown
-        // on screen, same as AUDIT_ROLE_LABELS/ROLE_LABELS elsewhere in the app.
-        // Names come from the ONE shared list (ROLE_LABELS, further down): super_admin shows
-        // as "Owner", admin as "Admin", cashier as "Pharmacist". The DB value and every
-        // permission check are unchanged.
+        // Display-only label
         const roleLabelText = roleLabel(user.role);
 
         // Header user info
@@ -331,13 +277,7 @@ const Nav = {
         });
     },
 
-    /**
-     * Hide/show sidebar links based on the logged-in user's role.
-     * nav-items use data-roles attribute: e.g. data-roles="admin,super_admin"
-     * Also hides an entire section label (e.g. "Management", "Admin") when
-     * every role-gated item under it ends up hidden — so a cashier never
-     * sees an empty "Admin" heading with nothing accessible underneath.
-     */
+    /** Hide/show sidebar links based on the logged-in user's role. nav-items use... */
     applyRoleVisibility() {
         const user = Auth.getUser();
         if (!user) return;
@@ -350,8 +290,6 @@ const Nav = {
         });
 
         // Hide section labels whose entire group of role-gated items is hidden.
-        // Items with NO data-roles (like "Sign Out") are ignored for this check
-        // since they're always visible and shouldn't keep an empty label alive.
         document.querySelectorAll('.nav-section-label').forEach(label => {
             const ul = label.nextElementSibling;
             if (!ul || ul.tagName !== 'UL') return;
@@ -401,26 +339,15 @@ const Nav = {
         document.querySelectorAll('[data-action="logout"]').forEach(el => {
             el.addEventListener('click', (e) => {
                 e.preventDefault();
-                handleSignOut();   // the whole flow is below (register check, typed CONFIRM, audit)
+                handleSignOut();   // the whole flow is below...
             });
         });
     }
 };
 
-// -- Sign out (with the register check) --
-//   1) ask the server "may this person sign out?" -- a person with an OPEN register must close
-//      it first (everyone, whatever their role);
-//   2) the typed CONFIRM, with a warning inside it if anything made on this computer has not
-//      been sent to the server yet;
-//   3) the server checks the register AGAIN (a sign-out is not written to the Audit Logs), and
-//      only then is this browser's login thrown away.
-// If the server cannot be reached the person cannot sign out (the register cannot be checked).
-// Automatic sign-outs -- an expired login, or the sign-out after an Admin changes their own
-// role -- call Auth.logout directly and are not blocked.
+// Sign out (with the register check) - 1) ask the server "may this person sign out?"
 
-// Talks to the server directly instead of through API.request, so a refusal, a dead connection
-// and an expired login can each be told apart (API.request returns null for the last two, and
-// pops up its own error message).
+// Talks to the server directly instead of through API.request, so a refusal
 async function signOutRequest(method, path) {
     const token      = Auth.getToken();
     const controller = new AbortController();
@@ -455,8 +382,7 @@ async function handleSignOut() {
              ${s ? `<div class="dlg-lead"><div><div class="dlg-label">Opened</div><div>${Fmt.datetime(s.opened_at)}</div></div><div style="text-align:right"><div class="dlg-label">Opening cash</div><div>${Fmt.currency(s.opening_cash)}</div></div></div>` : ''}` };
     };
 
-    // Reads a server reply. True = the person may carry on; otherwise they have already been
-    // told why (or signed out, because their login had expired).
+    // Reads a server reply.
     const mayContinue = async (r) => {
         if (!r.reachable) {
             await notice('Cannot Sign Out Right Now', { message: "Can't check your register right now. Sign out is unavailable until the connection returns." });
@@ -472,11 +398,10 @@ async function handleSignOut() {
         return false;
     };
 
-    // 1) may they sign out? (an open register says no)
+    // 1) may they sign out?
     if (!(await mayContinue(await signOutRequest('GET', '/auth/sign-out-check')))) return;
 
-    // 2) typed CONFIRM. Anything made on this computer that has NOT reached the server yet stays
-    //    on this computer when you sign out -- say so inside the same window.
+    // 2) typed CONFIRM.
     const left   = await OfflineLeftovers.count(Auth.getUser()?.id);
     const unsent = left.sales + left.changes;
     let html = null;
@@ -500,16 +425,12 @@ async function handleSignOut() {
     });
     if (!confirmed) return;
 
-    // 3) the server checks the register AGAIN (it may have been opened in another tab since step
-    //    1), and only then does this browser forget the login.
+    // 3) the server checks the register AGAIN (it may have been opened in another...
     if (!(await mayContinue(await signOutRequest('POST', '/auth/logout')))) return;
     Auth.logout();
 }
 
-// -- What is still waiting on THIS computer --
-// Offline sales and changes are kept in the browser's own database until they reach the
-// server. This only COUNTS them (read-only, nothing is changed), straight from that
-// database, so it works on every page -- not just the two that load the offline layer.
+// What is still waiting on THIS computer - Offline sales and changes are kept...
 const OfflineLeftovers = {
     async count(userId) {
         const none = { sales: 0, changes: 0 };
@@ -532,7 +453,7 @@ const OfflineLeftovers = {
                         let sales = 0, changes = 0;
                         for (const item of getAll.result || []) {
                             if (String(item.endpoint || '').startsWith('/pos/checkout')) {
-                                // a sale belongs to whoever rang it up; one with no recorded owner counts as yours
+                                // a sale belongs to whoever rang it up
                                 const owner = item.meta?.cashier_id;
                                 if (owner == null || owner === userId) sales++;
                             } else {
@@ -547,12 +468,9 @@ const OfflineLeftovers = {
     }
 };
 
-// ── Confirmation Dialog ──────────────────────────────
-// Reusable Yes/No confirmation modal (progressive enhancement — injected
-// on first use, so no per-page HTML is needed). Returns a Promise<boolean>.
+// Confirmation Dialog - Reusable Yes/No confirmation modal
 const ConfirmDialog = {
-    // The button for each severity: info = blue, success = green, warning = amber, danger = red.
-    // (Colour only -- no icons.) The window's band, title and button all follow the severity.
+    // The button for each severity: info = blue, success = green, warning = amber
     BUTTON_CLASS: {
         info:    'btn btn-primary',
         success: 'btn btn-success',
@@ -591,14 +509,10 @@ const ConfirmDialog = {
             </div>`;
         document.body.appendChild(overlay);
 
-        // Only the Cancel/Confirm buttons close this now -- see the
-        // DOMContentLoaded handler's comment for why backdrop-click was
-        // removed everywhere.
+        // Only the Cancel/Confirm buttons close this now
     },
 
-    // Plain text -> readable paragraphs and bullet lists, so a message written as one
-    // string with line breaks no longer shows as a wall of text. Everything is escaped,
-    // so text from a product name or a person can never run as markup.
+    // Plain text -> readable paragraphs and bullet lists
     formatMessage(text) {
         const esc = (s) => String(s ?? '').replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
         const isBullet = (l) => /^[\u2022*-]\s+/.test(l);
@@ -619,14 +533,7 @@ const ConfirmDialog = {
         return out.join('');
     },
 
-    // `html` (optional) replaces the plain-text message with prepared markup -- an item
-    // list, a totals card, alert boxes -- so a confirmation reads at a glance. Whoever
-    // passes it must escape any user-supplied text (escHtml); `message` is the plain
-    // text used when no html is given (it is formatted into paragraphs and bullets).
-    // `severity` ('info' | 'success' | 'warning' | 'danger') sets the colour of the band,
-    // title and button; if it is not given, `danger` picks red or blue as before.
-    // `hideCancel` turns it into a plain notice with a single OK button (a refusal the person
-    // only needs to read), instead of a question.
+    // `html` (optional) replaces the plain-text message with prepared markup
     show({ title = 'Are you sure?', message = '', html = null, confirmText = 'Confirm', danger = true, severity = null, hideCancel = false } = {}) {
         this.ensureModal();
         const overlay = document.getElementById('confirm-dialog-modal');
@@ -661,14 +568,7 @@ const ConfirmDialog = {
     }
 };
 
-// -- Typed Confirm (two steps) --
-// ONE component for every destructive or sensitive action (deleting a product, an Item
-// No., a backup; restoring a backup; removing an expired batch; voiding a sale; changing
-// a role; dismissing an unsynced change). Step 1 is the usual confirmation popup.
-// Step 2 asks the person to TYPE the word CONFIRM -- exactly, in capital letters (only
-// spaces around it are ignored); the final button stays disabled until they have.
-// Resolves true only after BOTH steps.
-//   TypedConfirm.show({ title, message | html, confirmText: 'Delete', severity: 'danger' })
+// Typed Confirm (two steps) - ONE component for every destructive or sensitive action
 const TypedConfirm = {
     WORD: 'CONFIRM',
 
@@ -728,7 +628,7 @@ const TypedConfirm = {
         return new Promise((resolve) => {
             // EXACT match: only the capitals count, spaces around the word are ignored
             const matches  = () => input.value.trim() === TypedConfirm.WORD;
-            // right letters but wrong capitals ("confirm") -> say so instead of leaving it a mystery
+            // right letters but wrong capitals ("confirm") -> say
             const nearMiss = () => !matches() && input.value.trim().toUpperCase() === TypedConfirm.WORD;
 
             function cleanup(result) {
@@ -761,11 +661,7 @@ const TypedConfirm = {
     }
 };
 
-// ── Manager/Owner Approval Dialog ──────────────────────
-// Collects an admin/owner's email + password for actions a cashier can't
-// authorize alone (e.g. voiding a sale). Returns { email, password } on
-// submit, or null if cancelled. Does NOT change the logged-in session —
-// it's a one-off approval check, verified server-side per use.
+// Manager/Owner Approval Dialog - Collects an admin/owner's email + password...
 const ManagerApprovalDialog = {
     ensureModal() {
         if (document.getElementById('manager-approval-modal')) return;
@@ -857,12 +753,7 @@ const ManagerApprovalDialog = {
     }
 };
 
-// ── Alert Header Notification Dropdown ──────────────────────────
-// Replaces the old pair of static "Low Stock" / "Near Expiry" pills with a
-// single bell-style notification button (progressive enhancement — works
-// on every page without needing per-page HTML changes). Clicking a category
-// navigates to Inventory filtered by that status, but only for roles that
-// can actually access Inventory; other roles still see the counts.
+// Alert Header Notification Dropdown - Replaces the old pair of static "Low Stock" /...
 const AlertsNav = {
     INVENTORY_ROLES: ['admin', 'super_admin'],
 
@@ -870,8 +761,7 @@ const AlertsNav = {
         const headerRight = document.querySelector('.header-right');
         if (!headerRight) return;
 
-        // Remove the old static alert pills if present (any page that still
-        // has the legacy markup) — we replace them with the dropdown below.
+        // Remove the old static alert pills if present
         headerRight.querySelectorAll('.header-alert-btn').forEach(el => el.remove());
 
         const wrap = document.createElement('div');
@@ -956,11 +846,7 @@ const AlertsNav = {
     }
 };
 
-// ── Profile Dropdown (avatar) ───────────────────
-// Wraps the existing .header-user block with a click-to-open dropdown
-// (same interaction pattern as the notification bell) containing a dark
-// mode toggle and Edit Profile. Progressive enhancement -- works on every
-// page without per-page HTML changes.
+// Profile Dropdown (avatar) - Wraps the existing .header-user block...
 const ProfileNav = {
     init() {
         const headerRight = document.querySelector('.header-right');
@@ -1004,13 +890,13 @@ const ProfileNav = {
         DarkMode.syncToggleUI();
     },
 
-    // Shows the actual picture if the user has one; otherwise falls back
-    // to the original colored-circle-with-initial look.
+    // Shows the actual picture if the user has one
     renderAvatar(user) {
         const avatarEl = document.getElementById('header-avatar');
         if (!avatarEl) return;
-        if (user.avatar) {
-            avatarEl.style.backgroundImage    = `url(${user.avatar})`;
+        const avatarUrl = ProfileNav.safeAvatarUrl(user.avatar);
+        if (avatarUrl) {
+            avatarEl.style.backgroundImage    = `url(${avatarUrl})`;
             avatarEl.style.backgroundSize     = 'cover';
             avatarEl.style.backgroundPosition = 'center';
             avatarEl.textContent = '';
@@ -1018,16 +904,16 @@ const ProfileNav = {
             avatarEl.style.backgroundImage = '';
             avatarEl.textContent = (user.name || '?').charAt(0).toUpperCase();
         }
+    },
+
+    // A picture is only ever used when it is a small PNG / JPEG / WebP data URL
+    safeAvatarUrl(src) {
+        if (typeof src !== 'string' || src.length > 60000) return '';
+        return /^data:image\/(?:png|jpeg|webp);base64,[A-Za-z0-9+/]+={0,2}$/.test(src) ? src : '';
     }
 };
 
-// ── Dark Mode ──────────────────────────────────
-// A real, working toggle over the shared building blocks (cards, tables,
-// forms, modals, the header) since those are all built from the same
-// CSS custom properties -- but this is explicitly a nice-to-have, not an
-// exhaustive per-page audit, so a few page-specific hardcoded colors
-// (charts, some POS-specific styling) may not fully adapt. Preference
-// persists across pages/sessions via localStorage.
+// Dark Mode - A real, working toggle over the shared building blocks
 const DarkMode = {
     KEY: 'pharmatrack_dark_mode',
 
@@ -1052,12 +938,7 @@ const DarkMode = {
     }
 };
 
-// ── Edit Profile Modal ──────────────────────
-// Name + profile picture. Cashiers can change their picture but not their
-// name (field is disabled here, AND enforced again server-side regardless
-// of what gets sent -- see authController.js's updateProfile). The picture
-// is resized client-side to a small thumbnail via canvas before it's ever
-// sent, so the request stays small and the database column doesn't bloat.
+// Edit Profile Modal - Name + profile picture.
 const EditProfileModal = {
     pendingAvatar: null,
 
@@ -1103,7 +984,7 @@ const EditProfileModal = {
                     </div>
                     <div class="form-group">
                         <label class="form-label">New Password</label>
-                        <input type="password" id="edit-profile-new-pw" class="form-control" autocomplete="new-password" placeholder="Min. 8 characters">
+                        <input type="password" id="edit-profile-new-pw" class="form-control" autocomplete="new-password" placeholder="Min. 10 characters">
                     </div>
                     <div class="form-group">
                         <label class="form-label">Confirm New Password</label>
@@ -1139,10 +1020,7 @@ const EditProfileModal = {
 
         document.getElementById('btn-close-edit-profile')?.addEventListener('click', () => Modal.close('edit-profile-modal'));
 
-        // "Change Password" / "Change Email" reveal their fields. Only one is open
-        // at a time (the two changes can't be saved together), and hiding a
-        // section clears what was typed in it, so a hidden field can never be
-        // saved by accident (or filled by the browser's autofill).
+        // "Change Password" / "Change Email" reveal their fields.
         const pwBtn       = document.getElementById('btn-show-change-pw');
         const emailBtn    = document.getElementById('btn-show-change-email');
         const pwSection   = document.getElementById('profile-password-section');
@@ -1173,8 +1051,7 @@ const EditProfileModal = {
         pwBtn?.addEventListener('click', () => this.showSection(pwSection.classList.contains('hidden') ? 'password' : null));
         emailBtn?.addEventListener('click', () => this.showSection(emailSection.classList.contains('hidden') ? 'email' : null));
 
-        // The form now has Name, Password and Email sections, so let its body
-        // scroll on short screens instead of running off the bottom.
+        // The form now has Name, Password and Email sections
         const profileBody = overlay.querySelector('.modal-body');
         if (profileBody) {
             profileBody.style.maxHeight = 'calc(100dvh - 190px)';
@@ -1211,23 +1088,19 @@ const EditProfileModal = {
             }
             if (this.pendingAvatar) body.avatar = this.pendingAvatar;
 
-            // Password change goes through a SEPARATE OTP-gated flow (see
-            // ChangePasswordOtpModal below), not this same PUT -- only
-            // validated here, never sent as part of `body`.
+            // Password change goes through a SEPARATE OTP-gated flow
             const currentPw = document.getElementById('edit-profile-current-pw')?.value;
             const newPw     = document.getElementById('edit-profile-new-pw')?.value;
             const confirmPw = document.getElementById('edit-profile-confirm-pw')?.value;
             const wantsPasswordChange = !!(currentPw || newPw || confirmPw);
 
-            // Email change is its own OTP-gated flow (see ChangeEmailOtpModal
-            // below) -- the code goes to the CURRENT email on file.
+            // Email change is its own OTP-gated flow (see ChangeEmailOtpModal below)
             const newEmail     = (document.getElementById('edit-profile-new-email')?.value || '').trim().toLowerCase();
             const confirmEmail = (document.getElementById('edit-profile-confirm-email')?.value || '').trim().toLowerCase();
             const wantsEmailChange = !!(newEmail || confirmEmail);
 
             if (wantsEmailChange) {
-                // Both flows share one pending-code slot per person on the server,
-                // so doing both in one Save would silently drop the first.
+                // Both flows share one pending-code slot per person on the server
                 if (wantsPasswordChange) {
                     errEl.textContent = 'Change your email and your password one at a time. Clear one of them and save again.';
                     return;
@@ -1239,16 +1112,14 @@ const EditProfileModal = {
 
             if (wantsPasswordChange) {
                 if (!currentPw) { errEl.textContent = 'Enter your current password to set a new one.'; return; }
-                if (!newPw || newPw.length < 8) { errEl.textContent = 'New password must be at least 8 characters.'; return; }
+                if (!newPw || newPw.length < 10) { errEl.textContent = 'New password must be at least 10 characters.'; return; }
                 if (newPw !== confirmPw) { errEl.textContent = 'New passwords do not match.'; return; }
             }
 
             btn.disabled = true;
             btn.textContent = 'Saving…';
 
-            // Name/avatar (if anything actually changed) save immediately,
-            // same as before -- skipped entirely if the ONLY thing touched
-            // was the password.
+            // Name/avatar (if anything actually changed) save immediately
             let profileResult = { success: true };
             if (Object.keys(body).length) {
                 profileResult = await API.put('/auth/profile', body);
@@ -1267,10 +1138,7 @@ const EditProfileModal = {
                 Nav.buildUserInfo(); // re-render header/avatar immediately, no re-login needed
             }
 
-            // Cleared regardless of what happens next -- plaintext
-            // shouldn't linger in the DOM, and a retry (e.g. wrong current
-            // password) should require deliberately retyping, not silently
-            // resubmitting a leftover value.
+            // Cleared regardless of what happens next
             const currentPwEl = document.getElementById('edit-profile-current-pw');
             const newPwEl     = document.getElementById('edit-profile-new-pw');
             const confirmPwEl = document.getElementById('edit-profile-confirm-pw');
@@ -1279,24 +1147,17 @@ const EditProfileModal = {
             if (confirmPwEl) confirmPwEl.value = '';
 
             if (wantsPasswordChange) {
-                // Request the code BEFORE closing this modal or touching the
-                // OTP one at all -- if it fails (wrong current password,
-                // etc.), the error shows right here, and Edit Profile never
-                // closes in the first place. Only on success does the OTP
-                // modal take over.
+                // Request the code BEFORE closing this modal or touching the OTP one...
                 const otpResult = await ChangePasswordOtpModal.open(currentPw, newPw);
                 if (!otpResult.success) {
                     errEl.textContent = otpResult.message;
                     return;
                 }
-                // Other fields (if any) are already saved at this point --
-                // only the password itself is still pending, gated behind a
-                // code sent to YOUR OWN email (the now-open OTP modal).
+                // Other fields (if any) are already saved at this point only...
                 Modal.close('edit-profile-modal');
                 if (Object.keys(body).length) Toast.show('Other changes saved. Verify your password change to finish.', 'info');
             } else if (wantsEmailChange) {
-                // Request the code BEFORE closing this modal -- if the email is
-                // already taken (or sending fails), the error shows right here.
+                // Request the code BEFORE closing this modal
                 const emailResult = await ChangeEmailOtpModal.open(newEmail);
                 if (!emailResult.success) {
                     errEl.textContent = emailResult.message;
@@ -1316,8 +1177,9 @@ const EditProfileModal = {
     setPreview(src) {
         const el = document.getElementById('edit-profile-avatar-preview');
         if (!el) return;
-        if (src) {
-            el.style.backgroundImage = `url(${src})`;
+        const safeSrc = ProfileNav.safeAvatarUrl(src);
+        if (safeSrc) {
+            el.style.backgroundImage = `url(${safeSrc})`;
             el.textContent = '';
         } else {
             el.style.backgroundImage = '';
@@ -1325,10 +1187,7 @@ const EditProfileModal = {
         }
     },
 
-    // Downscales an uploaded image to at most maxW x maxH via a canvas,
-    // returning a compact JPEG data-URL string -- keeps the request (and
-    // the database column) small regardless of how large the original
-    // photo was.
+    // Downscales an uploaded image to at most maxW x maxH via a canvas
     resizeImage(file, maxW, maxH) {
         return new Promise((resolve, reject) => {
             const reader = new FileReader();
@@ -1363,8 +1222,7 @@ const EditProfileModal = {
         if (nameInput) nameInput.value = user?.name || '';
         this.setPreview(user?.avatar || '');
 
-        // Same reasoning as pendingAvatar above -- don't carry over
-        // whatever was typed (or left blank) from a previous cancelled visit.
+        // Same reasoning as pendingAvatar above
         const currentPwEl = document.getElementById('edit-profile-current-pw');
         const newPwEl     = document.getElementById('edit-profile-new-pw');
         const confirmPwEl = document.getElementById('edit-profile-confirm-pw');
@@ -1388,15 +1246,7 @@ const EditProfileModal = {
     }
 };
 
-// ── Change Password Verification (OTP) ──────
-// Second step of EditProfileModal's password-change flow above. A
-// deliberately SEPARATE modal/id from users.html's own #action-otp-modal
-// (used there for Add User/Change Password-for-others/Delete) -- that one
-// only exists on the User Management page, while this one needs to work
-// from EVERY page, since Edit Profile is available everywhere. Keeping
-// them fully separate (different id, different JS state) avoids any
-// collision between the two on users.html, where both would otherwise be
-// present at once.
+// Change Password Verification (OTP) - Second step of EditProfileModal's...
 const ChangePasswordOtpModal = {
     pendingCurrentPassword: null,
     pendingNewPassword:     null,
@@ -1484,14 +1334,7 @@ const ChangePasswordOtpModal = {
     async open(currentPassword, newPassword) {
         this.ensureModal();
 
-        // Sends the request FIRST, before the modal ever opens -- if the
-        // current password is wrong (or anything else the server checks
-        // fails), the person sees that error back where they typed it,
-        // never a code-entry screen for a code that was never actually
-        // sent. Returns a plain {success, message} so the caller
-        // (EditProfileModal) can decide what to do on failure -- this
-        // modal only ever becomes visible once a code has genuinely gone
-        // out.
+        // Sends the request FIRST, before the modal ever opens
         const result = await API.post('/auth/change-password-otp/request', { currentPassword, newPassword });
 
         if (!result?.success) {
@@ -1511,9 +1354,7 @@ const ChangePasswordOtpModal = {
         return { success: true };
     },
 
-    // Closing without confirming just abandons the pending change entirely
-    // -- the password itself was never written to the database, only
-    // verified (see requestChangePasswordOtp).
+    // Closing without confirming just abandons the pending change entirely...
     close() {
         Modal.close('change-password-otp-modal');
         if (this.resendCooldown) clearInterval(this.resendCooldown);
@@ -1539,6 +1380,8 @@ const ChangePasswordOtpModal = {
             if (this.resendCooldown) clearInterval(this.resendCooldown);
             this.pendingCurrentPassword = null;
             this.pendingNewPassword     = null;
+            // Changing the password ended every login made with the OLD one
+            if (result.token) localStorage.setItem(CONFIG.TOKEN_KEY, result.token);
             Modal.close('change-password-otp-modal');
             Toast.show(result.message || 'Password updated.', 'success');
         } else {
@@ -1547,7 +1390,7 @@ const ChangePasswordOtpModal = {
     }
 };
 
-// ── Alert Header Badges ──────────────────────────────────────────────────────
+// Alert Header Badges
 async function loadHeaderAlerts() {
     const alertsClient = typeof OfflineAPI !== 'undefined' ? OfflineAPI : API;
     const data = await alertsClient.get('/inventory/alerts/summary');
@@ -1556,22 +1399,19 @@ async function loadHeaderAlerts() {
     AlertsNav.setCounts(data.data);
 }
 
-// ── Modal Helpers ──────────────────────────────────────────────
+// Modal Helpers
 async function downloadAuthenticatedFile(url, fallbackFilename) {
     const token = Auth.getToken();
     try {
         const res = await fetch(url, { headers: token ? { 'Authorization': `Bearer ${token}` } : {} });
 
         if (!res.ok) {
-            // A real endpoint failure sends a JSON error body (same
-            // {success:false, message:'...'} shape as everything else) --
-            // read it instead of a generic message, same fix as
-            // API.request() above.
+            // A real endpoint failure sends a JSON error body
             let message = 'Download failed.';
             try {
                 const errBody = await res.json();
                 if (errBody?.message) message = errBody.message;
-            } catch (e) { /* not JSON -- keep the generic message */ }
+            } catch (e) { /* not JSON - keep the generic message */ }
             Toast.show(message, 'error');
             return false;
         }
@@ -1591,19 +1431,13 @@ async function downloadAuthenticatedFile(url, fallbackFilename) {
         URL.revokeObjectURL(objectUrl);
         return true;
     } catch (err) {
-        // Genuine network-level failure (fetch() itself rejected) --
-        // distinct from the clean-but-unsuccessful response handled above.
+        // Genuine network-level failure (fetch() itself rejected) distinct...
         Toast.show('Download failed. Check your connection.', 'error');
         return false;
     }
 }
 
-// -- Change Email Verification (OTP) --
-// Second step of EditProfileModal's email-change flow. Same shape as
-// ChangePasswordOtpModal above: the code request happens BEFORE this modal
-// opens (so a taken email or a send failure shows back in Edit Profile),
-// and the code is emailed to the person's CURRENT address. Closing without
-// confirming just abandons the change -- nothing was written to the database.
+// Change Email Verification (OTP) - Second step of EditProfileModal's email-change...
 const ChangeEmailOtpModal = {
     pendingNewEmail: null,
     resendCooldown:  null,
@@ -1687,8 +1521,7 @@ const ChangeEmailOtpModal = {
         }, 1000);
     },
 
-    // Returns { success, message } so EditProfileModal can show a failure in
-    // place; this modal only becomes visible once a code has really gone out.
+    // Returns { success, message } so EditProfileModal can show a failure in place
     async open(newEmail) {
         this.ensureModal();
 
@@ -1735,9 +1568,7 @@ const ChangeEmailOtpModal = {
             if (this.resendCooldown) clearInterval(this.resendCooldown);
             this.pendingNewEmail = null;
             Modal.close('change-email-otp-modal');
-            // Keep the stored profile in step so Edit Profile shows the new
-            // address immediately; the login token only carries the id, so it
-            // stays valid and nobody has to log in again.
+            // Keep the stored profile in step so Edit Profile shows the new address...
             if (result.email) Auth.updateStoredUser({ email: result.email });
             Toast.show(result.message || 'Email updated.', 'success');
         } else {
@@ -1746,29 +1577,18 @@ const ChangeEmailOtpModal = {
     }
 };
 
-// A product's stored category list ("Analgesic|Antipyretic") as people read it:
-// "Analgesic, Antipyretic". A product with one category reads exactly as before.
+// A product's stored category list ("Analgesic|Antipyretic") as people read it
 function fmtCategory(value) {
     return String(value ?? '').split('|').map(s => s.trim()).filter(Boolean).join(', ');
 }
 
-// The name people see for each stored role code. ONE place, so a rename is a one-line
-// change and every screen agrees. (The codes themselves -- cashier / admin / super_admin --
-// are what the database and the permission checks use; they never change.)
-//   super_admin = Owner (full access)   admin = Admin (limited)   cashier = Pharmacist
+// The name people see for each stored role code.
 const ROLE_LABELS = { super_admin: 'Owner', admin: 'Admin', cashier: 'Pharmacist' };
 function roleLabel(role) {
     return ROLE_LABELS[role] || String(role ?? '').replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
 }
 
-// -- Table header alignment --
-// A header must sit over its data: numbers right-aligned under a right-aligned
-// header, text left-aligned. Most tables give header and cells the same class, but
-// some never classed their headers (so a numeric header stayed at the left of its
-// right-aligned numbers), and tables are often built later by the page's own
-// script (reports, inventory, user lists, the items inside an expanded row). So
-// this looks at what each column's cells actually do and gives the header the
-// same alignment -- in every table, whenever it is (re)drawn.
+// Table header alignment - A header must sit over its data
 const TableAlign = {
     syncTable(table) {
         const head = table.tHead;
@@ -1806,8 +1626,7 @@ const TableAlign = {
     start() {
         this.syncAll();
         let timer = null;
-        // only watches for rows/tables being added or replaced (not class changes),
-        // so it can never trigger itself
+        // only watches for rows/tables being added or replaced (not class changes)
         new MutationObserver(() => {
             clearTimeout(timer);
             timer = setTimeout(() => this.syncAll(), 60);
@@ -1822,13 +1641,7 @@ if (document.readyState === 'loading') {
 }
 
 const Modal = {
-    // Every popup used to share one z-index, so which one painted on top
-    // depended on when its element happened to be created -- a dialog built
-    // earlier (Confirm, Approval) could end up UNDER a window opened later
-    // (e.g. Partial Void). Now each popup is raised above all the others at
-    // the moment it opens, so the newest one is always on top. Toasts sit
-    // far above (z-index 9999), so the counter is reset before it could
-    // ever reach them.
+    // Every popup used to share one z-index, so which one painted on top depended...
     _z: 2000,
 
     bringToFront(el) {
@@ -1851,15 +1664,7 @@ const Modal = {
     }
 };
 
-// ── Search-as-you-type Suggestions ─────────────────
-// A small, reusable autocomplete dropdown -- attach it to any search box
-// on a page that already has its full dataset loaded in memory (products,
-// users, logs), and it suggests matching items as you type, the same way
-// a search engine suggests queries, except scoped to whatever's actually
-// on that page instead of the web. Selecting a suggestion just fills the
-// box and re-fires its normal 'input' event, so it works with whatever
-// filtering logic that page already has -- no page needs to duplicate any
-// matching logic here.
+// Search-as-you-type Suggestions - A small, reusable autocomplete dropdown
 const SearchSuggest = {
     attach(inputEl, { getItems, getLabel, getSubLabel = null, maxResults = 8, onSelect = null }) {
         if (!inputEl) return;
@@ -1890,9 +1695,7 @@ const SearchSuggest = {
                 return;
             }
 
-            // Same relevance idea used server-side elsewhere in this app --
-            // a name that STARTS WITH the typed text ranks above one where
-            // it's merely buried in the middle somewhere.
+            // Same relevance idea used server-side elsewhere in this app a name...
             const starts = [];
             const contains = [];
             items.forEach(item => {
@@ -1918,9 +1721,7 @@ const SearchSuggest = {
             `).join('');
 
             dropdown.querySelectorAll('.search-suggest-item').forEach(btn => {
-                // mousedown (not click) fires BEFORE the input's blur event,
-                // so picking a suggestion doesn't get lost to blur closing
-                // the dropdown first.
+                // mousedown (not click) fires BEFORE the input's blur event
                 btn.addEventListener('mousedown', (e) => {
                     e.preventDefault();
                     selectItem(currentMatches[parseInt(btn.dataset.index)]);
@@ -1970,38 +1771,16 @@ const SearchSuggest = {
     }
 };
 
-// ── Escape helper shared by the table utilities below ───────────
-// Several pages already define their own local escHtml -- this global
-// fallback exists purely so TableSort/attachKebabMenu below don't force
-// every page to define one just to use them.
+// Escape helper shared by the table utilities below Several pages already define...
 function escHtmlGlobal(str) {
     return String(str ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
-// ── Generic Column Sort ─────────────────────────────
-// Attaches click-to-sort to a table's .sortable-col <th> elements
-// (data-sort-key identifies which field each one sorts by). Sorting
-// happens entirely CLIENT-SIDE against the already-loaded data array --
-// every table that uses this already loads its full result set into
-// memory up front (reports/inventory/users/audit all do), so there's no
-// extra network round-trip per sort. Handles both the visual state (the
-// arrow, .sort-active, .sort-col-tint on the header) and the actual
-// re-sort + re-render via the caller's onSorted callback -- the CALLER
-// still owns rendering, since only it knows how to turn a row of data
-// into <tr> markup, and how to tag the matching BODY cell in the active
-// column with .sort-col-tint (this helper only reaches the header).
+// Generic Column Sort - Attaches click-to-sort to a table's .sortable-col <th>...
 const TableSort = {
     attach(theadEl, { getData, data, getValue, onSorted, defaultKey = null, defaultDir = 'asc' }) {
         if (!theadEl) return null;
-        // getData() (a function) is preferred over a plain `data` array --
-        // pages that REASSIGN their array variable on every reload (e.g.
-        // `salesData = data.data` when switching date ranges) would
-        // otherwise leave this closure holding a stale reference to
-        // whatever array existed at attach-time, silently sorting an array
-        // nobody renders anymore after the first reload. `data` is still
-        // accepted directly for a table that truly never replaces its
-        // array (only ever mutates it in place), but getData is the safer
-        // default for new call sites.
+        // getData() (a function) is preferred over a plain `data` array pages...
         const resolveData = getData || (() => data);
         let currentKey = defaultKey;
         let currentDir = defaultDir;
@@ -2014,7 +1793,7 @@ const TableSort = {
                 arrow.textContent = '▲';
                 th.appendChild(arrow);
             }
-            th.setAttribute('tabindex', '0'); // keyboard-focusable, so :focus-visible's hint arrow (see global.css) actually reaches it
+            th.setAttribute('tabindex', '0'); // keyboard-focusable, so :focus-visible's hint arrow
 
             const activate = () => {
                 const key = th.dataset.sortKey;
@@ -2069,14 +1848,7 @@ const TableSort = {
 
         if (defaultKey) sortAndRender();
 
-        // Exposed so a render function can re-tag the active column's BODY
-        // cells with .sort-col-tint after rebuilding the table's rows (the
-        // header's own tint is already handled above, but the header and
-        // body are separate DOM subtrees -- this helper can't reach into
-        // markup the caller hasn't built yet). resort() lets a page
-        // re-apply the CURRENT sort after a fresh data load (e.g. changing
-        // a date range) without waiting for the user to click a header
-        // again -- sorts whatever resolveData() returns NOW.
+        // Exposed so a render function can re-tag the active column's BODY cells...
         return {
             getCurrentSort: () => ({ key: currentKey, dir: currentDir }),
             resort: () => sortAndRender()
@@ -2084,12 +1856,7 @@ const TableSort = {
     }
 };
 
-// ── Kebab Row-Action Menu (touch devices) ────────────────
-// Reusable trigger+dropdown for a row's actions on touch devices, where
-// hover-to-reveal (see .row-actions in global.css) doesn't work. Call
-// once per row when rendering: attachKebabMenu(triggerEl, [{label,
-// onClick, danger}]). Builds the dropdown lazily on open and wires
-// outside-click-to-close; only one menu is ever open at a time.
+// Kebab Row-Action Menu (touch devices) - Reusable trigger+dropdown for a row's...
 function attachKebabMenu(triggerEl, actions) {
     if (!triggerEl) return;
     triggerEl.addEventListener('click', (e) => {
@@ -2121,35 +1888,15 @@ function attachKebabMenu(triggerEl, actions) {
     });
 }
 
-// ── Generic Pagination ────────────────────────────
-// Client-side pagination controls + slicing, generalized from Audit
-// Logs' original implementation so every table sharing this now (Reports,
-// Inventory, User Management, Backup & Restore) gets identical controls
-// and behavior, not a per-page reimplementation. Purely a SLICING helper
-// -- the dataset is already fully loaded in memory by the time this runs
-// (same assumption TableSort makes), so changing pages never triggers a
-// network request. Same UI as Audit Logs always had: Prev/Next, up to 5
-// numbered page buttons with an ellipsis for the rest, and a "Showing
-// X-Y of Z" label -- and, per explicit direction, NO pagination controls
-// at all when the full dataset already fits on one page.
+// Generic Pagination - Client-side pagination controls + slicing
 const Paginate = {
-    /**
-     * @param {HTMLElement} containerEl - where the controls render (usually a <div class="pagination">)
-     * @param {object} opts
-     * @param {() => any[]} opts.getData - returns the CURRENT full (already filtered/sorted) dataset -- a function, not a plain array, for the same staleness reason TableSort's getData is -- see that comment above.
-     * @param {(pageItems: any[], pageNumber: number) => void} opts.onRender - called with just the current page's slice of rows; the caller still owns turning that into <tr> markup.
-     * @param {number} [opts.pageSize=25]
-     */
     attach(containerEl, { getData, onRender, pageSize = 25 }) {
         let currentPage = 1;
 
         function render() {
             const data = getData() || [];
             const totalPages = Math.max(1, Math.ceil(data.length / pageSize));
-            // Clamp -- a filter/search change can shrink the dataset out
-            // from under whatever page was previously showing (e.g. you
-            // were on page 4 of a search result, then typed something
-            // that narrows it to 2 pages).
+            // Clamp - a filter/search change can shrink the dataset out from under...
             if (currentPage > totalPages) currentPage = totalPages;
 
             const start     = (currentPage - 1) * pageSize;
@@ -2161,9 +1908,7 @@ const Paginate = {
         function renderControls(totalItems, totalPages) {
             if (!containerEl) return;
 
-            // No pagination UI at all when everything already fits on one
-            // page -- Prev/Next/"page 1 of 1" controls for a 12-row table
-            // would just be clutter with nothing to actually navigate.
+            // No pagination UI at all when everything already fits on one page
             if (totalPages <= 1) {
                 containerEl.innerHTML = '';
                 return;
@@ -2174,10 +1919,7 @@ const Paginate = {
 
             let html = `<button class="page-btn" id="pg-prev" ${currentPage === 1 ? 'disabled' : ''}>← Prev</button>`;
 
-            // Up to 5 page buttons around the current page, same as Audit
-            // Logs' original: always show page 1 and the last page, plus 2
-            // on either side of wherever you currently are, with an
-            // ellipsis filling any gap.
+            // Up to 5 page buttons around the current page
             const range = 2;
             for (let p = 1; p <= totalPages; p++) {
                 if (p === 1 || p === totalPages || (p >= currentPage - range && p <= currentPage + range)) {
@@ -2201,22 +1943,16 @@ const Paginate = {
         }
 
         return {
-            // Call whenever the underlying data actually changes (a fresh
-            // load, a filter, a sort) -- re-slices and re-renders at
-            // whatever page is currently selected, WITHOUT resetting to
-            // page 1 by itself (see resetToFirstPage for that).
+            // Call whenever the underlying data actually changes
             render,
-            // A NEW filter/search value (not just a re-sort of the same
-            // results) should generally jump back to page 1, since
-            // "page 3" of the old results has no obvious meaning against
-            // a differently-filtered set.
+            // A NEW filter/search value (not just a re-sort of the same results)...
             resetToFirstPage: () => { currentPage = 1; render(); },
             getCurrentPage: () => currentPage
         };
     }
 };
 
-// ── DOM Ready: Initialise everything ──────────────────────────
+// DOM Ready: Initialise everything
 document.addEventListener('DOMContentLoaded', () => {
     Toast.init();
 
@@ -2229,21 +1965,10 @@ document.addEventListener('DOMContentLoaded', () => {
         loadHeaderAlerts();
     }
 
-    // Modals now only close via their own X/Cancel/Close buttons -- an
-    // accidental click on the dimmed background used to close them too,
-    // which was easy to trigger by mistake mid-form and lose progress.
+    // Modals now only close via their own X/Cancel/Close buttons
 });
 
-// ── Repaint safety net for a known Chromium quirk ──────────
-// After certain window state changes (minimize → restore), Chromium can
-// leave a page's GPU-COMPOSITED layers stale — the underlying layout box
-// sizes are actually correct, but the rasterized pixels on screen aren't
-// refreshed to match. A layout reflow (recalculating element positions/
-// sizes) does NOT fix this, because it's a compositor-level staleness, not
-// a layout-level one — only a full page refresh reliably forces Chromium
-// to rebuild its composited layers from scratch. This nudges the same
-// effect without a reload: a near-invisible opacity change is a well-known
-// trick that forces Chromium to recomposite the whole page.
+// Repaint safety net for a known Chromium quirk - After certain window state changes
 function nudgeRepaint() {
     const body = document.body;
     const prevOpacity = body.style.opacity;

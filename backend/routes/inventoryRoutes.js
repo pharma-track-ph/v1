@@ -11,8 +11,7 @@ const {
 const { exportInventory } = require('../controllers/exportController');
 const { verifyToken, requireRole } = require('../middleware/authMiddleware');
 
-// Multer config for inventory import uploads -- accepts CSV or Excel now
-// (see inventoryController.js's parseImportFile), not CSV only.
+// Multer config for inventory import uploads
 const upload = multer({
     dest: 'uploads/',
     limits: { fileSize: 5 * 1024 * 1024 },  // 5MB
@@ -28,22 +27,16 @@ const upload = multer({
 router.get('/',               verifyToken, getProducts);
 router.get('/alerts/summary', verifyToken, getAlertSummary);
 
-// Manage Categories (Admin and Owner). Registered before '/:id' so "categories"
-// is never mistaken for a product id.
+// Manage Categories (Admin and Owner).
 router.get('/categories',          verifyToken, requireRole('admin'), listCategories);
 router.post('/categories',         verifyToken, requireRole('admin'), addCategory);
 router.post('/categories/rename',  verifyToken, requireRole('admin'), renameCategory);
 router.post('/categories/delete',  verifyToken, requireRole('admin'), deleteCategories);
 
-// Export route MUST come before '/:id' — otherwise Express would try to
-// match "export" itself as an :id parameter. :format is excel|pdf|word.
+// Export route MUST come before '/:id'
 router.get('/export/:format', verifyToken, requireRole('admin'), exportInventory);
 
-// Item No. management (restocking) — registered before '/:id' for the
-// same reason as /export above, though these specific paths (two path
-// segments) wouldn't actually collide with the one-segment '/:id' route
-// regardless of order; kept up here anyway to stay next to that same
-// ordering note.
+// Item No. management (restocking)
 router.post('/:id/items',       verifyToken, requireRole('admin'), addItem);
 router.put('/items/:itemId',    verifyToken, requireRole('admin'), updateItem);
 router.delete('/items/:itemId', verifyToken, requireRole('admin'), deleteItem);

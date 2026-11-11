@@ -7,13 +7,13 @@
     <link rel="icon" type="image/png" href="../images/pharmatrack-logo.png">
     <link rel="stylesheet" href="../css/global.css">
     <link rel="stylesheet" href="../css/dashboard.css">
-    <!-- Chart.js CDN -->
-    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+    <!-- Chart.js: hosted by PharmaTrack (frontend/vendor, exact pinned version) -->
+    <script src="../vendor/chart.umd.js"></script>
 </head>
 <body>
 <div class="app-container">
 
-    <!-- ── Sidebar ──────────────────────────────────────────── -->
+    <!-- Sidebar -->
     <aside class="sidebar" id="sidebar">
         <div class="sidebar-brand">
             <div class="brand-icon"><img src="../images/pharmatrack-logo.png" alt="PharmaTrack"></div>
@@ -69,7 +69,7 @@
 
     <div class="sidebar-overlay" id="sidebar-overlay"></div>
 
-    <!-- ── Main Wrapper ─────────────────────────────────────── -->
+    <!-- Main Wrapper -->
     <div class="main-wrapper">
         <header class="top-header">
             <div class="header-left">
@@ -100,7 +100,7 @@
         </header>
 
         <main class="page-content">
-            <!-- ── KPI Cards ──────────────────────────────────── -->
+            <!-- KPI Cards -->
             <div class="kpi-grid">
                 <div class="kpi-card kpi-clickable" id="kpi-card-sales" title="View in Reports">
                     <div class="kpi-info">
@@ -132,7 +132,7 @@
                 </div>
             </div>
 
-            <!-- ── Charts ─────────────────────────────────────── -->
+            <!-- Charts -->
             <div class="charts-grid">
                 <div class="chart-card">
                     <h3>Monthly Revenue (Last 12 Months)</h3>
@@ -148,7 +148,7 @@
                 </div>
             </div>
 
-            <!-- ── Recent Transactions ────────────────────────── -->
+            <!-- Recent Transactions -->
             <div class="recent-table-card">
                 <h3>Recent Transactions</h3>
                 <div class="table-container">

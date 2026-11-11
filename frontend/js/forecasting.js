@@ -1,28 +1,17 @@
-// ============================================================
-// PharmaTrack – forecasting.js
-// Demand Forecasting: 3 algorithms, user-friendly output
-//
-// Algorithms:
-//   1. Simple Average (Moving Average — 4-week window)
-//   2. Weighted Average (Simple Exponential Smoothing)
-//   3. Seasonal Forecast (Holt-Winters Triple Exponential Smoothing)
-// ============================================================
+// PharmaTrack - forecasting.js - Demand Forecasting: 3 algorithms
 
 document.addEventListener('DOMContentLoaded', async () => {
     if (!Auth.requireAuth(['admin', 'super_admin'])) return;
 
-    // ── State ────────────────────────────────────────────────
+    // State
     let currentAlgorithm = 'holt-winters';
     let forecastChart    = null;
     let allProducts      = [];
     let trendingProducts = [];
-    let lastForecastData = null; // { product, history } from the most recent /forecasting/data call
+    let lastForecastData = null; // { product, history } from the most recent...
     let isCalculating     = false;
 
-    // Per-algorithm forecast horizon options. Deliberately different per
-    // method — a flat method like Moving Average doesn't get meaningfully
-    // more accurate (or honest) by projecting further out, so longer
-    // horizons simply aren't offered for it.
+    // Per-algorithm forecast horizon options.
     const HORIZON_OPTIONS = {
         'moving-average': [
             { value: 1, label: '1 Week' },
@@ -47,7 +36,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     let selectedHorizon = 4; // weeks; 'custom' when the Custom option is chosen
 
-    // ── DOM ─────────────────────────────────────────────────
+    // DOM
     const productSelect      = document.getElementById('forecast-product');
     const productSearch      = document.getElementById('product-search');
     const compareBtn         = document.getElementById('btn-compare-all');
@@ -59,7 +48,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     const horizonCustomInput = document.getElementById('horizon-custom-input');
     const horizonConfidenceEl= document.getElementById('horizon-confidence-note');
 
-    // ── Algorithm explainer texts ─────────────────────────────
+    // Algorithm explainer texts
     const ALGO_INFO = {
         'moving-average': {
             title: 'Simple Average Method',
@@ -75,15 +64,13 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
     };
 
-    // ── Boot ────────────────────────────────────────────────
+    // Boot
     renderHorizonButtons(currentAlgorithm);
     await Promise.all([loadProducts(), loadTrendingProducts(), loadRestockSuggestions()]);
     setupEventListeners();
     checkUrlParams();
 
-    // ────────────────────────────────────────────────────────
     // LOAD PRODUCTS
-    // ────────────────────────────────────────────────────────
     async function loadProducts() {
         const data = await API.get('/forecasting/products');
         if (!data?.success) { Toast.show('Could not load product list. Please refresh the page.', 'error'); return; }
@@ -106,9 +93,6 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
 
     // Auto-selects the first product in whatever list is currently shown
-    // (respecting the active quick filter / search) and runs its forecast,
-    // so the page always has something meaningful on screen without the
-    // user needing to manually pick a product first.
     function selectFirstAndRun(products) {
         if (!productSelect) return;
         if (!products.length) {
@@ -120,14 +104,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         runForecast();
     }
 
-    // A dedicated combobox for #product-search -- clicking/focusing it
-    // shows EVERY product (like opening a normal dropdown), and typing
-    // floats whatever matches to the top WITHOUT removing anything else
-    // from the list, so it never looks like products "disappeared". This
-    // is deliberately its own small implementation rather than the shared
-    // SearchSuggest component (main.js), which hides non-matching items
-    // entirely and shows nothing at all until there's a query -- exactly
-    // the opposite of what's needed here.
+    // A dedicated combobox for #product-search
     function setupProductCombobox() {
         if (!productSearch) return;
 
@@ -144,11 +121,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             return String(str ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
         }
 
-        // Every product, always -- just reordered so a name that STARTS
-        // WITH the typed text ranks above one where it's merely buried in
-        // the middle, and everything else keeps its normal order after
-        // those matches (same relevance idea SearchSuggest itself uses,
-        // minus the "hide anything that doesn't match" part).
+        // Every product, always
         function orderedProducts(query) {
             const q = query.trim().toLowerCase();
             if (!q) return allProducts;
@@ -174,9 +147,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             `).join('');
 
             dropdown.querySelectorAll('.search-suggest-item').forEach(btn => {
-                // mousedown (not click) fires BEFORE the input's blur event,
-                // same reasoning as SearchSuggest -- otherwise blur hides the
-                // dropdown before the click ever registers.
+                // mousedown (not click) fires BEFORE the input's blur event
                 btn.addEventListener('mousedown', (e) => {
                     e.preventDefault();
                     selectProduct(items[parseInt(btn.dataset.index)]);
@@ -190,9 +161,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             productSearch.value = p.name;
             dropdown.classList.add('hidden');
 
-            // A direct pick from this dropdown isn't scoped to whichever
-            // quick filter happened to be active, so that filter no longer
-            // describes what's shown -- reset to "All" to match.
+            // A direct pick from this dropdown isn't scoped to whichever quick...
             document.querySelectorAll('.btn-filter').forEach(b => b.classList.remove('active'));
             document.querySelector('.btn-filter[data-filter="all"]')?.classList.add('active');
             renderProductOptions(allProducts);
@@ -214,9 +183,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         });
     }
 
-    // ────────────────────────────────────────────────────────
     // TRENDING PRODUCTS
-    // ────────────────────────────────────────────────────────
     async function loadTrendingProducts() {
         const data = await API.get('/forecasting/trending');
         if (data?.success) {
@@ -260,9 +227,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         });
     }
 
-    // ────────────────────────────────────────────────────────
     // RESTOCK SUGGESTIONS
-    // ────────────────────────────────────────────────────────
     async function loadRestockSuggestions() {
         const data = await API.get('/forecasting/restock-suggestions');
         if (data?.success) renderRestockGrid(data.data);
@@ -283,7 +248,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         grid.innerHTML = suggestions.slice(0, 6).map(s => `
             <div class="restock-item">
                 <div class="restock-info">
-                    <div class="restock-name">${s.name}</div>
+                    <div class="restock-name">${escHtmlGlobal(s.name)}</div>
                     <div class="restock-reason">${s.reason}</div>
                 </div>
                 <div class="restock-action">
@@ -296,15 +261,12 @@ document.addEventListener('DOMContentLoaded', async () => {
         `).join('');
     }
 
-    // ────────────────────────────────────────────────────────
     // FORECAST HORIZON SELECTOR
-    // ────────────────────────────────────────────────────────
     function renderHorizonButtons(algo) {
         if (!horizonButtonsEl) return;
         const options = HORIZON_OPTIONS[algo] || HORIZON_OPTIONS['holt-winters'];
 
-        // Keep the current selection if it's still valid for this algorithm;
-        // otherwise fall back to 4 weeks (present in every option set).
+        // Keep the current selection if it's still valid for this algorithm
         const stillValid = options.some(o => o.value === selectedHorizon);
         if (!stillValid) selectedHorizon = 4;
 
@@ -345,10 +307,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         return selectedHorizon;
     }
 
-    // Shows a plain-language warning when a longer Holt-Winters horizon is
-    // requested but the product doesn't yet have close to a year of real
-    // sales history behind it — the seasonal component is a guess in that
-    // case, not a learned pattern.
+    // Shows a plain-language warning when a longer Holt-Winters horizon is requested...
     function updateConfidenceNote() {
         if (!horizonConfidenceEl) return;
 
@@ -374,26 +333,19 @@ document.addEventListener('DOMContentLoaded', async () => {
         horizonConfidenceEl.classList.add('hidden');
     }
 
-    // ────────────────────────────────────────────────────────
     // EVENT LISTENERS
-    // ────────────────────────────────────────────────────────
     function setupEventListeners() {
         compareBtn?.addEventListener('click', compareAllMethods);
 
-        // Choosing a product directly from the dropdown runs its forecast
-        // immediately — there's no separate "Generate" step anymore.
+        // Choosing a product directly from the dropdown runs its forecast immediately
         productSelect?.addEventListener('change', () => {
             if (productSelect.value) runForecast();
         });
 
-        // The visible box is #product-search alone now -- see
-        // setupProductCombobox() for how it behaves (click to see every
-        // product, type to float matches to the top without hiding the
-        // rest).
+        // The visible box is #product-search alone now
         setupProductCombobox();
 
-        // Quick filters — auto-selects & forecasts the first product in
-        // whichever filtered list results.
+        // Quick filters - auto-selects & forecasts the first product in whichever...
         document.querySelectorAll('.btn-filter').forEach(btn => {
             btn.addEventListener('click', () => {
                 document.querySelectorAll('.btn-filter').forEach(b => b.classList.remove('active'));
@@ -402,7 +354,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             });
         });
 
-        // Algorithm card selection — auto-generates the forecast immediately
+        // Algorithm card selection - auto-generates the forecast immediately
         document.querySelectorAll('.algo-card').forEach(card => {
             card.addEventListener('click', () => {
                 document.querySelectorAll('.algo-card').forEach(c => c.classList.remove('active'));
@@ -411,10 +363,7 @@ document.addEventListener('DOMContentLoaded', async () => {
                 updateAlgoExplainer(currentAlgorithm);
                 renderHorizonButtons(currentAlgorithm);
 
-                // Advanced Parameters: alpha applies to both Exponential
-                // Smoothing and Holt-Winters, so the whole block shows for
-                // either -- only Moving Average has nothing to tune. The
-                // beta/gamma/season-length sub-group is Holt-Winters only.
+                // Advanced Parameters: alpha applies to both Exponential Smoothing...
                 const hwParams     = document.getElementById('hw-params');
                 const hwOnlyParams = document.querySelector('.hw-only-params');
                 const summaryText  = document.getElementById('hw-params-summary');
@@ -434,8 +383,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             });
         });
 
-        // Slider live labels — also re-run automatically since these only
-        // affect Holt-Winters math and that's the only time they're visible
+        // Slider live labels
         ['alpha', 'beta', 'gamma'].forEach(key => {
             const slider = document.getElementById(`forecast-${key}`);
             const label  = document.getElementById(`${key}-value`);
@@ -448,8 +396,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             if (currentAlgorithm === 'holt-winters' && productSelect?.value) runForecast();
         });
 
-        // Close modal -- only the X button closes this now, not clicking
-        // outside (consistent with every other modal in the app).
+        // Close modal - only the X button closes this now, not clicking outside
         closeModal?.addEventListener('click', () => modal?.classList.add('hidden'));
     }
 
@@ -478,14 +425,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         selectFirstAndRun(filtered);
     }
 
-    // ────────────────────────────────────────────────────────
-    // RUN FORECAST
-    // ────────────────────────────────────────────────────────
-    // Keeps the visible combobox text in sync with whatever's actually
-    // selected in the (now-hidden) #forecast-product, regardless of HOW
-    // the selection happened -- trending-card click, quick filter,
-    // direct search-pick, or the ?product= URL param -- since runForecast
-    // is the one place all of those funnel through.
+    // RUN FORECAST - Keeps the visible combobox text in sync with whatever's...
     function syncSearchInputToSelection() {
         if (!productSearch || !productSelect) return;
         const opt = productSelect.options[productSelect.selectedIndex];
@@ -524,9 +464,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
     }
 
-    // ────────────────────────────────────────────────────────
     // ALGORITHM DISPATCHER
-    // ────────────────────────────────────────────────────────
     function runAlgorithm(history, algorithm) {
         const sales   = history.map(h => h.total_qty);
         const periods = resolvePeriods();
@@ -539,7 +477,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
     }
 
-    // ── 1. Simple Moving Average ──────────────────────────────
+    // 1.
     function runMovingAverage(sales, periods, window = 4) {
         const fitted = sales.map((_, i) => {
             if (i < window) return null;
@@ -564,16 +502,19 @@ document.addEventListener('DOMContentLoaded', async () => {
         return { predictions, components: { fitted, levels: [], trends: [], seasonals: [] }, pattern, mape, method: 'Moving Average' };
     }
 
-    // ── 2. Simple Exponential Smoothing ─────────────────────
+    // 2.
     function runExponentialSmoothing(sales, periods) {
         const alpha = parseFloat(document.getElementById('forecast-alpha')?.value) || 0.3;
 
+        // One-step-ahead: the fitted value for week i is built ONLY from weeks...
         const fitted = [sales[0]];
         for (let i = 1; i < sales.length; i++) {
-            fitted.push(Math.round(alpha * sales[i] + (1 - alpha) * fitted[i - 1]));
+            fitted.push(Math.round(alpha * sales[i - 1] + (1 - alpha) * fitted[i - 1]));
         }
 
-        const last    = fitted[fitted.length - 1];
+        // The forecast for the NEXT week also uses the latest actual sales
+        const n       = sales.length;
+        const last    = Math.round(alpha * sales[n - 1] + (1 - alpha) * fitted[n - 1]);
         const absErrs = sales.map((v, i) => Math.abs(v - fitted[i]));
         const avgErr  = absErrs.reduce((s, v) => s + v, 0) / absErrs.length;
 
@@ -589,7 +530,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         return { predictions, components: { fitted, levels: [], trends: [], seasonals: [] }, pattern, mape, method: 'Exponential Smoothing' };
     }
 
-    // ── 3. Holt-Winters Triple Exponential Smoothing ─────────
+    // 3.
     function runHoltWinters(sales, periods) {
         const alpha = parseFloat(document.getElementById('forecast-alpha')?.value)       || 0.3;
         const beta  = parseFloat(document.getElementById('forecast-beta')?.value)        || 0.1;
@@ -605,7 +546,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             return result;
         }
 
-        // ── Initialise ───────────────────────────────────────
+        // Initialise
         let L = sales.slice(0, s).reduce((sum, v) => sum + v, 0) / s;
         let T = (sales.slice(s, s * 2).reduce((sum, v) => sum + v, 0) / s - L) / s;
 
@@ -644,7 +585,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             trends.push(Math.round(T * 100) / 100);
         }
 
-        // ── Forecast ─────────────────────────────────────────
+        // Forecast
         const absErrors = sales.map((v, i) => Math.abs(v - fitted[i]));
         const rmse      = Math.sqrt(absErrors.reduce((sum, e) => sum + e * e, 0) / absErrors.length);
 
@@ -673,9 +614,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         };
     }
 
-    // ────────────────────────────────────────────────────────
     // PATTERN ANALYSIS
-    // ────────────────────────────────────────────────────────
     function buildPattern(sales, fitted) {
         const nonZero  = sales.filter(v => v > 0);
         const baseline = nonZero.length
@@ -689,16 +628,12 @@ document.addEventListener('DOMContentLoaded', async () => {
         const maxSale       = Math.max(...sales);
         const seasonalSpike = baseline > 0 ? Math.round(((maxSale - baseline) / baseline) * 100) : 0;
         const maxIdx        = sales.indexOf(maxSale);
-        const quarter       = Math.floor((maxIdx / Math.max(sales.length, 1)) * 4);
-        const quarterLabels = ['Jan–Mar', 'Apr–Jun', 'Jul–Sep', 'Oct–Dec'];
-        const peakSeason    = `Peak: Q${quarter + 1} (${quarterLabels[quarter] || 'unknown'})`;
 
-        return { baseline, trend: trendPct, seasonalSpike, peakSeason };
+        // WHEN the peak happened is worked out from the real week labels...
+        return { baseline, trend: trendPct, seasonalSpike, peakIndex: maxIdx, peakUnits: maxSale, peakSeason: '' };
     }
 
-    // ────────────────────────────────────────────────────────
     // RENDER RESULTS
-    // ────────────────────────────────────────────────────────
     function renderForecastResults(product, history, result) {
         const { predictions, components, pattern, mape, method } = result;
 
@@ -714,6 +649,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         document.getElementById('chart-title').textContent =
             `${product.name}: ${method}`;
 
+        pattern.peakSeason = describePeak(pattern, history);   // real dates of the busiest week
         renderPatternInsights(pattern, mape);
         renderForecastChart(history, predictions, components.fitted);
         renderPredictionsGrid(predictions);
@@ -753,6 +689,39 @@ document.addEventListener('DOMContentLoaded', async () => {
                 </div>
             </div>
         `;
+    }
+
+    // "Oct 19-25, 2026" from a week label such as "Week of Oct 19, 2026"
+    const MONTH_NAMES = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    function weekRangeText(weekLabel) {
+        const label = String(weekLabel || '');
+        const m     = /([A-Za-z]{3})[A-Za-z]*\.?\s+(\d{1,2}),\s+(\d{4})/.exec(label);
+        const month = m ? MONTH_NAMES.findIndex(n => n.toLowerCase() === m[1].toLowerCase()) : -1;
+        if (!m || month < 0) return label.replace(/^Week of\s*/i, '') || 'unknown week';
+
+        const start = new Date(Date.UTC(+m[3], month, +m[2]));
+        const end   = new Date(start.getTime() + 6 * 86400000);
+        const fmt   = (d, withYear) => `${MONTH_NAMES[d.getUTCMonth()]} ${d.getUTCDate()}${withYear ? ', ' + d.getUTCFullYear() : ''}`;
+
+        if (start.getUTCFullYear() !== end.getUTCFullYear()) return `${fmt(start, true)} - ${fmt(end, true)}`;
+        if (start.getUTCMonth()    !== end.getUTCMonth())    return `${fmt(start)} - ${fmt(end)}, ${start.getUTCFullYear()}`;
+        return `${MONTH_NAMES[start.getUTCMonth()]} ${start.getUTCDate()}-${end.getUTCDate()}, ${start.getUTCFullYear()}`;
+    }
+
+    // The sentence under "+X% at peak": the REAL dates of the busiest week
+    function describePeak(pattern, history) {
+        const units = pattern && pattern.peakUnits;
+        if (!units || units <= 0 || !Array.isArray(history) || !history.length) return 'No sales recorded in this period';
+
+        const tied = [];
+        history.forEach((h, i) => { if (h.total_qty === units) tied.push(i); });
+        if (!tied.length) return 'No sales recorded in this period';
+
+        const latest   = weekRangeText(history[tied[tied.length - 1]].week_label);
+        const unitWord = units === 1 ? 'unit' : 'units';
+        return tied.length === 1
+            ? `Peak week: ${latest} (${units} ${unitWord})`
+            : `Peak: ${units} ${unitWord} in ${tied.length} weeks, most recently ${latest}`;
     }
 
     function renderPredictionsGrid(predictions) {
@@ -839,18 +808,11 @@ document.addEventListener('DOMContentLoaded', async () => {
         `;
     }
 
-    // How many of the most recently fetched weeks to actually PLOT on the
-    // chart -- separate from how many weeks the algorithm itself used
-    // (still the full `history` array passed in, always up to the 52
-    // weeks fetched in runForecast). Fewer weeks on screen just means a
-    // less crowded chart; it never changes what the forecast math was
-    // computed from.
+    // How many of the most recently fetched weeks to actually PLOT on the chart
     function resolveHistoryDisplayWeeks(periods) {
         if (periods <= 4)  return 12;
         if (periods <= 12) return 26;
-        // Holt-Winters Custom beyond 12 weeks -- scale a bit with the
-        // horizon so a long forecast still has enough context behind it,
-        // but never just dump the entire fetched dataset on screen.
+        // Holt-Winters Custom beyond 12 weeks
         return Math.min(52, Math.max(26, periods * 2));
     }
 
@@ -859,11 +821,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         if (!ctx) return;
         if (forecastChart) forecastChart.destroy();
 
-        // Trim to a readable recent window for DISPLAY only -- `history`
-        // and `predictions` themselves are already computed from the full,
-        // un-trimmed series (still up to 52 weeks, fetched once in
-        // runForecast), so this never changes what the algorithm actually
-        // used, only how much of it gets drawn.
+        // Trim to a readable recent window for DISPLAY only
         const displayWeeks   = Math.min(resolveHistoryDisplayWeeks(predictions.length), history.length);
         const trimStart      = history.length - displayWeeks;
         const displayHistory = history.slice(trimStart);
@@ -886,9 +844,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         const upperData = [...Array(displayHistory.length).fill(null), ...predictions.map(p => p.upperBound)];
         const lowerData = [...Array(displayHistory.length).fill(null), ...predictions.map(p => p.lowerBound)];
 
-        // A light vertical "TODAY" marker at the historical/forecast
-        // boundary, so that split is visually unambiguous on its own --
-        // not just implied by the Actual-Sales-vs-Forecast color change.
+        // A light vertical "TODAY" marker at the historical/forecast boundary
         const todayMarkerPlugin = {
             id: 'todayMarker',
             afterDraw(chart) {
@@ -984,10 +940,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             options: {
                 responsive: true,
                 maintainAspectRatio: false,
-                // Reserves room above the plot area specifically for the
-                // "TODAY" text the todayMarkerPlugin draws just above the
-                // chart -- without this, that text sits right at (or past)
-                // the canvas's own top edge and gets clipped.
+                // Reserves room above the plot area specifically for the "TODAY"...
                 layout: { padding: { top: 22 } },
                 interaction: { intersect: false, mode: 'index' },
                 plugins: {
@@ -1023,20 +976,12 @@ document.addEventListener('DOMContentLoaded', async () => {
                     x: {
                         ticks: {
                             maxRotation: 45,
-                            // Chart.js thins these out on its own once there are
-                            // more than ~10 ticks worth of room, evenly spacing
-                            // whichever it keeps -- this is what actually fixes
-                            // the "crowded with Week of … labels" problem, on
-                            // top of the display window already being much
-                            // smaller than the full fetched history.
+                            // Chart.js thins these out on its own once there...
                             autoSkip: true,
                             maxTicksLimit: 10,
                             font: { size: 10 },
                             callback: function(val) {
-                                // Concise on the axis ("Sep 8" instead of "Week of
-                                // Sep 8") -- the tooltip TITLE above still uses the
-                                // full original label untouched, since this
-                                // callback only affects what's drawn on the axis.
+                                // Concise on the axis...
                                 const label = this.getLabelForValue(val);
                                 return label.replace(/^Week of /, '');
                             }
@@ -1086,11 +1031,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         });
     }
 
-    // Shared by Weekly Demand Predictions and Historical Data -- renders
-    // `pageSize` rows at a time into the given tbody, with Prev/Next
-    // controls in the given pagination container. Keeps its own page
-    // state per call (a fresh call, e.g. from a new forecast, always
-    // starts back at page 1).
+    // Shared by Weekly Demand Predictions and Historical Data
     function renderPaginatedTable({ tbodyId, paginationId, rows, pageSize, rowRenderer }) {
         const tbody = document.getElementById(tbodyId);
         const paginationEl = document.getElementById(paginationId);
@@ -1122,17 +1063,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         renderPage();
     }
 
-    // ────────────────────────────────────────────────────────
-    // COMPARE ALL METHODS
-    // ────────────────────────────────────────────────────────
-    // Each method only ever forecasts as far as ITS OWN available range
-    // supports (see HORIZON_OPTIONS above) -- Moving Average tops out at 4
-    // weeks, Exponential Smoothing at 12, Holt-Winters at the full custom
-    // range (26). Forcing every method to the same horizon regardless of
-    // what it actually supports would mean either capping everything down
-    // to Moving Average's ceiling (hiding what the other two can really
-    // do) or projecting Moving Average further out than it was ever
-    // designed for.
+    // COMPARE ALL METHODS - Each method only ever forecasts as far as ITS OWN...
     const METHOD_MAX_PERIODS = { 'moving-average': 4, 'exponential': 12, 'holt-winters': 26 };
 
     async function compareAllMethods() {
@@ -1142,11 +1073,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         compareBtn.disabled    = true;
         compareBtn.textContent = 'Comparing…';
 
-        // Uses whatever forecast range is CURRENTLY selected on screen, so
-        // the comparison reflects the same horizon the person is already
-        // looking at -- clamped per method to what that method actually
-        // supports (see METHOD_MAX_PERIODS above), rather than a horizon
-        // hard-coded to 4 weeks regardless of the on-screen selection.
+        // Uses whatever forecast range is CURRENTLY selected on screen
         const requestedPeriods = resolvePeriods();
 
         try {
@@ -1201,35 +1128,17 @@ document.addEventListener('DOMContentLoaded', async () => {
         if (titleEl) titleEl.textContent = `Algorithm Comparison: ${product.name}`;
 
         // Same names shown on the algorithm cards earlier on this page
-        // (Moving Average / Exponential Smoothing / Holt-Winters) -- this
-        // table used to call them "Simple Average"/"Weighted Average"/
-        // "Seasonal Forecast" instead, which read as three DIFFERENT,
-        // unrelated methods rather than the exact three already selected
-        // from above.
         const methods = [
             { key: 'moving-average', name: 'Moving Average',        result: ma,  desc: 'Best for stable, predictable products' },
             { key: 'exponential',    name: 'Exponential Smoothing', result: ses, desc: 'Best for products with gradual growth/decline' },
-            // No "(recommended)" here -- the BEST FIT badge below already
-            // says which method actually won for THIS product; hardcoding
-            // a recommendation onto Holt-Winters regardless of the real
-            // result would contradict that badge whenever a different
-            // method scores better (as seen above: Exponential Smoothing).
+            // No "(recommended)" here
             { key: 'holt-winters',   name: 'Holt-Winters',          result: hw,  desc: 'Best for seasonal patterns' }
         ];
 
         // Only methods with a measurable MAPE can be meaningfully compared.
-        // A null MAPE means "not enough sales history to score" -- not "0%
-        // error" -- and must never accidentally win "best fit" through JS's
-        // null-coerces-to-0 comparison quirk (null < 5 is true!).
         const scorable = methods.filter(m => m.result.mape !== null);
 
-        // A "best" pick is only meaningful if at least one method actually
-        // scored reasonably well. When every method's error is this high
-        // (>=90%), the underlying sales history is too sparse for the
-        // comparison to mean anything -- reduce() would still pick ONE as
-        // "BEST FIT" in that case (usually just whichever comes first when
-        // every score ties), which looks like a real recommendation but
-        // isn't one.
+        // A "best" pick is only meaningful if at least one method actually scored...
         const bestMethod = (scorable.length && scorable.some(m => m.result.mape < 90))
             ? scorable.reduce((best, m) => m.result.mape < best.result.mape ? m : best, scorable[0])
             : null;
@@ -1334,9 +1243,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         `;
     }
 
-    // ────────────────────────────────────────────────────────
     // HELPERS
-    // ────────────────────────────────────────────────────────
     function calcMAPE(actual, fitted) {
         let sum = 0, count = 0;
         for (let i = 0; i < Math.min(actual.length, fitted.length); i++) {
@@ -1345,9 +1252,7 @@ document.addEventListener('DOMContentLoaded', async () => {
                 count++;
             }
         }
-        // No comparable weeks means accuracy genuinely cannot be measured —
-        // return null rather than 0, since 0% would misleadingly imply a
-        // perfect score when really there was nothing to score at all.
+        // No comparable weeks means accuracy genuinely cannot be measured
         return count === 0 ? null : parseFloat(((sum / count) * 100).toFixed(1));
     }
 

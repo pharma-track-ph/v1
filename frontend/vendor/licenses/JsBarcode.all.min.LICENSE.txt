@@ -1,0 +1,6 @@
+jsbarcode 3.12.3
+License: MIT
+Author: Johan Lindell
+Home: https://github.com/lindell/JsBarcode#readme
+
+(This package does not include a LICENSE file; the details above come from its package.json.)

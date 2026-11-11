@@ -1,7 +1,4 @@
-// ============================================================
-// Auth Controller
-// Handles login, token refresh, user management (Admin+)
-// ============================================================
+// Auth Controller - Handles login, token refresh, user management (Admin+)
 const jwt     = require('jsonwebtoken');
 const crypto  = require('crypto');
 const bcrypt  = require('bcryptjs');
@@ -13,11 +10,21 @@ const { exportReport, formatShortDateTime } = require('../utils/reportExporter')
 const EmailChangeOtpStore = require('../utils/emailChangeOtpStore');
 const ActionOtpStore      = require('../utils/actionOtpStore');
 const CashSession         = require('../models/CashSession');
+const { plainTextProblem, passwordProblem, avatarProblem } = require('../utils/inputGuards');
+const { passwordVersion } = require('../utils/passwordVersion');
+const loginThrottle = require('../utils/loginThrottle');
 
-/**
- * POST /api/auth/login
- * Authenticates user and returns a JWT.
- */
+// The login token: who you are, plus a fingerprint of the password it was issued under
+const issueToken = (user) => jwt.sign(
+    { id: user.id, role: user.role, name: user.name, pwv: passwordVersion(user.password) },
+    process.env.JWT_SECRET,
+    { expiresIn: process.env.JWT_EXPIRES_IN || '8h' }
+);
+
+const lockedMessage = (seconds) =>
+    `Too many failed attempts. Please try again in ${Math.max(1, Math.ceil(seconds / 60))} minute(s).`;
+
+/** POST /api/auth/login - Authenticates user and returns a JWT. */
 const login = async (req, res, next) => {
     try {
         const { email, password } = req.body;
@@ -26,9 +33,22 @@ const login = async (req, res, next) => {
             return res.status(400).json({ success: false, message: 'Email and password are required.' });
         }
 
-        const user = await User.findByEmail(email.toLowerCase().trim());
+        const emailKey = String(email).toLowerCase().trim();
+
+        // Locked after too many wrong passwords for this email?
+        const lock = loginThrottle.check(emailKey);
+        if (lock.locked) {
+            return res.status(429).json({ success: false, message: lockedMessage(lock.retryAfterSeconds) });
+        }
+
+        const user = await User.findByEmail(emailKey);
 
         if (!user) {
+            // counted too, so the replies never reveal which emails have an account
+            const attempt = loginThrottle.fail(emailKey);
+            if (attempt.justLocked) {
+                return res.status(429).json({ success: false, message: lockedMessage(attempt.retryAfterSeconds) });
+            }
             return res.status(401).json({ success: false, message: 'Invalid email or password.' });
         }
 
@@ -36,14 +56,17 @@ const login = async (req, res, next) => {
 
         if (!isMatch) {
             await logAudit(user.id, 'LOGIN_FAILED', 'users', user.id, { email }, req.ip);
+            const attempt = loginThrottle.fail(emailKey);
+            if (attempt.justLocked) {
+                await logAudit(user.id, 'LOGIN_LOCKED', 'users', user.id,
+                    { email, minutes: Math.round(attempt.retryAfterSeconds / 60) }, req.ip);
+                return res.status(429).json({ success: false, message: lockedMessage(attempt.retryAfterSeconds) });
+            }
             return res.status(401).json({ success: false, message: 'Invalid email or password.' });
         }
 
-        const token = jwt.sign(
-            { id: user.id, role: user.role, name: user.name },
-            process.env.JWT_SECRET,
-            { expiresIn: process.env.JWT_EXPIRES_IN || '8h' }
-        );
+        loginThrottle.clear(emailKey);
+        const token = issueToken(user);
 
         await logAudit(user.id, 'LOGIN_SUCCESS', 'users', user.id, {}, req.ip);
 
@@ -65,14 +88,7 @@ const login = async (req, res, next) => {
     }
 };
 
-/**
- * GET /api/auth/me
- * Returns currently authenticated user profile -- a REAL, fresh database
- * lookup (not just echoing back whatever's in the JWT), since the JWT
- * deliberately doesn't carry the avatar (a base64 image would bloat every
- * single request's Authorization header) and may be stale on name if a
- * profile update happened since the token was issued.
- */
+/** GET /api/auth/me - Returns currently authenticated user profile */
 const getMe = async (req, res, next) => {
     try {
         const user = await User.findById(req.user.id);
@@ -81,9 +97,7 @@ const getMe = async (req, res, next) => {
     } catch (err) { next(err); }
 };
 
-/**
- * GET /api/auth/users  [Admin+]
- */
+/** GET /api/auth/users [Admin+] */
 const getAllUsers = async (req, res, next) => {
     try {
         const users = await User.findAll();
@@ -91,30 +105,13 @@ const getAllUsers = async (req, res, next) => {
     } catch (err) { next(err); }
 };
 
-/**
- * PUT /api/auth/users/:id  [Admin+]
- *
- * Manages Role and Active-status ONLY -- name, email and password are not
- * editable through this endpoint. Self-edit: you cannot change your own Role
- * or Active-status
- * -- letting someone change their own role or deactivate their own account
- * risks locking themselves out with no one else able to undo it in the
- * moment. This mirrors the frontend's users.js, which disables those two
- * fields when editing your own row, but it's enforced here too so it can't
- * be bypassed with a direct API call.
- *
- * Other-owner accounts remain fully protected regardless (unchanged).
- */
+/** PUT /api/auth/users/:id [Admin+] - Manages Role and Active-status ONLY */
 const updateUser = async (req, res, next) => {
     try {
         const { id } = req.params;
         const { role, is_active } = req.body;
 
-        // Name, email and password are NOT editable through this endpoint any
-        // more: an admin only manages Role and Account Status here. Passwords
-        // change only through the OTP-verified flows, and each person changes
-        // their own email from Edit Profile. Anything else sent in the body
-        // is ignored.
+        // Name, email and password are NOT editable through this endpoint any more
         const VALID_ROLES = ['super_admin', 'admin', 'cashier'];
         if (!VALID_ROLES.includes(role)) {
             return res.status(400).json({ success: false, message: 'A valid role is required.' });
@@ -125,32 +122,17 @@ const updateUser = async (req, res, next) => {
         }
         const isSelf = parseInt(id) === req.user.id;
 
-        // Always fetched -- needed below regardless of isSelf, since email
-        // changes are deliberately IGNORED here (see comment on the email
-        // line) and we need the target's CURRENT email to keep it unchanged.
+        // Always fetched - needed below regardless of isSelf
         const target = await User.findById(id);
         if (!target) {
             return res.status(404).json({ success: false, message: 'User not found.' });
         }
 
-        // Self-edit: an Admin may change their OWN role or status only while at
-        // least 2 Admin accounts are active (enforced atomically below, so it
-        // cannot be bypassed by an API call or by two Admins acting at once).
-        // Every update that would take an active Admin out of the Admin role
-        // or deactivate them goes through the same guard.
+        // Self-edit: an Admin may change their OWN role or status only
         if (!isSelf) {
-            // Owner (super_admin) accounts can only be managed by the account
-            // holder themselves, never by another owner. NOTE: as of the
-            // Owner/Admin label swap, the super_admin DB value now displays
-            // as "Admin" -- this message's WORDING was updated to match,
-            // even though the underlying check (role === 'super_admin')
-            // and who it applies to are completely unchanged.
+            // Owner (super_admin) accounts can only be managed by the account holder...
             if (target.role === 'super_admin') {
-                // The ONE thing another Admin may do to an Admin account: reactivate
-                // a DEACTIVATED one (role stays Admin, status goes back to Active).
-                // Without this, an Admin who deactivated themselves -- which is
-                // allowed while another Admin exists -- would be locked out for
-                // good. Everything else about an Admin account stays with its holder.
+                // The ONE thing another Admin may do to an Admin account
                 const isReactivation = !target.is_active && role === 'super_admin' && activeFlag === 1;
                 if (!isReactivation) {
                     return res.status(403).json({
@@ -161,12 +143,7 @@ const updateUser = async (req, res, next) => {
             }
         }
 
-        // Email is deliberately NOT accepted here anymore -- it can only be
-        // changed via the dedicated OTP-verified flow below
-        // (requestEmailChangeOtp / confirmEmailChangeOtp), which sends a code
-        // to the PERSON MAKING THE CHANGE before it takes effect. Even if a
-        // client sends a different email in this request body, the target's
-        // existing email is kept untouched here.
+        // Email is deliberately NOT accepted here anymore
         const roleChanged   = role !== target.role;
         const statusChanged = activeFlag !== (target.is_active ? 1 : 0);
 
@@ -174,12 +151,7 @@ const updateUser = async (req, res, next) => {
             return res.json({ success: true, message: 'No changes to save.' });
         }
 
-        // Would this update take an ACTIVE Admin out of the Admin role, or
-        // deactivate them? If so the system must still have another active
-        // Admin afterwards. The count and the update run inside ONE
-        // transaction that locks every active Admin row (FOR UPDATE), so two
-        // Admins demoting themselves at the same moment are serialized: the
-        // second one sees only one Admin left and is refused.
+        // Would this update take an ACTIVE Admin out of the Admin role
         const removesAdmin = target.role === 'super_admin' && !!target.is_active
             && (role !== 'super_admin' || activeFlag !== 1);
 
@@ -234,18 +206,7 @@ const updateUser = async (req, res, next) => {
     } catch (err) { next(err); }
 };
 
-/**
- * POST /api/auth/users/:id/email-otp/request  [Admin+]
- * Body: { newEmail }
- *
- * Step 1 of the email-change flow. The 6-digit code is emailed to the
- * PERSON PERFORMING THE CHANGE (req.user -- the admin/owner logged in and
- * using User Management right now), never to the target account's new or
- * old address. This mirrors the forgot-password OTP pattern, but its
- * purpose is different: it's confirming "the person at this keyboard, in
- * this session, really meant to do this" rather than confirming that the
- * new address is reachable by its eventual owner.
- */
+/** POST /api/auth/users/:id/email-otp/request [Admin+] Body */
 const requestEmailChangeOtp = async (req, res, next) => {
     try {
         const { id } = req.params;
@@ -262,8 +223,7 @@ const requestEmailChangeOtp = async (req, res, next) => {
             return res.status(404).json({ success: false, message: 'User not found.' });
         }
 
-        // Same owner-protection rule as updateUser above. The top role is shown
-        // as "Owner" (DB value super_admin).
+        // Same owner-protection rule as updateUser above.
         if (parseInt(id) !== req.user.id && target.role === 'super_admin') {
             return res.status(403).json({ success: false, message: 'Owner accounts can only be managed by the account holder.' });
         }
@@ -283,8 +243,7 @@ const requestEmailChangeOtp = async (req, res, next) => {
         const otpHash   = await bcrypt.hash(otp, 10);
         const expiresAt = new Date(Date.now() + OTP_EXPIRY_MINUTES * 60 * 1000);
 
-        // In-memory only -- see utils/emailChangeOtpStore.js for why this
-        // isn't written to the users table.
+        // In-memory only - see utils/emailChangeOtpStore.js for why this isn't...
         EmailChangeOtpStore.set(req.user.id, {
             otpHash, expiresAt, targetId: id, newEmail: normalizedEmail
         });
@@ -292,9 +251,7 @@ const requestEmailChangeOtp = async (req, res, next) => {
         try {
             await sendEmailChangeOtp(requester.email, otp, requester.name, target.name, normalizedEmail);
         } catch (mailErr) {
-            // See forgotPassword's comment above -- EmailJS rejects with
-            // {status, text}, not a standard Error, so .message alone
-            // logs nothing useful.
+            // See forgotPassword's comment above
             console.error('[requestEmailChangeOtp] Failed to send OTP email:', mailErr?.text || mailErr?.message || mailErr);
             EmailChangeOtpStore.clear(req.user.id);
             return res.status(500).json({ success: false, message: 'Could not send the verification email. Please try again later.' });
@@ -305,17 +262,7 @@ const requestEmailChangeOtp = async (req, res, next) => {
     } catch (err) { next(err); }
 };
 
-/**
- * POST /api/auth/users/:id/email-otp/confirm  [Admin+]
- * Body: { otp }
- *
- * Step 2 -- verifies the code against the REQUESTER's (not the target's)
- * stored hash, then applies the pending email change to the target
- * account it was originally requested for. The pending target id is
- * checked against the :id in the URL so a stale/mismatched confirm
- * request (e.g. two edit tabs open) can't silently apply to the wrong
- * user.
- */
+/** POST /api/auth/users/:id/email-otp/confirm [Admin+] Body: { otp } Step 2 */
 const confirmEmailChangeOtp = async (req, res, next) => {
     try {
         const { id } = req.params;
@@ -356,8 +303,7 @@ const confirmEmailChangeOtp = async (req, res, next) => {
             });
         }
 
-        // Re-check the target email hasn't been claimed by someone else while
-        // this code was pending (e.g. two admins editing at once).
+        // Re-check the target email hasn't been claimed by someone else
         const stillAvailable = await User.findByEmail(pending.newEmail);
         if (stillAvailable && parseInt(stillAvailable.id) !== parseInt(id)) {
             EmailChangeOtpStore.clear(req.user.id);
@@ -373,19 +319,7 @@ const confirmEmailChangeOtp = async (req, res, next) => {
     } catch (err) { next(err); }
 };
 
-/**
- * POST /api/auth/action-otp/request  [Super Admin only]
- * Body: { action: 'create_user'|'update_password'|'delete_user', payload }
- *
- * Generic first step for the three OTP-gated User Management actions
- * below (Add User, Change Password, Delete/Deactivate) -- same "confirm
- * it's really you" pattern as requestEmailChangeOtp above: a code is
- * emailed to the OWNER PERFORMING the action, and NOTHING is written to
- * the database until confirmActionOtp verifies it. All the validation
- * the direct create/update-password/delete logic normally does is
- * duplicated here too, so a code is never sent for a request that was
- * always going to fail anyway.
- */
+/** POST /api/auth/action-otp/request [Super Admin only] Body: { action */
 const requestActionOtp = async (req, res, next) => {
     try {
         const { action, payload = {} } = req.body;
@@ -396,9 +330,7 @@ const requestActionOtp = async (req, res, next) => {
         }
 
         let actionDescription;
-        // Names people see: super_admin = Owner (full access), admin = Admin (limited),
-        // cashier = Pharmacist. The DB values and every permission check throughout this
-        // file are unchanged -- only this display mapping and the messages that name a role.
+        // Names people see: super_admin = Owner (full access), admin = Admin (limited)
         const roleLabels = { super_admin: 'Owner', admin: 'Admin', cashier: 'Pharmacist' };
 
         if (action === 'create_user') {
@@ -406,17 +338,18 @@ const requestActionOtp = async (req, res, next) => {
             if (!name || !email || !password || !role) {
                 return res.status(400).json({ success: false, message: 'All fields are required.' });
             }
-            if (password.length < 8) {
-                return res.status(400).json({ success: false, message: 'Password must be at least 8 characters.' });
+            // A name is plain words (never HTML); a password follows the shared rules
+            const nameProblem = plainTextProblem('Name', name);
+            if (nameProblem) {
+                return res.status(400).json({ success: false, message: nameProblem });
+            }
+            const pwProblem = passwordProblem(password, { email, name });
+            if (pwProblem) {
+                return res.status(400).json({ success: false, message: pwProblem });
             }
 
             const normalizedEmail = email.toLowerCase().trim();
-            // Checked WITHOUT the is_active filter findByEmail normally
-            // applies -- this needs to see a DEACTIVATED match too, so it
-            // can be offered as a reactivation below instead of either
-            // silently hitting the database's unique constraint on email
-            // (findByEmail alone never finds a deactivated row) or creating
-            // a confusing duplicate.
+            // Checked WITHOUT the is_active filter findByEmail normally applies
             const existingAny = await User.findByEmailIncludingInactive(normalizedEmail);
 
             if (existingAny && existingAny.is_active) {
@@ -424,15 +357,7 @@ const requestActionOtp = async (req, res, next) => {
             }
 
             if (existingAny && !existingAny.is_active) {
-                // Reactivation instead of a fresh account -- this email
-                // belongs to a DEACTIVATED user. Restores their ORIGINAL
-                // name/role, not whatever was typed into this form, since
-                // it's the same person's existing account being restored,
-                // not a new one (see User.reactivate). The
-                // admin-can-only-manage-Pharmacy-Assistant restriction below
-                // is checked against the role being RESTORED, since that's
-                // the role that will actually be back in effect -- not the
-                // form's now-irrelevant role field.
+                // Reactivation instead of a fresh account
                 if (req.user.role === 'admin' && existingAny.role !== 'cashier') {
                     return res.status(403).json({ success: false, message: 'Admins can only reactivate Pharmacist accounts.' });
                 }
@@ -451,15 +376,16 @@ const requestActionOtp = async (req, res, next) => {
             if (!targetId || !newPassword) {
                 return res.status(400).json({ success: false, message: 'Target user and new password are required.' });
             }
-            if (newPassword.length < 8) {
-                return res.status(400).json({ success: false, message: 'Password must be at least 8 characters.' });
-            }
             const target = await User.findById(targetId);
             if (!target) {
                 return res.status(404).json({ success: false, message: 'User not found.' });
             }
-            // Same owner-protection rule as updateUser above (the top role is
-            // shown as "Owner").
+            // the shared password rules, including...
+            const pwProblem = passwordProblem(newPassword, { email: target.email, name: target.name });
+            if (pwProblem) {
+                return res.status(400).json({ success: false, message: pwProblem });
+            }
+            // Same owner-protection rule as updateUser above
             if (parseInt(targetId) !== req.user.id && target.role === 'super_admin') {
                 return res.status(403).json({ success: false, message: 'Owner accounts can only be managed by the account holder.' });
             }
@@ -475,11 +401,6 @@ const requestActionOtp = async (req, res, next) => {
 
             if (isSelfDelete) {
                 // Self-delete is allowed ONLY for a super_admin, and ONLY
-                // when at least one OTHER active owner exists -- otherwise
-                // the system would be left with zero owners able to manage
-                // it at all. Admins/cashiers still can't delete themselves
-                // under any circumstance (they'd just be locking themselves
-                // out with an owner having to fix it anyway).
                 if (req.user.role !== 'super_admin') {
                     return res.status(400).json({ success: false, message: 'Cannot delete your own account.' });
                 }
@@ -507,30 +428,19 @@ const requestActionOtp = async (req, res, next) => {
         const otpHash   = await bcrypt.hash(otp, 10);
         const expiresAt = new Date(Date.now() + OTP_EXPIRY_MINUTES * 60 * 1000);
 
-        // In-memory only -- see utils/actionOtpStore.js for why. The
-        // plaintext password briefly held in `payload` for create_user (or
-        // update_password) lives only here, for up to 10 minutes, until
-        // confirmActionOtp hashes it via User.create/updatePassword (both
-        // hash internally) and this entry is cleared.
+        // In-memory only - see utils/actionOtpStore.js for why.
         ActionOtpStore.set(req.user.id, { otpHash, expiresAt, action, payload });
 
         try {
             await sendActionOtp(requester.email, otp, requester.name, actionDescription);
         } catch (mailErr) {
-            // See forgotPassword's comment above -- EmailJS rejects with
-            // {status, text}, not a standard Error, so .message alone
-            // logs nothing useful.
+            // See forgotPassword's comment above
             console.error('[requestActionOtp] Failed to send OTP email:', mailErr?.text || mailErr?.message || mailErr);
             ActionOtpStore.clear(req.user.id);
             return res.status(500).json({ success: false, message: 'Could not send the verification email. Please try again later.' });
         }
 
-        // description included so the frontend can correct its own
-        // on-screen wording if it guessed wrong -- it can't know in
-        // advance whether an Add User submission will turn out to be a
-        // fresh account or a reactivation (only the check above knows
-        // that), so it initially shows a generic "create" message that
-        // may need to become "reactivate" once this response comes back.
+        // description included so the frontend can correct its own on-screen wording...
         res.json({
             success: true,
             message: `A verification code has been sent to ${requester.email}.`,
@@ -540,15 +450,7 @@ const requestActionOtp = async (req, res, next) => {
     } catch (err) { next(err); }
 };
 
-/**
- * POST /api/auth/action-otp/confirm  [Super Admin only]
- * Body: { otp }
- *
- * Step 2 -- verifies the code against the requester's stored hash, then
- * actually performs whichever action was pending (create_user /
- * update_password / delete_user), same expiry/attempt-limit logic as
- * confirmEmailChangeOtp above.
- */
+/** POST /api/auth/action-otp/confirm [Super Admin only] Body: { otp } Step 2 */
 const confirmActionOtp = async (req, res, next) => {
     try {
         const { otp } = req.body;
@@ -588,13 +490,7 @@ const confirmActionOtp = async (req, res, next) => {
             const { name, email, password, role, reactivateUserId } = payload;
 
             if (reactivateUserId) {
-                // Reactivation -- re-verify the account is STILL
-                // deactivated (it could have been reactivated some other
-                // way in the time between request and this confirm), then
-                // restore it. Original name/role are kept untouched (see
-                // User.reactivate); only is_active flips back on, plus a
-                // fresh password since the returning person may not
-                // remember their old one.
+                // Reactivation - re-verify the account is STILL deactivated
                 const target = await User.findById(reactivateUserId);
                 if (!target) {
                     ActionOtpStore.clear(req.user.id);
@@ -608,8 +504,7 @@ const confirmActionOtp = async (req, res, next) => {
                 await logAudit(req.user.id, 'REACTIVATE_USER', 'users', reactivateUserId, { email }, req.ip);
                 responseMessage = `Account reactivated -- ${target.name}'s previous role and access have been restored.`;
             } else {
-                // Re-check email uniqueness -- a race condition (another admin
-                // created the same email) while this code was pending.
+                // Re-check email uniqueness
                 const stillAvailable = await User.findByEmail(email.toLowerCase().trim());
                 if (stillAvailable) {
                     ActionOtpStore.clear(req.user.id);
@@ -638,10 +533,7 @@ const confirmActionOtp = async (req, res, next) => {
                 ActionOtpStore.clear(req.user.id);
                 return res.status(404).json({ success: false, message: 'User not found.' });
             }
-            // Re-check the active-owner count for a self-delete -- another
-            // owner could have been deactivated in the time between request
-            // and this confirm, and this must never be allowed to leave
-            // the system with zero active owners.
+            // Re-check the active-owner count for a self-delete
             if (parseInt(targetId) === req.user.id) {
                 const allUsersForCount = await User.findAll();
                 const activeOwnerCount = allUsersForCount.filter(u => u.role === 'super_admin' && u.is_active).length;
@@ -661,20 +553,11 @@ const confirmActionOtp = async (req, res, next) => {
     } catch (err) { next(err); }
 };
 
-// An Admin (DB role 'admin') may read the Audit Logs, but ONLY entries made by
-// Pharmacists (DB role 'cashier') -- never their own entries and never an Owner's.
-// The Owner (DB role 'super_admin') sees everything. This is added to the SQL itself, so
-// it also covers the filters, the search, the paging and the export -- it is not just
-// something the page chooses to show.
-// Sign-outs are never shown (a sign-out is not written to the Audit Logs any more; any entries
-// recorded by an earlier version are kept out of the list and the export too).
+// An Admin (DB role 'admin') may read the Audit Logs
 const auditScopeSql = (req) =>
     (req.user.role === 'super_admin' ? '' : " AND u.role = 'cashier'") + " AND al.action <> 'LOGOUT'";
 
-/**
- * GET /api/auth/audit-logs  [Owner: every entry | Admin: Pharmacist entries only]
- * Query params: limit, offset, action, user, date_start, date_end
- */
+/** GET /api/auth/audit-logs [Owner: every entry | Admin */
 const getAuditLogs = async (req, res, next) => {
     try {
         const {
@@ -694,7 +577,7 @@ const getAuditLogs = async (req, res, next) => {
         `;
         const params = [];
 
-        // Admin: Pharmacist entries only (Owner: everything) -- see auditScopeSql
+        // Admin: Pharmacist entries only (Owner: everything) - see auditScopeSql
         sql += auditScopeSql(req);
 
         if (action) {
@@ -738,9 +621,7 @@ const AUDIT_COLUMNS = [
     { label: 'Entity ID',   excelWidth: 10, pdfWidth: 50  }
 ];
 
-// Names people see: super_admin = Owner, admin = Admin, cashier = Pharmacist. Audit Logs
-// show the user's CURRENT role (not a snapshot from the moment of each action), so an
-// older entry reads with today's names.
+// Names people see: super_admin = Owner, admin = Admin, cashier = Pharmacist.
 const AUDIT_ROLE_LABELS   = { super_admin: 'Owner', admin: 'Admin', cashier: 'Pharmacist' };
 const AUDIT_ENTITY_LABELS = {
     products: 'Product', users: 'User', orders: 'Order', order_items: 'Order Item',
@@ -748,13 +629,7 @@ const AUDIT_ENTITY_LABELS = {
     backups: 'Backups', app_settings: 'App Settings'
 };
 
-/**
- * GET /api/auth/audit-logs/export/:format (excel|pdf|word)
- * Mirrors the exact same filters the Audit Logs PAGE applies client-side
- * (search/action/entity/date) -- entity filtering in particular isn't
- * supported by getAuditLogs above at all, so it's handled here instead,
- * to keep "what you're looking at" and "what you exported" consistent.
- */
+/** GET /api/auth/audit-logs/export/:format (excel|pdf|word) Mirrors the exact... */
 const exportAuditLogs = async (req, res, next) => {
     try {
         const { search = '', action = '', entity = '', date = '' } = req.query;
@@ -767,8 +642,7 @@ const exportAuditLogs = async (req, res, next) => {
         `;
         const params = [];
 
-        // Admin: Pharmacist entries only (Owner: everything) -- the export must follow
-        // the same rule as the page, so it cannot be used to read more than the page shows.
+        // Admin: Pharmacist entries only (Owner: everything)
         sql += auditScopeSql(req);
 
         if (search) {
@@ -805,18 +679,9 @@ const exportAuditLogs = async (req, res, next) => {
     } catch (err) { next(err); }
 };
 
-/**
- * POST /api/auth/forgot-password
- * Body: { email }
- * Public endpoint (no login required -- that's the whole point). Always
- * returns the same generic success message whether or not the email is
- * actually registered, so this can't be used to check which emails exist
- * in the system. If the email IS registered, a 6-digit code is emailed
- * to it, valid for 15 minutes. Only a bcrypt HASH of the code is ever
- * stored -- never the plain code itself.
- */
+/** POST /api/auth/forgot-password - Body: { email } Public endpoint */
 const GENERIC_OTP_MESSAGE = 'If that email is registered, a reset code has been sent to it.';
-const OTP_EXPIRY_MINUTES  = 15; // matches the EmailJS template's own wording ("valid for 15 minutes")
+const OTP_EXPIRY_MINUTES  = 15; // matches the EmailJS template's own wording
 const MAX_OTP_ATTEMPTS    = 5;
 
 const forgotPassword = async (req, res, next) => {
@@ -829,12 +694,11 @@ const forgotPassword = async (req, res, next) => {
         const user = await User.findByEmail(email.toLowerCase().trim());
 
         if (!user) {
-            // Deliberately identical response to the "found" case below --
-            // see GENERIC_OTP_MESSAGE comment.
+            // Deliberately identical response to the "found" case below see...
             return res.json({ success: true, message: GENERIC_OTP_MESSAGE });
         }
 
-        const otp     = String(crypto.randomInt(100000, 1000000)); // 6 digits, never all-zeros-prefixed issue since randomInt is inclusive-exclusive over this range
+        const otp     = String(crypto.randomInt(100000, 1000000)); // 6 digits, never all-zeros-prefixed...
         const otpHash = await bcrypt.hash(otp, 10);
         const expiresAt = new Date(Date.now() + OTP_EXPIRY_MINUTES * 60 * 1000);
 
@@ -843,18 +707,7 @@ const forgotPassword = async (req, res, next) => {
         try {
             await sendOtpEmail(user.email, otp, user.name);
         } catch (mailErr) {
-            // A real registered user whose email genuinely failed to send is
-            // worth surfacing loudly (almost certainly an SMTP config
-            // issue) -- this is the one deliberate exception to "always
-            // return the same generic message", since silently failing
-            // here would just leave someone waiting forever for a code
-            // that was never going to arrive.
-            //
-            // EmailJS's SDK rejects with a plain {status, text} object, not
-            // a standard Error -- mailErr.message is always undefined for
-            // it, which is why this used to log nothing useful. .text is
-            // where the actual reason (bad template variable, invalid
-            // keys, etc.) actually lives.
+            // A real registered user whose email genuinely failed to send is worth...
             console.error('[forgotPassword] Failed to send OTP email:', mailErr?.text || mailErr?.message || mailErr);
             return res.status(500).json({ success: false, message: 'Could not send the reset email. Please try again later.' });
         }
@@ -864,14 +717,7 @@ const forgotPassword = async (req, res, next) => {
     } catch (err) { next(err); }
 };
 
-/**
- * POST /api/auth/verify-otp
- * Body: { email, otp }
- * Checks the 6-digit code against its stored hash. On success, issues a
- * short-lived (10 min) single-purpose JWT that authorizes ONE password
- * reset -- this is what /reset-password requires, so the OTP itself
- * can't be reused/replayed after this step.
- */
+/** POST /api/auth/verify-otp - Body: { email, otp } Checks the 6-digit code... */
 const verifyOtp = async (req, res, next) => {
     try {
         const { email, otp } = req.body;
@@ -881,8 +727,7 @@ const verifyOtp = async (req, res, next) => {
 
         const user = await User.findByEmail(email.toLowerCase().trim());
 
-        // Same generic-sounding failure for "no such user" and "no pending
-        // code" -- no need to distinguish these to the caller.
+        // Same generic-sounding failure for "no such user" and "no pending code"
         if (!user || !user.reset_otp_hash || !user.reset_otp_expires_at) {
             return res.status(400).json({ success: false, message: 'Invalid or expired code. Please request a new one.' });
         }
@@ -919,23 +764,13 @@ const verifyOtp = async (req, res, next) => {
     } catch (err) { next(err); }
 };
 
-/**
- * POST /api/auth/reset-password
- * Body: { resetToken, newPassword, confirmPassword }
- * resetToken is the short-lived token issued by /verify-otp -- this is
- * what actually authorizes the change, not the OTP again, so this step
- * can't be replayed once used (see User.clearResetOtp below) or after
- * the 10-minute window closes.
- */
+/** POST /api/auth/reset-password - Body: { resetToken, newPassword */
 const resetPassword = async (req, res, next) => {
     try {
         const { resetToken, newPassword, confirmPassword } = req.body;
 
         if (!resetToken || !newPassword || !confirmPassword) {
             return res.status(400).json({ success: false, message: 'All fields are required.' });
-        }
-        if (newPassword.length < 8) {
-            return res.status(400).json({ success: false, message: 'Password must be at least 8 characters.' });
         }
         if (newPassword !== confirmPassword) {
             return res.status(400).json({ success: false, message: 'Passwords do not match.' });
@@ -952,8 +787,18 @@ const resetPassword = async (req, res, next) => {
             return res.status(401).json({ success: false, message: 'Invalid reset session. Please start over.' });
         }
 
+        // The shared password rules...
+        const resetUser = await User.findById(payload.id);
+        if (!resetUser) {
+            return res.status(404).json({ success: false, message: 'User not found.' });
+        }
+        const pwProblem = passwordProblem(newPassword, { email: resetUser.email, name: resetUser.name });
+        if (pwProblem) {
+            return res.status(400).json({ success: false, message: pwProblem });
+        }
+
         await User.updatePassword(payload.id, newPassword);
-        await User.clearResetOtp(payload.id); // defense in depth -- the token is single-use by design already
+        await User.clearResetOtp(payload.id); // defense in depth - the token is single-use by design already
         await logAudit(payload.id, 'RESET_PASSWORD_VIA_OTP', 'users', payload.id, {}, req.ip);
 
         res.json({ success: true, message: 'Password updated. You can now sign in with your new password.' });
@@ -961,32 +806,23 @@ const resetPassword = async (req, res, next) => {
     } catch (err) { next(err); }
 };
 
-/**
- * PUT /api/auth/profile
- * Body: { name, avatar }
- * Self-service profile update -- available to EVERY role, unlike
- * /users/:id which is admin/owner-only. Cashiers can change their
- * profile picture but NOT their name (enforced here regardless of what
- * the client sends, same principle as the role/is_active self-edit lock
- * elsewhere); admins/owners can change both.
- *
- * `avatar` is expected as a data-URL string (e.g. "data:image/jpeg;
- * base64,..."), already resized client-side to a small thumbnail before
- * it ever reaches here -- kept as a reasonably-sized string in the
- * database rather than a file on disk (see the avatar column's own
- * comment in the migration for why).
- */
+/** PUT /api/auth/profile - Body: { name, avatar } Self-service profile update */
 const updateProfile = async (req, res, next) => {
     try {
         const { name, avatar } = req.body;
 
+        // A name is plain words, and a picture must be a small real image
+        const profileProblem = plainTextProblem('Name', name) || avatarProblem(avatar);
+        if (profileProblem) {
+            return res.status(400).json({ success: false, message: profileProblem });
+        }
+
         const current = await User.findById(req.user.id);
         if (!current) return res.status(404).json({ success: false, message: 'User not found.' });
 
-        // Cashiers keep their existing name no matter what was sent --
-        // they can still see it, just not change it.
+        // Cashiers keep their existing name no matter what was sent they can still...
         const finalName   = req.user.role === 'cashier' ? current.name : (name || current.name);
-        const finalAvatar = avatar !== undefined ? avatar : current.avatar;
+        const finalAvatar = avatar !== undefined ? (avatar || null) : current.avatar;
 
         await User.updateProfile(req.user.id, { name: finalName, avatar: finalAvatar });
         await logAudit(req.user.id, 'UPDATE_PROFILE', 'users', req.user.id, { name: finalName }, req.ip);
@@ -999,20 +835,7 @@ const updateProfile = async (req, res, next) => {
     } catch (err) { next(err); }
 };
 
-/**
- * POST /api/auth/change-password-otp/request  [Any authenticated role]
- * Body: { currentPassword, newPassword }
- *
- * Self-service password change, available to EVERY role -- this only
- * ever touches the REQUESTER'S OWN account, unlike the generic
- * action-otp flow above (create_user/update_password-for-others/
- * delete_user), which is super_admin-only since those act on OTHER
- * accounts. Current password is verified immediately here -- fails fast
- * with no OTP sent if it's wrong -- and the OTP step that follows adds
- * a second factor beyond just knowing the current password, meaningful
- * if a session were ever left open/hijacked while the real owner still
- * knows their own password.
- */
+/** POST /api/auth/change-password-otp/request [Any authenticated role] Body */
 const requestChangePasswordOtp = async (req, res, next) => {
     try {
         const { currentPassword, newPassword } = req.body;
@@ -1020,8 +843,9 @@ const requestChangePasswordOtp = async (req, res, next) => {
         if (!currentPassword || !newPassword) {
             return res.status(400).json({ success: false, message: 'Current and new password are required.' });
         }
-        if (newPassword.length < 8) {
-            return res.status(400).json({ success: false, message: 'New password must be at least 8 characters.' });
+        const pwProblem = passwordProblem(newPassword, { email: req.user.email, name: req.user.name });
+        if (pwProblem) {
+            return res.status(400).json({ success: false, message: pwProblem });
         }
 
         const requester = await User.findByIdWithPassword(req.user.id);
@@ -1029,14 +853,7 @@ const requestChangePasswordOtp = async (req, res, next) => {
 
         const matches = await User.comparePassword(currentPassword, requester.password);
         if (!matches) {
-            // 400, not 401 -- this is a wrong FORM FIELD (the password they
-            // just typed doesn't match), not an invalid/expired SESSION.
-            // The frontend's shared API client treats any 401 as "log out
-            // and redirect to login" (see main.js's API.request), which
-            // would incorrectly kick someone back to login just for
-            // mistyping their current password -- 401 is reserved for
-            // actual session/token problems (see authMiddleware.js's
-            // verifyToken), not "a value in this request was wrong".
+            // 400, not 401 - this is a wrong FORM FIELD
             return res.status(400).json({ success: false, message: 'Current password is incorrect.' });
         }
 
@@ -1044,16 +861,7 @@ const requestChangePasswordOtp = async (req, res, next) => {
         const otpHash   = await bcrypt.hash(otp, 10);
         const expiresAt = new Date(Date.now() + OTP_EXPIRY_MINUTES * 60 * 1000);
 
-        // Reuses the same generic in-memory store as the Add User/Change
-        // Password(-for-others)/Delete flows in requestActionOtp -- same
-        // "only one pending thing per requester at a time" limitation
-        // applies here too (starting this while one of THOSE is also
-        // pending silently replaces whichever was there). action is
-        // tagged distinctly ('self_change_password') so confirm below can
-        // tell it apart from the other three. Only newPassword needs to
-        // persist until confirm -- currentPassword was already verified
-        // above, no reason to keep a second plaintext password sitting in
-        // memory.
+        // Reuses the same generic in-memory store as the Add User/Change...
         ActionOtpStore.set(req.user.id, {
             otpHash, expiresAt, action: 'self_change_password', payload: { newPassword }
         });
@@ -1071,10 +879,7 @@ const requestChangePasswordOtp = async (req, res, next) => {
     } catch (err) { next(err); }
 };
 
-/**
- * POST /api/auth/change-password-otp/confirm  [Any authenticated role]
- * Body: { otp }
- */
+/** POST /api/auth/change-password-otp/confirm [Any authenticated role] Body: { otp } */
 const confirmChangePasswordOtp = async (req, res, next) => {
     try {
         const { otp } = req.body;
@@ -1111,25 +916,22 @@ const confirmChangePasswordOtp = async (req, res, next) => {
         ActionOtpStore.clear(req.user.id);
         await logAudit(req.user.id, 'CHANGE_OWN_PASSWORD', 'users', req.user.id, {}, req.ip);
 
-        res.json({ success: true, message: 'Password updated successfully.' });
+        // Changing the password ends every login made with the OLD one
+        const refreshed = await User.findByEmail(req.user.email);
+
+        res.json({
+            success: true,
+            message: 'Password updated successfully.',
+            ...(refreshed ? { token: issueToken(refreshed) } : {})
+        });
 
     } catch (err) { next(err); }
 };
 
-// -- Self-service email change (any authenticated role) --
-// Each person changes THEIR OWN email from Edit Profile. The 6-digit code is
-// emailed to their CURRENT address (not the new one), and nothing is written
-// to the database until it is confirmed. Reuses the in-memory ActionOtpStore
-// (one pending item per person, tagged 'self_change_email' so it can't be
-// confirmed through any other endpoint). users.email is UNIQUE across ALL
-// accounts including deactivated ones, so availability is checked without
-// the is_active filter.
+// Self-service email change (any authenticated role) Each person changes THEIR OWN...
 const EMAIL_FORMAT = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
-/**
- * POST /api/auth/change-email-otp/request  [Any authenticated role]
- * Body: { newEmail }
- */
+/** POST /api/auth/change-email-otp/request [Any authenticated role] Body */
 const requestChangeEmailOtp = async (req, res, next) => {
     try {
         const { newEmail } = req.body;
@@ -1175,10 +977,7 @@ const requestChangeEmailOtp = async (req, res, next) => {
     } catch (err) { next(err); }
 };
 
-/**
- * POST /api/auth/change-email-otp/confirm  [Any authenticated role]
- * Body: { otp }
- */
+/** POST /api/auth/change-email-otp/confirm [Any authenticated role] Body: { otp } */
 const confirmChangeEmailOtp = async (req, res, next) => {
     try {
         const { otp } = req.body;
@@ -1213,8 +1012,7 @@ const confirmChangeEmailOtp = async (req, res, next) => {
 
         const newEmail = pending.payload.newEmail;
 
-        // Re-check at confirm time -- someone else may have claimed this
-        // address while the code was pending.
+        // Re-check at confirm time
         const existing = await User.findByEmailIncludingInactive(newEmail);
         if (existing && parseInt(existing.id) !== req.user.id) {
             ActionOtpStore.clear(req.user.id);
@@ -1242,18 +1040,7 @@ const confirmChangeEmailOtp = async (req, res, next) => {
     } catch (err) { next(err); }
 };
 
-// ============================================================
-// SIGN OUT (with the register check)
-// ============================================================
-// A person with an OPEN register must close it before signing out, so the drawer is counted and
-// recorded. This is true for everyone -- Pharmacist, Admin and Owner alike: the rule is "has an
-// open register", not a role. The app first asks GET /sign-out-check ("may I?"); then, once the
-// person has typed CONFIRM, it calls POST /logout, which CHECKS AGAIN before it says yes -- so
-// the refusal cannot be skipped by calling /logout directly. A sign-out is deliberately NOT
-// written to the Audit Logs (by request).
-// (A login pass cannot be cancelled from the server, so nothing here can stop someone simply
-// discarding the pass in their browser; their open register then just stays open and shows up
-// at their next sign-in.)
+// SIGN OUT (with the register check) - A person with an OPEN register must close it...
 const openRegisterReply = (session) => ({
     success: false,
     allowed: false,
@@ -1262,7 +1049,7 @@ const openRegisterReply = (session) => ({
     session: { opened_at: session.opened_at, opening_cash: session.opening_cash }
 });
 
-/** GET /api/auth/sign-out-check  [any logged-in role] -- "may this person sign out?" */
+/** GET /api/auth/sign-out-check [any logged-in role] - "may this person sign out?" */
 const signOutCheck = async (req, res, next) => {
     try {
         const open = await CashSession.findOpenByCashier(req.user.id);
@@ -1271,7 +1058,7 @@ const signOutCheck = async (req, res, next) => {
     } catch (err) { next(err); }
 };
 
-/** POST /api/auth/logout  [any logged-in role] -- checks the register again, then says OK. Writes nothing to the Audit Logs. */
+/** POST /api/auth/logout [any logged-in role] */
 const signOut = async (req, res, next) => {
     try {
         const open = await CashSession.findOpenByCashier(req.user.id);

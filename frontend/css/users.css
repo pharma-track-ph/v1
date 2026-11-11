@@ -1,4 +1,4 @@
-/* ── Users page styles ─────────────────────────────── */
+/* Users page styles */
 .users-toolbar {
     display: flex;
     align-items: center;
@@ -109,8 +109,7 @@
 
 /* Self-account warning */
 .self-row td { opacity: 0.6; }
-/* Inactive accounts stay in the list (so they can be set back to Active)
-   but are visibly muted; the action buttons stay fully readable. */
+/* Inactive accounts stay in the list (so they can be set back to Active)... */
 .row-inactive td:not(.action-cell) { opacity: 0.55; }
 .self-badge {
     display: inline-block;
@@ -126,7 +125,7 @@
 /* Action buttons column */
 .action-cell { white-space: nowrap; }
 
-/* ── Responsive ──────────────────────────────────────────── */
+/* Responsive */
 @media (max-width: 768px) {
     .users-toolbar {
         display:        flex;

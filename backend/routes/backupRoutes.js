@@ -5,7 +5,7 @@ const {
     getBackups, triggerBackup, restore, remove, download, getSchedule, updateSchedule
 } = require('../controllers/backupController');
 
-// Backup/restore — super_admin ("owner") only, same tier as Users/Audit Logs.
+// Backup/restore - super_admin ("owner") only, same tier as Users/Audit Logs.
 router.get('/schedule',            verifyToken, requireRole('super_admin'), getSchedule);
 router.put('/schedule',            verifyToken, requireRole('super_admin'), updateSchedule);
 router.get('/',                    verifyToken, requireRole('super_admin'), getBackups);

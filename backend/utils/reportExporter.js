@@ -1,35 +1,4 @@
-// ============================================================
-// Report Exporter
-// Shared Excel/PDF/Word generation engine used by every exportable
-// report in the app (Inventory, Sales, Expired Inventory, Void Report,
-// Register Report, Audit Logs) — built once here instead of being
-// duplicated per report.
-//
-// Callers supply already-FORMATTED string/number values per row (dates
-// as short strings like "Jul 11 2026", currency as "₱123.00", etc.) —
-// this engine only handles LAYOUT (headers, widths, signature area,
-// pagination), never data formatting, which stays specific to each
-// report's own controller.
-//
-// Optional `totalsRow` (array matching columns.length, blank string for
-// cells that don't apply) renders as a bold row directly under the data,
-// with a divider line above it — used e.g. by the Sales Report export to
-// show Total Profit under the Profit column.
-//
-// Signature block: the underline is drawn as a real line/border (not a
-// string of underscores), and the caption beneath it is centered against
-// that SAME width in every format — so "Signature over Printed Name"
-// always lines up under the line regardless of how long the generated
-// name or caption text is.
-//
-// Same currency caveat as the original Inventory export: Excel and Word
-// render the ₱ sign fine (the viewing app handles the font), but PDFKit
-// bakes text into the file with its own bundled fonts at generation
-// time, which don't include it — so the PDF version uses "PHP" instead
-// of "₱". The PharmaTrack logo itself is a raster image, not a font
-// glyph, so it embeds identically across all four formats with no
-// equivalent workaround needed.
-// ============================================================
+// Report Exporter - Shared Excel/PDF/Word generation engine used by every exportable...
 const ExcelJS     = require('exceljs');
 const PDFDocument = require('pdfkit');
 const fs          = require('fs');
@@ -40,25 +9,14 @@ const {
     PageOrientation, TableLayoutType
 } = require('docx');
 
-// Real logo file, shared by every format below -- lives under
-// frontend/images since that's already served to the browser (sidebar,
-// login page, favicon); backend and frontend are siblings under the
-// project root, so a plain relative path reaches it directly without
-// needing a second copy anywhere.
+// Real logo file, shared by every format below
 const LOGO_PATH = path.resolve(__dirname, '../../frontend/images/pharmatrack-logo.png');
 const LOGO_BUFFER = (() => {
     try { return fs.readFileSync(LOGO_PATH); }
     catch (err) { console.error('[reportExporter] Could not read logo file:', err.message); return null; }
 })();
 
-// -- Column alignment ----------------------------------------------
-// ONE rule for every report in every format (Excel, PDF, Word): text
-// columns are LEFT-aligned and number/amount columns are RIGHT-aligned, and
-// a header is aligned the same as its own data, so amounts line up under
-// their heading and are easy to compare down a column.
-// A column may force it with align: 'left' | 'right'; otherwise a column
-// counts as a number column when every filled cell in it is a number or an
-// amount ("12", "1,234.50", "\u20b1455.51", "-5", "3.5%").
+// Column alignment - ONE rule for every report in every format (Excel, PDF, Word)
 const NUMERIC_CELL = /^\s*[-+]?\s*(?:\u20b1|PHP)?\s*[-+]?\d[\d,]*(?:\.\d+)?\s*%?\s*$/;
 
 function isNumericCell(value) {
@@ -87,8 +45,7 @@ function columnAligns(columns, rows) {
     });
 }
 
-// Excel column width: wide enough for the heading and for typical values,
-// capped so one very long value wraps instead of making the sheet enormous.
+// Excel column width: wide enough for the heading and for typical values, capped
 function excelColumnWidth(col, i, rows) {
     const longest = rows.reduce((m, r) => Math.max(m, String(r[i] ?? '').length), 0);
     const want = Math.max(col.excelWidth || 0, String(col.label).length + 4, Math.min(longest, 42) + 2);
@@ -103,18 +60,14 @@ function formatManilaDateTime() {
     });
 }
 
-// "Jul 11 2026" — short and unambiguous, same format used everywhere else
-// in exports. mysql2 returns DATE/DATETIME columns as JS Date objects;
-// naively stringifying one produces a verbose, overflow-prone string —
-// always go through this instead.
+// "Jul 11 2026" - short and unambiguous, same format used everywhere else...
 const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 const manila = require('./manilaTime');
 
-// Read on a MANILA clock, never the server's: a hosted server runs in UTC, which made
-// these 8 hours off (and a midnight expiry date show as the day before).
+// Read on a MANILA clock, never the server's: a hosted server runs in UTC
 function formatShortDate(value) {
     if (!value) return '—';
-    // a plain "2026-10-25" is a calendar date already -- no time zone to apply
+    // a plain "2026-10-25" is a calendar date already - no time zone to apply
     if (typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value)) {
         const [y, m, day] = value.split('-').map(Number);
         return `${MONTHS[m - 1]} ${day} ${y}`;
@@ -137,17 +90,6 @@ function formatShortDateTime(value) {
     return `${formatShortDate(d)}, ${hours12}:${minutes}:${seconds} ${ampm}`;
 }
 
-/**
- * @param {object} opts
- * @param {object} opts.res - Express response
- * @param {string} opts.title - report title (e.g. "Sales Report")
- * @param {string} opts.generatedBy - name of whoever generated it
- * @param {string} opts.filename - e.g. "PharmaTrack_Sales_Report" (no extension)
- * @param {{label:string, excelWidth?:number, pdfWidth?:number}[]} opts.columns
- * @param {Array<Array<string|number>>} opts.rows - already-formatted values, one array per row
- * @param {string} [opts.periodLabel] - optional e.g. "Aug 1 - Aug 23, 2026"
- * @param {Array<string|number>} [opts.totalsRow] - optional bold summary row, same length as columns
- */
 async function exportExcel({ res, title, generatedBy, filename, columns, rows, periodLabel, totalsRow }) {
     const workbook = new ExcelJS.Workbook();
     workbook.creator = 'PharmaTrack';
@@ -163,11 +105,9 @@ async function exportExcel({ res, title, generatedBy, filename, columns, rows, p
     sheet.getCell('A1').value = 'PharmaTrack';
     sheet.getCell('A1').font = { size: 18, bold: true, color: { argb: 'FF0D6EFD' } };
     sheet.getCell('A1').alignment = { horizontal: 'center' };
-    sheet.getRow(1).height = 30; // taller than default so the logo image below has room to sit without overlapping row 2
+    sheet.getRow(1).height = 30; // taller than default so the logo image below has room...
 
-    // Real logo, anchored over the merged title cell -- floats on top of
-    // (doesn't replace) the text above, small enough to sit inside row 1's
-    // own height.
+    // Real logo, anchored over the merged title cell
     if (LOGO_BUFFER) {
         const imageId = workbook.addImage({ buffer: LOGO_BUFFER, extension: 'png' });
         sheet.addImage(imageId, { tl: { col: 0, row: 0 }, ext: { width: 26, height: 26 } });
@@ -197,18 +137,12 @@ async function exportExcel({ res, title, generatedBy, filename, columns, rows, p
         rows.forEach(row => {
             const excelRow = sheet.addRow(row);
             // Text columns left, number columns right. wrapText lets a long value
-            // (a name, the Details text) wrap onto more lines instead of being
-            // cut off at the column edge; Excel grows the row to fit it.
             excelRow.eachCell({ includeEmpty: true }, (cell, colNumber) => {
                 cell.alignment = { horizontal: aligns[colNumber - 1] || 'left', vertical: 'top', wrapText: true };
             });
         });
     } else {
-        // Compute the target row number FIRST, merge that exact row, THEN
-        // write into it via getRow/getCell (rather than mixing mergeCells
-        // with a later addRow) -- mixing the two was the original cause of
-        // the "No records found" text rendering as if it started off the
-        // left edge of the sheet.
+        // Compute the target row number FIRST, merge that exact row
         const emptyRowNum = sheet.rowCount + 1;
         sheet.mergeCells(`A${emptyRowNum}:${lastColLetter}${emptyRowNum}`);
         const emptyCell = sheet.getCell(`A${emptyRowNum}`);
@@ -220,10 +154,7 @@ async function exportExcel({ res, title, generatedBy, filename, columns, rows, p
     if (totalsRow) {
         const totalsExcelRow = sheet.addRow(totalsRow);
         totalsExcelRow.eachCell({ includeEmpty: true }, (cell, colNumber) => {
-            // Same solid-blue treatment as the header row -- makes a
-            // totals row (e.g. TOTAL PROFIT) read as clearly as the
-            // header does, instead of a thin divider line over otherwise
-            // plain black-on-white cells.
+            // Same solid-blue treatment as the header row
             cell.font = { bold: true, color: { argb: 'FFFFFFFF' } };
             cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF0D6EFD' } };
             cell.alignment = { horizontal: aligns[colNumber - 1] || 'left', vertical: 'middle' };
@@ -232,8 +163,7 @@ async function exportExcel({ res, title, generatedBy, filename, columns, rows, p
 
     sheet.columns.forEach((col, i) => { col.width = excelColumnWidth(columns[i] || {}, i, rows); });
 
-    // Generated date/time: directly below the table (and its totals row),
-    // above Prepared by / Approved by.
+    // Generated date/time: directly below the table (and its totals row)
     sheet.addRow([]);
     const generatedRowNum = sheet.rowCount + 1;
     sheet.mergeCells(`A${generatedRowNum}:${lastColLetter}${generatedRowNum}`);
@@ -245,19 +175,7 @@ async function exportExcel({ res, title, generatedBy, filename, columns, rows, p
     sheet.addRow([]);
     sheet.addRow([]);
 
-    // ── Signature block ──────────────────────────────────────
-    // Each side ("Prepared by" / "Approved by") gets its own merged span,
-    // occupying the first/last N columns respectively so they never
-    // overlap. The underline is a real cell BORDER (not typed
-    // underscores) and the caption directly below it is centered against
-    // that identical merged span -- guaranteeing the caption always lines
-    // up under the line regardless of text length in either row.
-    //
-    // approvedStartCol is always preparedEndCol + 2 (never +1) so there's
-    // always at least one un-bordered gap COLUMN between the two spans --
-    // two bottom-bordered cells sitting directly adjacent to each other
-    // render as one continuous line in Excel with no visible break at
-    // all, regardless of report column count.
+    // Signature block - Each side ("Prepared by" / "Approved by") gets its own...
     const spanCols         = Math.max(2, Math.min(3, Math.floor((colCount - 1) / 2)));
     const preparedEndCol   = Math.min(spanCols, Math.max(1, colCount - 2));
     const approvedStartCol = Math.min(colCount, preparedEndCol + 2);
@@ -274,7 +192,7 @@ async function exportExcel({ res, title, generatedBy, filename, columns, rows, p
     }
     r++;
 
-    // Underline row — a real bottom border, not a string of underscores
+    // Underline row - a real bottom border, not a string of underscores
     if (preparedEndCol > 1) sheet.mergeCells(`A${r}:${colLetter(preparedEndCol)}${r}`);
     sheet.getCell(`A${r}`).border = { bottom: { style: 'thin' } };
     if (approvedStartCol <= colCount) {
@@ -283,7 +201,7 @@ async function exportExcel({ res, title, generatedBy, filename, columns, rows, p
     }
     r++;
 
-    // Caption row — centered under the SAME merged span as the line above
+    // Caption row - centered under the SAME merged span as the line above
     if (preparedEndCol > 1) sheet.mergeCells(`A${r}:${colLetter(preparedEndCol)}${r}`);
     const preparedCaption = sheet.getCell(`A${r}`);
     preparedCaption.value = generatedBy;
@@ -310,10 +228,7 @@ async function exportPDF({ res, title, generatedBy, filename, columns, rows, per
     res.setHeader('Content-Disposition', `attachment; filename="${filename}.pdf"`);
     doc.pipe(res);
 
-    // Brand header -- the real logo image plus the wordmark, centered
-    // together as ONE group, embedded directly via PDFKit's own image
-    // support (a real raster image now, not a hand-drawn vector
-    // approximation).
+    // Brand header - the real logo image plus the wordmark
     const brandText   = 'PharmaTrack';
     doc.font('Helvetica-Bold').fontSize(20);
     const brandTextWidth = doc.widthOfString(brandText);
@@ -335,19 +250,14 @@ async function exportPDF({ res, title, generatedBy, filename, columns, rows, per
     doc.y = groupY + brandTextHeight + 4;
 
     doc.fontSize(13).font('Helvetica-Bold').fillColor('#212529').text(title, { align: 'center' });
-    // Only the report range goes above the table now. The generated date and
-    // time is printed BELOW the table, above Prepared by / Approved by.
+    // Only the report range goes above the table now.
     if (periodLabel) {
         doc.fontSize(9).font('Helvetica-Oblique').fillColor('#6c757d')
            .text(periodLabel, { align: 'center' });
     }
     doc.moveDown(1);
 
-    // Column widths: each column's pdfWidth is used as a RELATIVE weight and
-    // scaled so the table fills the page's usable width (a 3-column report is
-    // not stretched past 1.5x). Wider columns mean fewer wrapped lines.
-    // Cells WRAP and each row grows to fit its tallest cell -- nothing is cut
-    // off with "..." any more.
+    // Column widths: each column's pdfWidth is used as a RELATIVE weight and scaled
     const aligns           = columnAligns(columns, rows);   // text left, numbers right
     const pageContentWidth = doc.page.width - doc.page.margins.left - doc.page.margins.right;
     const weights          = columns.map(c => c.pdfWidth || 70);
@@ -357,8 +267,7 @@ async function exportPDF({ res, title, generatedBy, filename, columns, rows, per
         : Math.min(pageContentWidth / weightSum, 1.5);
     const colWidths         = weights.map(w => w * scale);
     const tableWidth        = colWidths.reduce((a, b) => a + b, 0);
-    // Centered on the page; the signature block below shares this same
-    // startX/tableWidth so it can never drift out of line with the table.
+    // Centered on the page; the signature block below shares this same...
     const startX            = doc.page.margins.left + Math.max(0, (pageContentWidth - tableWidth) / 2);
 
     const CELL_PAD_X      = 3;
@@ -367,8 +276,7 @@ async function exportPDF({ res, title, generatedBy, filename, columns, rows, per
     const pdfText          = v => String(v ?? '').replace('\u20b1', 'PHP ');
     const bottomLimit      = () => doc.page.height - doc.page.margins.bottom - 30;
 
-    // The height a row needs: its tallest cell once the text is wrapped to
-    // that column's width, plus padding.
+    // The height a row needs: its tallest cell once the text is wrapped...
     function rowHeightFor(cells, font) {
         doc.font(font).fontSize(8);
         let tallest = 0;
@@ -395,8 +303,7 @@ async function exportPDF({ res, title, generatedBy, filename, columns, rows, per
 
     function drawRow(row, rowY, rowH, { bold = false, topBorder = false, highlight = false } = {}) {
         if (highlight) {
-            // Solid blue fill with white bold text -- the same treatment as the
-            // header bar -- so a totals row reads as clearly as the header.
+            // Solid blue fill with white bold text
             doc.rect(startX, rowY, tableWidth, rowH).fill('#0d6efd');
             doc.fillColor('#fff').font('Helvetica-Bold').fontSize(8);
         } else {
@@ -445,12 +352,7 @@ async function exportPDF({ res, title, generatedBy, filename, columns, rows, per
         }
     }
 
-    // ── Signature block ──────────────────────────────────────
-    // A real drawn line (not underscores), with the caption centered
-    // underneath using the exact same x-start and width as that line --
-    // so it can never drift out of alignment with it.
-    // Generated date/time: directly below the table (and its totals row),
-    // above the signature block.
+    // Signature block - A real drawn line (not underscores)
     y += 14;
     if (y > doc.page.height - doc.page.margins.bottom - 120) {
         doc.addPage();
@@ -485,11 +387,7 @@ async function exportPDF({ res, title, generatedBy, filename, columns, rows, per
 }
 
 async function exportWord({ res, title, generatedBy, filename, columns, rows, periodLabel, totalsRow }) {
-    // Same column rule as Excel and PDF: text left, numbers right, headers
-    // aligned with their data. Column widths are proportional (the same
-    // weights the PDF uses) in a FIXED-layout table, so a wide text column
-    // such as Details gets room and its text wraps inside the cell instead
-    // of being squeezed or cut.
+    // Same column rule as Excel and PDF: text left, numbers right
     const aligns     = columnAligns(columns, rows);
     const wordAlign  = i => aligns[i] === 'right' ? AlignmentType.RIGHT : AlignmentType.LEFT;
     const weightSum  = columns.reduce((s, c) => s + (c.pdfWidth || 70), 0);
@@ -528,8 +426,7 @@ async function exportWord({ res, title, generatedBy, filename, columns, rows, pe
         ? [new TableRow({
             children: totalsRow.map((value, i) => new TableCell({
                 width: cellWidth(i),
-                // Same blue shading as the header row -- see the Excel/PDF
-                // versions of this same row for why.
+                // Same blue shading as the header row
                 shading: { fill: '0D6EFD' },
                 children: [new Paragraph({
                     alignment: wordAlign(i),
@@ -539,15 +436,7 @@ async function exportWord({ res, title, generatedBy, filename, columns, rows, pe
         })]
         : [];
 
-    // Invisible 2-column table used purely for layout, so "Prepared by"
-    // and "Approved by" sit in equal-width blocks. The underline is a
-    // real paragraph BORDER (not typed underscores), and the caption
-    // paragraph directly beneath it is centered against that SAME cell
-    // width -- so it can never drift out from under the line. Each cell
-    // also gets an inward margin (right on the left cell, left on the
-    // right cell) so the two borders don't sit flush against each other --
-    // without it they'd touch at the shared cell boundary and render as
-    // ONE continuous line with no visible break between them at all.
+    // Invisible 2-column table used purely for layout
     const noBorder = { style: BorderStyle.NONE, size: 0, color: 'FFFFFF' };
     const sigLine  = { style: BorderStyle.SINGLE, size: 6, color: '000000' };
     const SIG_GAP  = 360; // twips (0.25in) inset on the facing edge of each cell
@@ -645,15 +534,7 @@ function csvEscape(value) {
     return str;
 }
 
-/**
- * Plain-data CSV export -- deliberately NOT trying to replicate the
- * branded title/date/signature block the other three formats have. CSV
- * has no merged cells or styling at all, so faking that layout would
- * just show up as a row of bare commas; CSV's actual use case is data
- * interchange (reopening in a spreadsheet, filtering, or feeding into
- * another tool), so this is just the header row + data rows + optional
- * totals row, nothing decorative.
- */
+/** Plain-data CSV export */
 function exportCSV({ res, filename, columns, rows, totalsRow }) {
     const lines = [columns.map(c => csvEscape(c.label)).join(',')];
 
@@ -667,13 +548,10 @@ function exportCSV({ res, filename, columns, rows, totalsRow }) {
         lines.push(totalsRow.map(csvEscape).join(','));
     }
 
-    // CRLF line endings -- the CSV spec's own recommendation, and what
-    // Excel/Sheets expect when opening a .csv directly.
+    // CRLF line endings - the CSV spec's own recommendation
     const csvContent = lines.join('\r\n');
 
-    // UTF-8 BOM prefix -- without it, Excel on Windows misreads a UTF-8
-    // file with non-ASCII characters as a different encoding and shows
-    // mojibake instead of the real characters.
+    // UTF-8 BOM prefix - without it, Excel on Windows misreads a UTF-8 file...
     const bom = '\uFEFF';
 
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');
@@ -681,10 +559,7 @@ function exportCSV({ res, filename, columns, rows, totalsRow }) {
     res.send(bom + csvContent);
 }
 
-/**
- * Single entry point every controller uses -- pass the format from the
- * route param, plus the same opts object described above.
- */
+/** Single entry point every controller uses */
 async function exportReport(format, opts) {
     if (format === 'excel') return exportExcel(opts);
     if (format === 'pdf')   return exportPDF(opts);

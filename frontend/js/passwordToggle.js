@@ -1,22 +1,4 @@
-// ============================================================
-// PharmaTrack - passwordToggle.js
-//
-// ONE helper that puts the same show/hide "eye" button on EVERY
-// <input type="password"> in the system: login, forgot password, Edit
-// Profile, User Management, manager approval, and anything added later.
-// Nothing is wired per input -- include this file on a page and every
-// password field on it (now or created later, such as inside a popup
-// that is built on demand) gets the eye automatically.
-//
-// How it works: each password input is wrapped in a .password-field
-// (styled in global.css) and given a small button that flips the input
-// between type="password" and type="text". The input keeps its id,
-// name and every existing event listener, because it is MOVED into the
-// wrapper, not replaced.
-//
-// This file has no dependencies so the login page (which does not load
-// main.js) can use it too.
-// ============================================================
+// PharmaTrack - passwordToggle.js - ONE helper that puts the same show/hide "eye"...
 const PasswordToggle = (() => {
     const SVG_OPEN = 'xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" ' +
                      'stroke="currentColor" stroke-width="2" stroke-linecap="round" ' +
@@ -65,9 +47,7 @@ const PasswordToggle = (() => {
         if (root.querySelectorAll) root.querySelectorAll('input[type="password"]').forEach(enhance);
     }
 
-    // A popup that closes must not leave a password VISIBLE for the next
-    // person who opens it (the manager-approval dialog is reused all day),
-    // so every revealed field inside it goes back to hidden on close.
+    // A popup that closes must not leave a password VISIBLE for the next person who...
     function hideAllIn(container) {
         container.querySelectorAll('.password-field').forEach(w => {
             const input = w.querySelector('input');

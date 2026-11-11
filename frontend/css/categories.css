@@ -1,7 +1,4 @@
-/* ============================================================
-   Category picker (Add/Edit Product), Manage Categories window,
-   and the Import Results window -- Inventory page.
-   ============================================================ */
+/* Category picker (Add/Edit Product), Manage Categories window */
 
 .field-hint {
     font-weight: 400;
@@ -10,10 +7,7 @@
     margin-left: 4px;
 }
 
-/* -- Category picker (Add / Edit Product) --
-   The input sits on top and the list opens BELOW it with a checkbox on every
-   category, like the product search on the Forecasting page. The chosen
-   categories show as small chips under the field. */
+/* Category picker (Add / Edit Product) - The input sits on top and the list opens... */
 .category-combo { position: relative; }
 
 .category-list {
@@ -109,7 +103,7 @@
 
 .category-suggestion .btn { margin: 6px 6px 0 0; }
 
-/* -- Manage Categories window -- */
+/* Manage Categories window */
 .mc-table { width: 100%; }
 
 .mc-table td.mc-actions {
@@ -125,7 +119,7 @@
 
 .mc-name-row { margin-bottom: 10px; }
 
-/* -- Import Results window -- */
+/* Import Results window */
 .ir-summary {
     font-weight:   600;
     margin-bottom: 12px;

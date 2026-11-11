@@ -1,9 +1,4 @@
-// ============================================================
-// PharmaTrack – backup.js
-// Backup & Restore: manual backup, list, restore, delete, download,
-// configurable auto-backup schedule.
-// Accessible by: super_admin ("owner") only
-// ============================================================
+// PharmaTrack - backup.js - Backup & Restore: manual backup, list, restore, delete
 document.addEventListener('DOMContentLoaded', () => {
     if (!Auth.requireAuth(['super_admin'])) return;
 
@@ -16,9 +11,9 @@ document.addEventListener('DOMContentLoaded', () => {
     const periodSelect     = document.getElementById('backup-schedule-period');
     const saveScheduleBtn  = document.getElementById('btn-save-schedule');
 
-    // ── State (sort + pagination) ─────────────────────
+    // State (sort + pagination)
     let allBackups     = [];
-    let backupSort      = null; // set once the table's sortable headers are wired up (see loadBackups)
+    let backupSort      = null; // set once the table's sortable headers are wired up
     let backupPaginate  = null; // set once, alongside backupSort (see loadBackups)
 
     populateTimeSelects();
@@ -28,11 +23,7 @@ document.addEventListener('DOMContentLoaded', () => {
     backupBtn?.addEventListener('click', runManualBackup);
     saveScheduleBtn?.addEventListener('click', saveSchedule);
 
-    // ── Schedule ──────────────────────────────────────────────
-    // Plain dropdowns instead of the browser's built-in time picker --
-    // that one scrolls its hour/minute lists in an endless loop, which is
-    // confusing. These are just fixed lists: 1-12 and 00-59, nothing to
-    // scroll past the end of.
+    // Schedule - Plain dropdowns instead of the browser's built-in time picker...
     function populateTimeSelects() {
         if (!hourSelect || !minuteSelect) return;
 
@@ -48,8 +39,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    // Converts the server's 24-hour "HH:MM" into what the three dropdowns
-    // need (12-hour + AM/PM).
+    // Converts the server's 24-hour "HH:MM" into what the three dropdowns need
     function setSelectsFrom24Hour(time24) {
         const [hStr, mStr] = (time24 || '23:59').split(':');
         let hour = parseInt(hStr, 10);
@@ -99,7 +89,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    // ── Load list ─────────────────────────────────────────────
+    // Load list
     async function loadBackups() {
         const data = await API.get('/backup');
 
@@ -115,10 +105,7 @@ document.addEventListener('DOMContentLoaded', () => {
         allBackups = data.data || [];
         renderSummary(allBackups);
 
-        // Sort operates on allBackups itself; getData (not a plain array)
-        // keeps this correct even though allBackups gets REASSIGNED on
-        // every reload above -- see TableSort's own comment for why a
-        // plain array reference would go stale here.
+        // Sort operates on allBackups itself; getData
         if (!backupSort) {
             backupSort = TableSort.attach(document.querySelector('#backup-table thead'), {
                 getData: () => allBackups,
@@ -139,11 +126,7 @@ document.addEventListener('DOMContentLoaded', () => {
             });
         }
 
-        // Always -- TableSort's resort() unconditionally triggers onSorted
-        // regardless of whether a sort is active, which produces both the
-        // very first render and every later reload's reset-to-page-1
-        // against the freshly-loaded data (same pattern used throughout
-        // inventory.js/users.js/reports.html for this).
+        // Always - TableSort's resort() unconditionally triggers onSorted regardless...
         backupSort.resort();
     }
 
@@ -154,7 +137,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    // ── Render table ──────────────────────────────────────────
+    // Render table
     function renderTable(list) {
         if (!tbody) return;
 
@@ -189,9 +172,7 @@ document.addEventListener('DOMContentLoaded', () => {
             btn.addEventListener('click', () => confirmRestore(btn.dataset.filename)));
         tbody.querySelectorAll('.btn-delete').forEach(btn =>
             btn.addEventListener('click', () => confirmDelete(btn.dataset.filename)));
-        // Touch-device equivalent of the three buttons above -- see
-        // .kebab-trigger in global.css, only ever visible where hover isn't
-        // available.
+        // Touch-device equivalent of the three buttons above
         tbody.querySelectorAll('.kebab-trigger').forEach(btn => {
             const filename = btn.dataset.filename;
             attachKebabMenu(btn, [
@@ -213,7 +194,7 @@ document.addEventListener('DOMContentLoaded', () => {
         return `<span class="backup-type-badge ${cls}">${label}</span>`;
     }
 
-    // ── Manual backup ─────────────────────────────────────────
+    // Manual backup
     async function runManualBackup() {
         backupBtn.disabled    = true;
         backupBtn.textContent = 'Backing up…';
@@ -231,7 +212,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    // ── Restore ───────────────────────────────────────────────
+    // Restore
     async function confirmRestore(filename) {
         const confirmed = await TypedConfirm.show({
             title:       'Restore This Backup?',
@@ -254,7 +235,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    // ── Delete ────────────────────────────────────────────────
+    // Delete
     async function confirmDelete(filename) {
         const confirmed = await TypedConfirm.show({
             title:       'Delete Backup',
@@ -273,9 +254,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    // ── Download ──────────────────────────────────────────────
-    // Uses fetch (not a plain <a href>) since the endpoint needs the
-    // Authorization header — same pattern as inventory.js's CSV import.
+    // Download - Uses fetch (not a plain <a href>) since the endpoint needs...
     async function downloadBackup(filename) {
         const config = typeof getRuntimeConfig === 'function' ? getRuntimeConfig() : CONFIG;
         const token  = Auth.getToken();
@@ -288,14 +267,12 @@ document.addEventListener('DOMContentLoaded', () => {
             });
 
             if (!res.ok) {
-                // A real endpoint failure sends a JSON error body -- read
-                // it instead of a generic message, same fix as
-                // main.js's shared API.request().
+                // A real endpoint failure sends a JSON error body
                 let message = 'Download failed.';
                 try {
                     const errBody = await res.json();
                     if (errBody?.message) message = errBody.message;
-                } catch (e) { /* not JSON -- keep the generic message */ }
+                } catch (e) { /* not JSON - keep the generic message */ }
                 Toast.show(message, 'error');
                 return;
             }
@@ -310,14 +287,13 @@ document.addEventListener('DOMContentLoaded', () => {
             a.remove();
             URL.revokeObjectURL(url);
         } catch (err) {
-            // Genuine network-level failure (fetch() itself rejected) --
-            // distinct from the clean-but-unsuccessful response above.
+            // Genuine network-level failure (fetch() itself rejected) distinct...
             Toast.show('Download failed. Check your connection.', 'error');
         }
     }
 });
 
-// ── Utilities ─────────────────────────────────────────────────
+// Utilities
 function formatBytes(bytes) {
     if (!bytes) return '0 KB';
     const units = ['B', 'KB', 'MB', 'GB'];

@@ -1,43 +1,15 @@
-// ============================================================
-// Backup Service
-// Full-database backup as one plain SQL dump, stored AS A ROW IN THE
-// DATABASE ITSELF (table: `backups`) rather than a file on disk.
-//
-// This changed from filesystem storage after a real failure on Render:
-// Render's disk is ephemeral — every deploy rebuilds the container from
-// scratch, wiping anything written to the local filesystem during the
-// previous run. Backups are the one thing that absolutely cannot be
-// allowed to vanish on deploy, so they now live in the database, which
-// is the one part of this stack that's actually persistent.
-//
-// The CONTENT is still a real, standard .sql dump (CREATE TABLE + INSERT
-// statements, generated the same way mysqldump does it under the hood),
-// so downloading a backup still gives you a plain file that works with
-// MySQL Workbench, the `mysql` command line, phpMyAdmin, etc., completely
-// independent of this app. Only WHERE it's stored between backup and
-// download/restore changed, not what it is.
-//
-// Tables are introspected live via information_schema, so any table
-// added later directly on Aiven (e.g. cash_sessions/cash_movements,
-// which aren't even in database/schema.sql) is picked up automatically —
-// nothing to keep in sync by hand.
-// ============================================================
+// Backup Service - Full-database backup as one plain SQL dump
 const mysql = require('mysql2/promise');
 const db    = require('../config/db');
 const manilaTime = require('../utils/manilaTime');
 
-// Two accepted shapes: the original UTC stamp (2026-10-24T08-03-12-345Z) and the Manila stamp
-// now used for new backups (2026-10-24_16-03-12-345). Still strictly digits and - _ only.
+// Two accepted shapes: the original UTC stamp
 const FILENAME_PATTERN = /^backup-(manual|scheduled|pre-restore-safety)-(?:[0-9T-]+Z|\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}-\d{3})\.sql$/;
 
-// Every generated file starts with this exact line — a cheap sanity check
-// before restoreBackup() ever executes stored content as SQL.
+// Every generated file starts with this exact line
 const FILE_HEADER = '-- PharmaTrack database backup';
 
-// How many SCHEDULED backups to keep before the oldest ones are pruned
-// automatically (see pruneOldScheduledBackups). Manual backups and
-// pre-restore safety copies are never auto-pruned — only the
-// once-a-day automatic ones, so the table doesn't grow forever.
+// How many SCHEDULED backups to keep before the oldest ones are pruned automatically
 const MAX_SCHEDULED_BACKUPS = 30;
 
 function validateFilename(filename) {
@@ -58,20 +30,12 @@ async function getAllTableNames() {
 }
 
 // MySQL DATE/DATETIME columns come back from mysql2 as JS Date objects.
-// Rendering them naively (e.g. toISOString()) would produce UTC, which
-// would silently shift every timestamp by 8 hours on restore (the DB
-// connection itself runs in +08:00 — see config/db.js's DB_TIMEZONE).
-// This renders the SAME wall-clock value that was actually stored.
 function dateToSqlString(value) {
     const shifted = new Date(value.getTime() + 8 * 60 * 60 * 1000);
     return shifted.toISOString().slice(0, 19).replace('T', ' ');
 }
 
-// Converts one cell's JS value into a literal safe to embed directly in
-// an INSERT statement's VALUES list. db.escape() (mysql2) handles the
-// actual quoting/escaping for strings/numbers/booleans, so a value like
-// an apostrophe in a product name can never break out of its literal or
-// be mistaken for SQL syntax.
+// Converts one cell's JS value into a literal safe to embed directly in an INSERT...
 function escapeValue(value) {
     if (value === null || value === undefined) return 'NULL';
     if (value instanceof Date) return db.escape(dateToSqlString(value));
@@ -112,9 +76,7 @@ async function buildSqlDump(triggeredBy) {
             const columns    = Object.keys(rows[0]);
             const columnList = columns.map(c => `\`${c}\``).join(', ');
 
-            // Batched in chunks rather than one giant statement, so a very
-            // large table (audit_logs after months of real use, say)
-            // can't hit MySQL's max_allowed_packet limit.
+            // Batched in chunks rather than one giant statement, so a very large table
             const CHUNK_SIZE = 500;
             for (let i = 0; i < rows.length; i += CHUNK_SIZE) {
                 const chunk = rows.slice(i, i + CHUNK_SIZE);
@@ -133,15 +95,11 @@ async function buildSqlDump(triggeredBy) {
     return { sqlContent: lines.join('\n'), tableCount: tables.length };
 }
 
-/**
- * Creates a full backup and stores it as a row in the `backups` table.
- * @param {string} triggeredBy - 'manual' | 'scheduled' | 'pre-restore-safety'
- */
+/** Creates a full backup and stores it as a row in the `backups` table. */
 async function runBackup(triggeredBy = 'manual') {
     const { sqlContent, tableCount } = await buildSqlDump(triggeredBy);
 
-    // Named in MANILA time (a UTC stamp looked 8 hours behind). Only digits and - _ are used,
-    // so it stays safe in a URL; the milliseconds keep two backups made in the same second apart.
+    // Named in MANILA time (a UTC stamp looked 8 hours behind).
     const mp = manilaTime.parts();
     const two = (n) => String(n).padStart(2, '0');
     const stamp = `${mp.year}-${two(mp.month)}-${two(mp.day)}_${two(mp.hour)}-${two(mp.minute)}-${two(mp.second)}-${String(Date.now() % 1000).padStart(3, '0')}`;
@@ -160,10 +118,7 @@ async function runBackup(triggeredBy = 'manual') {
     return { filename, size, table_count: tableCount, triggered_by: triggeredBy };
 }
 
-// Keeps the table from growing forever on its own — only touches
-// automatic daily backups, never manual ones or pre-restore safety
-// copies, both of which a person deliberately created and might want to
-// keep around indefinitely.
+// Keeps the table from growing forever on its own
 async function pruneOldScheduledBackups() {
     await db.query(
         `DELETE FROM backups
@@ -207,19 +162,7 @@ async function deleteBackup(filename) {
     await db.query(`DELETE FROM backups WHERE filename = ?`, [filename]);
 }
 
-/**
- * Restores the database by executing a stored backup's SQL directly.
- * DESTRUCTIVE — every table covered by it is dropped and recreated from
- * scratch. A fresh safety backup of the CURRENT state is taken first, so
- * an accidental wrong-file restore is itself recoverable.
- *
- * Uses a DEDICATED connection with multipleStatements enabled, rather
- * than the app's shared pool (config/db.js), which deliberately disables
- * multipleStatements in production for security — every other query in
- * this app is a single parameterized statement, so that pool has no
- * business ever running a whole file of raw SQL. This one-off connection
- * is opened only for this operation and closed immediately after.
- */
+/** Restores the database by executing a stored backup's SQL directly. */
 async function restoreBackup(filename) {
     const sqlContent = await getBackupContent(filename);
 
@@ -229,8 +172,7 @@ async function restoreBackup(filename) {
         throw err;
     }
 
-    // Safety net: snapshot whatever is in the database RIGHT NOW before
-    // touching anything, in case the wrong backup gets picked.
+    // Safety net: snapshot whatever is in the database RIGHT NOW before touching...
     const safetySnapshot = await runBackup('pre-restore-safety');
 
     const restoreConnection = await mysql.createConnection({

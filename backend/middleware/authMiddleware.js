@@ -1,20 +1,12 @@
-// ============================================================
-// Authentication & Authorization Middleware
-// Verifies JWT and enforces Role-Based Access Control (RBAC)
-// Roles: super_admin > admin > cashier
-// ============================================================
+// Authentication & Authorization Middleware - Verifies JWT and enforces Role-Based...
 const jwt = require('jsonwebtoken');
+const { PASSWORD_VERSION_SQL } = require('../utils/passwordVersion');
 const db  = require('../config/db');
 
-// ── Role hierarchy ────────────────────────────────────────────
-// Higher index = more permissions
+// Role hierarchy - Higher index = more permissions
 const ROLE_HIERARCHY = { cashier: 0, admin: 1, super_admin: 2 };
 
-/**
- * verifyToken
- * Validates the Bearer JWT in the Authorization header.
- * Attaches decoded user payload to req.user.
- */
+/** verifyToken - Validates the Bearer JWT in the Authorization header. */
 const verifyToken = async (req, res, next) => {
     try {
         const authHeader = req.headers.authorization;
@@ -33,7 +25,7 @@ const verifyToken = async (req, res, next) => {
 
         // Fetch fresh user data (catches deactivated accounts)
         const [rows] = await db.query(
-            'SELECT id, name, email, role, is_active FROM users WHERE id = ?',
+            'SELECT id, name, email, role, is_active, ' + PASSWORD_VERSION_SQL + ' AS pw_version FROM users WHERE id = ?',
             [decoded.id]
         );
 
@@ -44,11 +36,17 @@ const verifyToken = async (req, res, next) => {
             });
         }
 
-        req.user = rows[0];  // Attach user to request
-        // Session start time (JWT 'iat', seconds since epoch) — used to scope
-        // actions like Void to only what THIS login session actually created,
-        // regardless of role. A fresh login (even by the same person) starts
-        // a new boundary; nothing from before this token was issued counts.
+        // A token carries a fingerprint ("pwv") of the password it was issued under.
+        if (decoded.pwv && decoded.pwv !== rows[0].pw_version) {
+            return res.status(401).json({
+                success: false,
+                message: 'Your password was changed. Please log in again.'
+            });
+        }
+
+        const { pw_version, ...currentUser } = rows[0];   // the fingerprint is for this check only
+        req.user = currentUser;  // Attach user to request
+        // Session start time (JWT 'iat', seconds since epoch)
         req.user.session_iat = decoded.iat;
         next();
 
@@ -63,16 +61,7 @@ const verifyToken = async (req, res, next) => {
     }
 };
 
-/**
- * requireRole(...roles)
- * Factory that returns middleware enforcing minimum role level.
- * Usage: requireRole('admin') — allows admin and super_admin
- *        requireRole('super_admin') — allows only super_admin
- *        requireRole('cashier', 'admin') — allows specific roles
- *
- * When an array is passed, it checks for an exact role match (allowlist).
- * When a single role string is passed, it uses hierarchy (≥ that level).
- */
+/** requireRole(...roles) - Factory that returns middleware enforcing minimum role... */
 const requireRole = (...allowedRoles) => {
     return (req, res, next) => {
         if (!req.user) {
@@ -81,7 +70,7 @@ const requireRole = (...allowedRoles) => {
 
         const userRoleLevel = ROLE_HIERARCHY[req.user.role];
 
-        // If a single role is passed, use hierarchical check (user must be >= that level)
+        // If a single role is passed, use hierarchical check
         if (allowedRoles.length === 1 && !Array.isArray(allowedRoles[0])) {
             const requiredLevel = ROLE_HIERARCHY[allowedRoles[0]];
             if (userRoleLevel >= requiredLevel) return next();
@@ -97,11 +86,7 @@ const requireRole = (...allowedRoles) => {
     };
 };
 
-/**
- * logAudit(userId, action, entity, entityId, details, ip)
- * Helper to write to audit_logs table.
- * Called from controllers for significant mutations.
- */
+/** logAudit(userId, action, entity, entityId, details, ip) Helper to write... */
 const logAudit = async (userId, action, entity = null, entityId = null, details = {}, ip = null) => {
     try {
         await db.query(
@@ -110,7 +95,7 @@ const logAudit = async (userId, action, entity = null, entityId = null, details 
             [userId, action, entity, entityId, JSON.stringify(details), ip]
         );
     } catch (err) {
-        // Audit failures should not crash the app — log and continue
+        // Audit failures should not crash the app - log and continue
         console.error('[AUDIT LOG FAILED]', err.message);
     }
 };

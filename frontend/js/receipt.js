@@ -1,17 +1,6 @@
-// ============================================================
-// PharmaTrack - receipt.js
-// ONE receipt template, shared by:
-//   - the POS "Transaction Receipt" window (pos.js)
-//   - the Sales Report "Print Receipt" reprint (reports.html)
-//   - the print-only 80mm output (see receipt.css)
-// so what is shown on screen is exactly what gets printed, and a reprint
-// always matches the original.
-//
-// Needs main.js loaded first (uses Fmt.currency / Fmt.datetime).
-// ============================================================
+// PharmaTrack - receipt.js - ONE receipt template, shared by
 const Receipt = {
-    // The receipt currently shown in the POS window, so its Print button
-    // knows what to print.
+    // The receipt currently shown in the POS window
     current: null,
 
     esc(str) {
@@ -22,17 +11,7 @@ const Receipt = {
             .replace(/"/g, '&quot;');
     },
 
-    /**
-     * Splits an order's stored discount into its two parts for display:
-     *   - "VAT exemption": the VAT taken off a VATable item that got the
-     *     Senior/PWD discount (price - price/1.12)
-     *   - "20% Senior/PWD": the rest
-     * Items are grouped by brand name first, because checkout rounds each
-     * CART LINE once (a line can span several batch rows) -- grouping the
-     * stored rows back by brand reproduces exactly the split the original
-     * receipt showed. The second part is always "total discount minus the
-     * first", so the two lines always add up to the stored discount.
-     */
+    /** Splits an order's stored discount into its two parts for display */
     splitDiscount(items, totalDiscount) {
         const groups = new Map();
         (items || []).forEach(i => {
@@ -55,13 +34,7 @@ const Receipt = {
         return { vatExemption: vatExC / 100, senior: (totalC - vatExC) / 100 };
     },
 
-    /**
-     * Builds receipt data from a stored order (Sales Report row with its
-     * items). Totals come straight from what was saved at checkout, so a
-     * reprint stays exact even if a brand's Tax Exempt flag changed since.
-     * Orders from before VAT existed (no VAT figures stored) get a single
-     * "Discount" line, if any, and no VAT block.
-     */
+    /** Builds receipt data from a stored order (Sales Report row with its items). */
     fromOrder(order) {
         const num   = v => Number(v) || 0;
         const items = (order.items || []).map(i => ({
@@ -103,7 +76,7 @@ const Receipt = {
         };
     },
 
-    /** The receipt markup. Styled by receipt.css. */
+    /** The receipt markup. */
     build(r) {
         const esc   = v => this.esc(v);
         const money = v => Fmt.currency(v);
@@ -160,14 +133,7 @@ const Receipt = {
         </div>`;
     },
 
-    /**
-     * Prints ONLY the receipt. The markup is copied into a hidden
-     * print-only area at the end of <body>; while printing, receipt.css
-     * hides everything else on the page (the rule is scoped to
-     * body.printing-receipt, so a normal Ctrl+P elsewhere is unaffected).
-     * Waits for the logo to load first so it isn't missing from the
-     * printout.
-     */
+    /** Prints ONLY the receipt. */
     print(data) {
         let area = document.getElementById('receipt-print-area');
         if (!area) {

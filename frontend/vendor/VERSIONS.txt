@@ -1,0 +1,30 @@
+Browser libraries hosted by PharmaTrack (copied by backend/scripts/copy-vendor.js).
+Do not edit these files by hand: change the version with npm and run "npm run vendor".
+
+zxing-library.min.js
+  package : @zxing/library@0.23.0
+  file    : umd/index.min.js
+  used by : POS: camera barcode scanner
+  sha384  : 0ASr5PEWAMtTnWsn0PzKmioHVDA4+QqFiJr94io/0DCrGP6E1gRAmbO6O8y5WZW9
+  license : licenses/zxing-library.min.LICENSE.txt
+
+zxing-browser.min.js
+  package : @zxing/browser@0.2.1
+  file    : umd/zxing-browser.min.js
+  used by : POS: camera barcode scanner
+  sha384  : HRtzk9lZgkbSgvUyQrnfC/GxiXZgwaNyD7hC9wcXlsBpDhkS80ISl73juef2FRuf
+  license : licenses/zxing-browser.min.LICENSE.txt
+
+JsBarcode.all.min.js
+  package : jsbarcode@3.12.3
+  file    : dist/JsBarcode.all.min.js
+  used by : Inventory: barcode image
+  sha384  : vmcSy8TM1KhZWBIKMKTR8AxbrJQCuConAolGY+42odu9ZGIzw8L8xAT/u7ul4X2U
+  license : licenses/JsBarcode.all.min.LICENSE.txt
+
+chart.umd.js
+  package : chart.js@4.4.0
+  file    : dist/chart.umd.js
+  used by : Dashboard and Forecasting charts
+  sha384  : FcQlsUOd0TJjROrBxhJdUhXTUgNJQxTMcxZe6nHbaEfFL1zjQ+bq/uRoBQxb0KMo
+  license : licenses/chart.umd.LICENSE.txt

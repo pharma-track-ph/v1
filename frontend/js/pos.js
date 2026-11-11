@@ -1,18 +1,9 @@
-// ============================================================
-// PharmaTrack – pos.js
-// Point of Sale: product search, barcode sim, cart, checkout,
-// and cash register (Opening Cash / Cash In-Out / Close Register)
-// ============================================================
+// PharmaTrack - pos.js - Point of Sale: product search, barcode sim, cart, checkout
 document.addEventListener('DOMContentLoaded', () => {
     // Cashier, admin, and super_admin can access POS
     if (!Auth.requireAuth(['cashier', 'admin', 'super_admin'])) return;
 
-    // ── State ─────────────────────────────────────────────────
-    // -- VAT / Senior-PWD preview math --
-    // Same arithmetic as backend/utils/vat.js (whole centavos, VAT-inclusive
-    // prices, 12% VAT; Senior/PWD removes the VAT first, then takes 20% off).
-    // The SERVER recalculates everything at checkout and is the authority --
-    // this only keeps the cart's totals in step with what it will charge.
+    // State - VAT / Senior-PWD preview math Same arithmetic as backend/utils/vat.js
     function vatLine(grossCents, taxExempt, seniorPwd) {
         const gross = Math.round(grossCents);
 
@@ -62,10 +53,7 @@ document.addEventListener('DOMContentLoaded', () => {
             else { renderCart(); saveCartToStorage(); }
         },
 
-        // Directly setting a quantity (typed into the cart's own quantity
-        // field, same idea as "Type Barcode") rather than only being able
-        // to step it one unit at a time via +/-. Same stock-cap and
-        // remove-on-zero rules as updateQty above.
+        // Directly setting a quantity...
         setQty(productId, newQty) {
             const item = this.items.find(i => i.product.id === productId);
             if (!item) return;
@@ -87,9 +75,7 @@ document.addEventListener('DOMContentLoaded', () => {
             saveCartToStorage();
         },
 
-        // Totals are worked out per cart line in whole centavos (see vatLine
-        // above). discountEnabled is the Senior/PWD (20%) toggle: VAT comes off
-        // first, then 20%, so the "discount" here is larger than a flat 20%.
+        // Totals are worked out per cart line in whole centavos
         _calc() {
             const t = { gross: 0, discount: 0, vat: 0, vatableNet: 0, exempt: 0 };
             this.items.forEach(i => {
@@ -122,16 +108,10 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     };
 
-    // Cash register state — null means no OPEN session for this cashier
+    // Cash register state - null means no OPEN session for this cashier
     let currentCashSession = null;
 
-    // ── Cart persistence ──────────────────────
-    // This is a traditional multi-page app, not a single-page app — navigating
-    // to another page and back is a full page reload, which wipes any
-    // in-memory JS state. sessionStorage survives that (it persists across
-    // reloads/navigation within the same browser tab), but clears when the
-    // tab itself is closed — exactly right for "don't lose my cart if I check
-    // Inventory real quick", without an abandoned cart lingering forever.
+    // Cart persistence - This is a traditional multi-page app, not a single-page app
     const CART_STORAGE_KEY = 'pharmatrack_pos_cart';
 
     function saveCartToStorage() {
@@ -142,7 +122,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 paymentMethod:   cart.paymentMethod,
                 amountTendered:  cart.amountTendered
             }));
-        } catch (e) { /* storage unavailable/full — cart just won't persist, non-fatal */ }
+        } catch (e) { /* storage unavailable/full */ }
     }
 
     function loadCartFromStorage() {
@@ -154,14 +134,10 @@ document.addEventListener('DOMContentLoaded', () => {
             cart.discountEnabled = saved.discountEnabled || false;
             cart.paymentMethod   = saved.paymentMethod    || 'cash';
             cart.amountTendered  = saved.amountTendered   || 0;
-        } catch (e) { /* corrupted data — just start fresh */ }
+        } catch (e) { /* corrupted data - just start fresh */ }
     }
 
-    // After a sale (or Clear) the paying-customer controls go back to a blank slate: the
-    // Amount Paid box is emptied, the Senior/PWD toggle shows OFF, and the payment method
-    // is Cash (the only method). Resetting only the numbers in memory (what clear() used to
-    // do) left the old amount sitting in the box and the toggle looking ON. Because clear()
-    // also saves the cart, nothing of this comes back from sessionStorage either.
+    // After a sale (or Clear) the paying-customer controls go back to a blank slate
     function resetPaymentUI() {
         if (tenderedInput) tenderedInput.value = '';
         if (discountToggle) {
@@ -173,9 +149,7 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    // Syncs the DOM controls (which aren't part of the `cart` object itself)
-    // to match a just-restored cart, since setting the JS state alone doesn't
-    // move a toggle switch or re-select a payment button.
+    // Syncs the DOM controls (which aren't part of the `cart` object itself)...
     function restoreCartUI() {
         if (discountToggle) {
             discountToggle.classList.toggle('active', cart.discountEnabled);
@@ -190,7 +164,7 @@ document.addEventListener('DOMContentLoaded', () => {
         renderCart();
     }
 
-    // ── DOM References ────────────────────────────────────────
+    // DOM References
     const productGrid     = document.getElementById('product-grid');
     const posSearchBar    = document.getElementById('pos-search-bar');
     const searchInput     = document.getElementById('pos-search');
@@ -205,8 +179,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const discountToggle  = document.getElementById('discount-toggle');
     const tenderedInput   = document.getElementById('amount-tendered');
 
-    // Category filter (beside the search box) -- see "Category filter" below loadPOSProducts.
-    // The choice is remembered for this browser tab, like the cart, and Auth.logout clears it.
+    // Category filter (beside the search box)
     const CATEGORY_STORAGE_KEY = 'pharmatrack_pos_category';
     const categoryFilterEl      = document.getElementById('pos-category-filter');
     const knownCategories      = new Set();
@@ -220,20 +193,13 @@ document.addEventListener('DOMContentLoaded', () => {
     const registerBlocker = document.getElementById('register-blocker');
     const posLayout       = document.getElementById('pos-layout');
 
-    // Mobile cart peek/expand controls — see .pos-right's mobile rules in
-    // pos.css. cartPanel itself doubles as both the desktop full panel and
-    // the mobile peek bar; only .cart-expanded changes which one it looks
-    // like on a narrow screen.
+    // Mobile cart peek/expand controls
     const cartPanel        = document.querySelector('.pos-right');
     const cartToggleBtn    = document.getElementById('cart-toggle-btn');
     const cartToggleIcon   = document.getElementById('cart-toggle-icon');
     const cartMobileOverlay= document.getElementById('cart-mobile-overlay');
 
-    // ── Mobile cart peek/expand ──────────────────────────────
-    // Toggles the cart between its compact "peek" bar and the expanded
-    // panel that occupies most of the screen on mobile (see .pos-right's
-    // mobile rules in pos.css). No-op on desktop — .cart-expanded has no
-    // visual effect there since the cart is already a normal full panel.
+    // Mobile cart peek/expand - Toggles the cart between its compact "peek" bar...
     function setCartExpanded(expanded) {
         if (!cartPanel) return;
         cartPanel.classList.toggle('cart-expanded', expanded);
@@ -249,28 +215,21 @@ document.addEventListener('DOMContentLoaded', () => {
 
     cartMobileOverlay?.addEventListener('click', () => setCartExpanded(false));
 
-    // ── Boot ────────────────────────────────────────────────
+    // Boot
     loadCartFromStorage();
     loadPOSProducts();
     loadCashSession();
     restoreCartUI();
 
-    // Changes the server refused (everything except sales, which have their own Pending
-    // Sales list below) are shown by the shared panel in offlineSync.js: a plain-language
-    // explanation of each one. The Inventory page has its own copy for inventory changes.
+    // Changes the server refused...
     SyncIssues.mount('pos');
     const FailedSyncPanel = { refresh: () => SyncIssues.refresh() };
 
-    // -- Pending Sales (offline checkouts waiting to reach the server) --
-    // Lists every sale that was made without a connection (or whose reply was
-    // lost) and has not been recorded yet, plus any the server refused. Each
-    // row can be synced on its own, and "Sync All" does the lot. Nothing here
-    // can double-record a sale: every sale carries a unique reference the
-    // server checks, and only one sync runs at a time.
+    // Pending Sales (offline checkouts waiting to reach the server) Lists every sale...
     const PendingPanel = {
         isOpen:          false,
         busy:            false,
-        syncedThisVisit: [],   // rows that synced while the list was open (shown with a tick until it is closed)
+        syncedThisVisit: [],   // rows that synced while the list was open
         notes:           new Map(),   // queue id -> last "will retry" message
 
         async refresh() {
@@ -386,8 +345,7 @@ document.addEventListener('DOMContentLoaded', () => {
             this.setBusy(true);
             this.setStatus('');
 
-            // Snapshot first: a sale that syncs disappears from storage, and we
-            // still want to show it here as done, with its order number.
+            // Snapshot first: a sale that syncs disappears from storage
             const before = await OfflineAPI.getPendingCheckouts();
 
             try {
@@ -477,9 +435,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     };
 
-    // Housekeeping for the offline queue, once per page load: drop any void
-    // request an older version left in browser storage (it holds a manager's
-    // password), and give older queued sales their duplicate-guard reference.
+    // Housekeeping for the offline queue, once per page load
     (async () => {
         try {
             const removedVoids = await OfflineAPI.purgeStoredVoidRequests();
@@ -503,10 +459,7 @@ document.addEventListener('DOMContentLoaded', () => {
         loadCashSession();
     });
 
-    // ── Load all available products ───────────────────────────
-    // Every card here represents one product *family* — batches of the
-    // same product name are combined server-side into a single card with
-    // a combined stock count, and expired batches are excluded entirely.
+    // Load all available products - Every card here represents one product *family*
     let allProducts = [];
 
     async function loadPOSProducts(query = '') {
@@ -519,13 +472,7 @@ document.addEventListener('DOMContentLoaded', () => {
         renderProductGrid(visibleProducts());
     }
 
-    // -- Category filter -----------------------------------------------------
-    // A dropdown after the Scan Barcode button. It narrows the grid to products that have the
-    // chosen category (a product can have several, stored as "A|B"), TOGETHER with whatever is
-    // typed in the search box -- both must match. allProducts always keeps the FULL list, so
-    // adding to the cart (including a barcode scan) still works for a product the filter is
-    // currently hiding. The options are every category seen so far this visit, so a search
-    // that returns only a few products does not shrink the dropdown.
+    // Category filter - A dropdown after the Scan Barcode button.
     const categoryTokens = (value) => String(value ?? '').split('|').map(s => s.trim()).filter(Boolean);
 
     function visibleProducts() {
@@ -538,7 +485,7 @@ document.addEventListener('DOMContentLoaded', () => {
         try {
             if (categoryFilter) sessionStorage.setItem(CATEGORY_STORAGE_KEY, categoryFilter);
             else                sessionStorage.removeItem(CATEGORY_STORAGE_KEY);
-        } catch (e) { /* storage unavailable -- it just will not be remembered */ }
+        } catch (e) { /* storage unavailable */ }
     }
 
     function refreshCategoryOptions() {
@@ -547,8 +494,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         const names = [...knownCategories].sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
 
-        // A remembered category that no longer exists (renamed or deleted since) quietly goes
-        // back to All Categories instead of leaving the grid empty.
+        // A remembered category that no longer exists
         if (categoryFilter) {
             const match = names.find(n => n.toLowerCase() === categoryFilter.toLowerCase());
             if (match !== categoryFilter) { categoryFilter = match || ''; saveCategoryFilter(); }
@@ -567,9 +513,7 @@ document.addEventListener('DOMContentLoaded', () => {
         renderProductGrid(visibleProducts());
     });
 
-    // ────────────────────────────────────────────────────────
     // CASH REGISTER (Opening Cash / Cash In-Out / Close Register)
-    // ────────────────────────────────────────────────────────
     async function loadCashSession() {
         const data = await OfflineAPI.get('/pos/cash-session/current');
         currentCashSession = data?.success ? data.data : null;
@@ -599,15 +543,13 @@ document.addEventListener('DOMContentLoaded', () => {
             registerBlocker.classList.remove('hidden');
             posLayout.classList.add('hidden');
             cartPanel?.classList.add('hidden');
-            // Nothing to search or scan for until a register session is
-            // open — hide the whole search/scan toolbar, and make sure the
-            // simulated barcode input row isn't left open behind it either.
+            // Nothing to search or scan for until a register session is open
             posSearchBar?.classList.add('hidden');
             barcodeRow?.classList.remove('active');
         }
     }
 
-    // ── Open Register ─────────────────────────────────────────
+    // Open Register
     document.getElementById('btn-open-register')?.addEventListener('click', () => {
         const input = document.getElementById('open-register-amount');
         if (input) input.value = '';
@@ -615,12 +557,7 @@ document.addEventListener('DOMContentLoaded', () => {
         setTimeout(() => input?.focus(), 50);
     });
 
-    // -- Quick-cash buttons (Open Register modal) --
-    // Each button ADDS its amount to whatever is already in the field (typed
-    // or from earlier taps); Clear empties it. The field itself is still a
-    // normal number input, so typing or editing by hand keeps working
-    // between taps. Math is done in whole centavos so a typed amount like
-    // 100.10 never picks up floating-point drift (e.g. 100.10000000000001).
+    // Quick-cash buttons (Open Register modal) - Each button ADDS its amount...
     const openRegisterAmountInput = document.getElementById('open-register-amount');
 
     document.querySelectorAll('#open-register-quick-cash .quick-cash-btn').forEach(btn => {
@@ -665,8 +602,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const isCashier = Auth.getUser()?.role === 'cashier';
 
         if (isCashier) {
-            // Manager/owner approval required to open too now -- same retry
-            // loop pattern as Cash In/Out/Close/Void.
+            // Manager/owner approval required to open too now
             let promptMessage = 'Opening the register requires an admin or owner to approve.';
 
             while (true) {
@@ -711,7 +647,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
 
-    // ── Cash In ────────────────────────────────────────────────
+    // Cash In
     document.getElementById('btn-cash-in')?.addEventListener('click', () => {
         document.getElementById('cash-in-amount').value = '';
         document.getElementById('cash-in-reason').value = '';
@@ -722,7 +658,7 @@ document.addEventListener('DOMContentLoaded', () => {
         handleCashMovement('CASH_IN');
     });
 
-    // ── Cash Out ───────────────────────────────────────────────
+    // Cash Out
     document.getElementById('btn-cash-out')?.addEventListener('click', () => {
         document.getElementById('cash-out-amount').value = '';
         document.getElementById('cash-out-reason').value = '';
@@ -765,7 +701,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const isCashier = Auth.getUser()?.role === 'cashier';
 
         if (isCashier) {
-            // Manager/owner approval required — same retry loop pattern as Void
+            // Manager/owner approval required - same retry loop pattern as Void
             let promptMessage = `${isIn ? 'Adding' : 'Removing'} ${Fmt.currency(amount)} requires an admin or owner to approve.`;
 
             while (true) {
@@ -810,13 +746,11 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    // ── Close Register ─────────────────────────────────────────
+    // Close Register
     document.getElementById('btn-close-register')?.addEventListener('click', async () => {
         if (!currentCashSession) return;
 
-        // Sales still waiting to sync are not in the register's totals yet, and
-        // once the register is closed the server refuses them. So closing is
-        // held until they are synced (or dismissed on purpose).
+        // Sales still waiting to sync are not in the register's totals yet
         const pending = await OfflineAPI.getPendingCheckoutCount(Auth.getUser()?.id);
         if (pending.total > 0) {
             const openList = await ConfirmDialog.show({
@@ -937,25 +871,19 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
 
-    // ── Product search ────────────────────────────────────────
+    // Product search
     searchInput?.addEventListener('input', debounce(() => {
         loadPOSProducts(searchInput.value.trim());
     }, 280));
 
-    // Suggestions read from whatever `allProducts` currently holds -- since
-    // that's replaced by each search's own results, suggestions may lag by
-    // one keystroke during very rapid typing, an acceptable tradeoff
-    // rather than keeping a whole separate "master catalog" copy just for
-    // this.
+    // Suggestions read from whatever `allProducts` currently holds
     SearchSuggest.attach(searchInput, {
         getItems:    () => allProducts,
         getLabel:    p => p.name,
         getSubLabel: p => `${Fmt.currency(p.price)} · Stock: ${p.stock_quantity}`
     });
 
-    // ── Render product cards ───────────────────────────────────
-    // No status tags (expired/low-stock/near-expiry) — expired items
-    // never appear at all, and stock count alone is enough signal.
+    // Render product cards - No status tags (expired/low-stock/near-expiry)
     function renderProductGrid(products) {
         if (!productGrid) return;
 
@@ -984,10 +912,7 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    // ── Add to cart ─────────────────────────────────────────────
-    // Expired batches are never returned by the backend at all, so no
-    // client-side expiry check is needed here — the checkout endpoint
-    // still re-validates server-side as a final safety net regardless.
+    // Add to cart - Expired batches are never returned by the backend at all
     function addToCart(product, qty = 1) {
         qty = Math.max(1, parseInt(qty) || 1);
 
@@ -1008,9 +933,7 @@ document.addEventListener('DOMContentLoaded', () => {
         return true;
     }
 
-    // ── Render cart ───────────────────────────────────────────
-    // The label above the 20% toggle is fixed text ("Discount: Senior/PWD" in
-    // pos.html). It does NOT change when the toggle or an item tick changes.
+    // Render cart - The label above the 20% toggle is fixed text
     function renderCart() {
         if (!cartItemsEl) return;
 
@@ -1051,12 +974,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 });
             });
 
-            // Direct quantity entry -- same idea as "Type Barcode": type a
-            // number instead of only being able to step one at a time.
-            // `change` (fires on blur/Enter), not `input`, since renderCart()
-            // replaces this exact element with a new one every time setQty
-            // runs -- reacting on every keystroke would yank focus away
-            // mid-typing.
+            // Direct quantity entry
             cartItemsEl.querySelectorAll('.qty-input').forEach(input => {
                 input.addEventListener('change', () => {
                     const id = parseInt(input.dataset.id);
@@ -1065,14 +983,11 @@ document.addEventListener('DOMContentLoaded', () => {
                 input.addEventListener('keydown', (e) => {
                     if (e.key === 'Enter') input.blur(); // commits via the change handler above
                 });
-                // Selecting the existing value on focus means typing
-                // immediately replaces it, rather than needing to manually
-                // clear the field first.
+                // Selecting the existing value on focus means typing immediately...
                 input.addEventListener('focus', () => input.select());
             });
 
-            // Senior/PWD tick on a single cart line (the 20% OFF toggle, when on,
-            // covers every line and locks these boxes).
+            // Senior/PWD tick on a single cart line
             cartItemsEl.querySelectorAll('.sp-checkbox').forEach(cb => {
                 cb.addEventListener('change', () => {
                     const item = cart.items.find(i => i.product.id === parseInt(cb.dataset.id));
@@ -1098,7 +1013,7 @@ document.addEventListener('DOMContentLoaded', () => {
         updateChange();
     }
 
-    // ── Discount toggle (flat 20%) ───────────────────────────
+    // Discount toggle (flat 20%)
     discountToggle?.addEventListener('click', () => {
         cart.discountEnabled = !cart.discountEnabled;
         discountToggle.classList.toggle('active', cart.discountEnabled);
@@ -1107,7 +1022,7 @@ document.addEventListener('DOMContentLoaded', () => {
         saveCartToStorage();
     });
 
-    // ── Tendered amount ───────────────────────────────────────
+    // Tendered amount
     tenderedInput?.addEventListener('input', () => {
         cart.amountTendered = parseFloat(tenderedInput.value) || 0;
         updateChange();
@@ -1121,7 +1036,7 @@ document.addEventListener('DOMContentLoaded', () => {
         changeEl.style.color = change >= 0 ? 'var(--success)' : 'var(--danger)';
     }
 
-    // ── Payment method buttons ────────────────────────────────
+    // Payment method buttons
     document.querySelectorAll('.pay-method-btn').forEach(btn => {
         btn.addEventListener('click', () => {
             document.querySelectorAll('.pay-method-btn').forEach(b => b.classList.remove('active'));
@@ -1131,17 +1046,13 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     });
 
-    // ── Simulated Barcode Scanner ─────────────────────────────
+    // Simulated Barcode Scanner
     document.getElementById('btn-barcode-scan')?.addEventListener('click', () => {
         barcodeRow?.classList.add('active');
         barcodeInput?.focus();
     });
 
-    // Quantity to add per typed/scanned barcode -- same stepper pattern as
-    // the camera scanner's #camera-scan-qty (see getCameraScanQty below),
-    // read fresh on every Enter so changing it mid-session (e.g. from 1 to
-    // 20 for the next product) applies immediately without reopening
-    // anything.
+    // Quantity to add per typed/scanned barcode
     const barcodeQtyInput = document.getElementById('barcode-scan-qty');
 
     function getBarcodeScanQty() {
@@ -1160,8 +1071,7 @@ document.addEventListener('DOMContentLoaded', () => {
     barcodeQtyInput?.addEventListener('input', () => {
         if (barcodeQtyInput.value !== '' && getBarcodeScanQty() < 1) barcodeQtyInput.value = 1;
     });
-    // Typing/adjusting the quantity shouldn't fall through to the barcode
-    // input's own Enter/Escape handling below.
+    // Typing/adjusting the quantity shouldn't fall through to the barcode input's...
     barcodeQtyInput?.addEventListener('keydown', (e) => e.stopPropagation());
 
     barcodeInput?.addEventListener('keydown', async (e) => {
@@ -1187,17 +1097,10 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
 
-    // ── Camera Scanner (real camera, phone/laptop/desktop) ──────
-    // Uses ZXing (loaded via CDN in pos.html) to decode barcodes from a live
-    // video feed. Reuses the exact same lookup as manual/simulated scanning
-    // below — the only new part is getting a code INTO that lookup via a
-    // camera instead of a keyboard.
+    // Camera Scanner (real camera, phone/laptop/desktop) Uses ZXing
     let zxingControls = null;
 
-    // Quantity-per-scan stepper (camera modal). Read fresh on every
-    // successful scan (see handleScannedCode), so changing it mid-session
-    // (e.g. from 1 to 50 for the next product) applies immediately without
-    // needing to reopen the scanner.
+    // Quantity-per-scan stepper (camera modal).
     const cameraQtyInput = document.getElementById('camera-scan-qty');
     const cameraFeedback = document.getElementById('camera-scan-feedback');
 
@@ -1222,9 +1125,7 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('btn-camera-done')?.addEventListener('click', closeCameraScanner);
     document.getElementById('btn-camera-close')?.addEventListener('click', closeCameraScanner);
 
-    // Only Done/✕ close this now -- backdrop-click-to-close was removed
-    // app-wide (see main.js), since it was too easy to trigger by
-    // accident and lose scanning progress or an in-progress form.
+    // Only Done/✕ close this now
 
     async function openCameraScanner() {
         console.log('[Camera Scanner] Opening... ZXingBrowser loaded?', typeof ZXingBrowser !== 'undefined');
@@ -1238,22 +1139,11 @@ document.addEventListener('DOMContentLoaded', () => {
         Modal.open('camera-scan-modal');
         const videoEl = document.getElementById('camera-scan-video');
 
-        // Fresh state for this scanning session — quantity defaults back to
-        // 1 and any leftover "Added X" feedback from a previous visit to
-        // this modal is cleared.
+        // Fresh state for this scanning session
         if (cameraQtyInput) cameraQtyInput.value = 1;
         if (cameraFeedback) { cameraFeedback.textContent = ''; cameraFeedback.className = 'camera-scan-feedback'; }
 
-        // Explicitly telling ZXing which formats to look for, plus TRY_HARDER,
-        // is the documented, recommended way to use this library — confirmed
-        // via its own source code and official examples. Without this, the
-        // reader defaults to hints=null, which is exactly what earlier
-        // diagnostic logging showed: a perfect video feed (readyState 4,
-        // 640x480, continuously attempting frames) that never once
-        // successfully decoded a barcode clearly in view. TRY_HARDER trades
-        // a bit of per-frame speed for meaningfully better accuracy, which is
-        // the right tradeoff here since we only need one successful decode,
-        // not rapid-fire scanning of many items per second.
+        // Explicitly telling ZXing which formats to look for, plus TRY_HARDER
         let hints = null;
         if (typeof ZXing !== 'undefined' && ZXing.DecodeHintType && ZXing.BarcodeFormat) {
             hints = new Map();
@@ -1275,33 +1165,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         let frameCount = 0;
 
-        // ── Scan confirmation (fixes false-positive misreads) ──────
-        // ZXing decodes continuously, on essentially every camera frame, and
-        // previously the FIRST successful decode was trusted and acted on
-        // immediately. That's exactly what let a single noisy/blurry/glare-y
-        // frame get accepted as a completely different (wrong) barcode from
-        // the one actually in view — confirmed from a real session where the
-        // camera was pointed at barcode 4800001005001 but a stray frame
-        // decoded as 55112888. The longer a code is held in frame, the more
-        // single-frame attempts happen, so this got worse the longer you held
-        // the barcode up rather than better.
-        //
-        // Fix: require the SAME decoded text on two consecutive frames before
-        // accepting it. A spurious/erroneous decode essentially never repeats
-        // identically twice in a row, so this filters out false positives
-        // while adding only a fraction of a second of perceived delay for a
-        // real, steady scan. `scanLocked` additionally blocks any further
-        // frame callbacks the instant a code IS confirmed.
-        //
-        // The scanner now stays open across multiple scans (see
-        // handleScannedCode below) instead of closing after the first one,
-        // so a code being confirmed is no longer the end of this session —
-        // scanLocked/lastDecodedText/consecutiveMatches get RESET on a short
-        // cooldown afterwards (see resetScanState) rather than staying
-        // locked forever. That cooldown is what stops the same barcode,
-        // still sitting in front of the camera, from being immediately
-        // re-added a second time before the person has had a chance to move
-        // on to the next product.
+        // Scan confirmation (fixes false-positive misreads) ZXing decodes continuously
         const REQUIRED_CONSECUTIVE_MATCHES = 2;
         const SCAN_COOLDOWN_MS             = 1200;
         let lastDecodedText     = null;
@@ -1318,7 +1182,7 @@ document.addEventListener('DOMContentLoaded', () => {
         function handleDecodeResult(result, err) {
             frameCount++;
             if (result) {
-                if (scanLocked) return; // in cooldown after a confirmed scan — ignore stray in-flight frames
+                if (scanLocked) return; // in cooldown after a confirmed scan
 
                 const text = result.getText();
                 if (text === lastDecodedText) {
@@ -1335,27 +1199,17 @@ document.addEventListener('DOMContentLoaded', () => {
                     console.log('[Camera Scanner] CONFIRMED:', text);
                     clearTimeout(cooldownTimer);
                     handleScannedCode(text);
-                    // Give the person a beat to move to the next product before
-                    // the same code in frame could be confirmed again.
+                    // Give the person a beat to move to the next product before...
                     cooldownTimer = setTimeout(resetScanState, SCAN_COOLDOWN_MS);
                 }
             } else if (err && frameCount % 30 === 0) {
-                // ZXing calls this back on EVERY frame, even when nothing is
-                // found (that's normal — it's continuously trying). Logging
-                // every 30th attempt (roughly once a second) instead of every
-                // single frame, so the console stays readable while still
-                // proving the decode loop is actually running at all.
+                // ZXing calls this back on EVERY frame, even when nothing is found
                 console.log('[Camera Scanner] Still scanning, no code found yet. Attempt #' + frameCount, err?.name || err);
             }
         }
 
         try {
-            // facingMode: 'environment' is a soft preference, not a hard
-            // requirement — on a phone it correctly picks the back camera;
-            // on a laptop with no "environment"-facing camera, the browser
-            // falls back to whatever camera IS available (the webcam),
-            // rather than failing outright. This is what lets the exact same
-            // code work sensibly on both phones and laptops.
+            // facingMode: 'environment' is a soft preference, not a hard requirement
             zxingControls = await reader.decodeFromConstraints(
                 { video: { facingMode: 'environment' } },
                 videoEl,
@@ -1370,9 +1224,7 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
 
-        // If more than one camera is available (e.g. a laptop with both a
-        // built-in webcam and an external USB one), offer a picker so the
-        // person isn't stuck on the wrong one with no way to switch.
+        // If more than one camera is available...
         try {
             const devices = await ZXingBrowser.BrowserCodeReader.listVideoInputDevices();
             const selectWrap = document.getElementById('camera-select-wrap');
@@ -1382,9 +1234,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 selectWrap.classList.remove('hidden');
                 select.onchange = async () => {
                     if (zxingControls) { zxingControls.stop(); }
-                    // Reset scan-confirmation state for the newly selected camera —
-                    // a candidate from the old camera feed shouldn't count towards
-                    // confirming a code on the new one.
+                    // Reset scan-confirmation state for the newly selected camera
                     lastDecodedText    = null;
                     consecutiveMatches = 0;
                     scanLocked         = false;
@@ -1395,9 +1245,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 selectWrap.classList.add('hidden');
             }
         } catch (err) {
-            // Device enumeration failing isn't fatal — the camera is likely
-            // already running fine from decodeFromConstraints() above; this
-            // just means no device-picker dropdown will be shown.
+            // Device enumeration failing isn't fatal
         }
     }
 
@@ -1410,10 +1258,7 @@ document.addEventListener('DOMContentLoaded', () => {
         Modal.close('camera-scan-modal');
     }
 
-    // Camera stays open after a successful scan — no closeCameraScanner()
-    // call here — so the cashier can keep scanning the next product without
-    // reopening the modal each time. The quantity stepper is read fresh on
-    // every call, so it's added at whatever quantity was set for THIS scan.
+    // Camera stays open after a successful scan - no closeCameraScanner() call here
     async function handleScannedCode(code) {
         const qty  = getCameraScanQty();
         const data = await OfflineAPI.get(`/pos/products?barcode=${encodeURIComponent(code)}`);
@@ -1434,7 +1279,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    // ── Clear cart ────────────────────────────────────────────
+    // Clear cart
     clearCartBtn?.addEventListener('click', async () => {
         if (cart.isEmpty) return;
         const confirmed = await ConfirmDialog.show({
@@ -1446,12 +1291,8 @@ document.addEventListener('DOMContentLoaded', () => {
         if (confirmed) cart.clear();
     });
 
-    // ── Void: pick which transaction ───────────────
-    // Shows up to the last 50 completed sales from the last CALENDAR MONTH,
-    // from ANY cashier -- not just your own -- so a mistake noticed later,
-    // possibly by someone other than who rang it up, can still be found
-    // and corrected.
-    let voidCandidates = []; // full list from the server, filtered client-side by voidSearch below
+    // Void: pick which transaction - Shows up to the last 50 completed sales...
+    let voidCandidates = []; // full list from the server, filtered client-side...
 
     voidBtn?.addEventListener('click', async () => {
         const candidates = await OfflineAPI.get('/pos/void-candidates');
@@ -1469,9 +1310,7 @@ document.addEventListener('DOMContentLoaded', () => {
         setTimeout(() => voidSearchInput?.focus(), 50);
     });
 
-    // The full ~50-candidate list is already loaded client-side in one shot
-    // above (not paginated), so filtering by order number just narrows the
-    // in-memory array and re-renders -- no extra request needed.
+    // The full ~50-candidate list is already loaded client-side in one shot above
     document.getElementById('void-search')?.addEventListener('input', debounce((e) => {
         const term = e.target.value.trim().toLowerCase();
         const filtered = term
@@ -1527,12 +1366,7 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    // Where the REFUND money goes, shown in the Void and Partial Void windows before the person
-    // confirms (the server does the actual recording -- see recordVoidRefund in posController):
-    //   no open register ......... the refund will not be recorded in a drawer
-    //   the sale is in THIS register  nothing to say (it simply drops out of the cash sales)
-    //   the sale is from another register ... the refund is recorded as money out of THIS register,
-    //                              unless the drawer is expected to hold less than that (refused)
+    // Where the REFUND money goes, shown in the Void and Partial Void windows before...
     function refundNoticeHtml(order, refundAmount) {
         const amount = Number(refundAmount) || 0;
         if (amount <= 0) return '';
@@ -1552,10 +1386,7 @@ document.addEventListener('DOMContentLoaded', () => {
             .map(i => `• ${i.product_name} x${i.quantity}`)
             .join('\n');
 
-        // Voiding something from a PREVIOUS day (or a different cashier's
-        // sale) is allowed, but it can make a Sales/Register report already
-        // generated for that date incorrect after the fact -- flag it
-        // clearly here so it's a conscious choice, not a surprise.
+        // Voiding something from a PREVIOUS day (or a different cashier's sale)...
         const orderDay = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Manila', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(order.created_at));
         const today     = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Manila', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
         const isOlderDay = orderDay !== today;
@@ -1571,8 +1402,7 @@ document.addEventListener('DOMContentLoaded', () => {
             warningLine += `\nThis sale was rung up by ${order.cashier_name}, not you.\n`;
         }
 
-        // Step 1: show what would be voided (same for every role) -- an item list
-        // and soft alert boxes instead of one block of plain text
+        // Step 1: show what would be voided (same for every role)
         const voidItemRows = (order.items || []).map(i => `
             <div class="dlg-item">
                 <div>${escHtml(i.product_name)}<small>Quantity ${i.quantity}</small></div>
@@ -1589,8 +1419,7 @@ document.addEventListener('DOMContentLoaded', () => {
             ${refundNoticeHtml(order, order.total)}
             <div class="dlg-alert danger">This restores stock and cannot be undone.</div>`;
 
-        // Typed CONFIRM comes FIRST, then (for a Pharmacist) the manager's approval -- so a
-        // manager is never called over for a void the Pharmacist then backs out of.
+        // Typed CONFIRM comes FIRST, then (for a Pharmacist) the manager's approval
         const isCashier = Auth.getUser()?.role === 'cashier';
 
         const confirmed = await TypedConfirm.show({
@@ -1605,11 +1434,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!confirmed) return;
 
         if (isCashier) {
-            // Cashiers cannot void on their own authority -- an admin/owner must
-            // approve by entering their own credentials right here. Loop so a
-            // typo doesn't just silently fail; every exit path below is an
-            // explicit return (success, cashier cancels, or a non-credential
-            // failure), so this never spins forever.
+            // Cashiers cannot void on their own authority
             let promptMessage = `Voiding ${order.order_number} requires an admin or owner to approve.`;
 
             while (true) {
@@ -1636,18 +1461,17 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
 
                 if (result?.message?.toLowerCase().includes('credentials')) {
-                    // Wrong email/password or not an admin/owner -- let them retry
+                    // Wrong email/password or not an admin/owner - let them retry
                     promptMessage = `${result.message} Please try again.`;
                     continue;
                 }
 
-                // Any other failure (already voided, closed session, etc.) -- stop
+                // Any other failure (already voided, closed session, etc.) - stop
                 Toast.show(result?.message || 'Void failed.', 'error');
                 return;
             }
         } else {
-            // Admins and Owners already have the authority. The typed CONFIRM above was
-            // their explicit confirmation, so the request goes straight through.
+            // Admins and Owners already have the authority.
             const result = await OfflineAPI.post('/pos/void', { order_id: order.id });
 
             if (result?.offline) {
@@ -1666,12 +1490,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    // ── Checkout ──────────────────────────────────────────────
-    // -- Partial Void --
-    // Void only some of the items (or some of the quantity) of a sale. The server
-    // voids the original receipt, restocks just what was voided, and issues a NEW
-    // receipt for what remains (see posController.partialVoidOrder). Same approval
-    // as a full void; needs an internet connection like one.
+    // Checkout - Partial Void Void only some of the items
     const PartialVoid = {
         order: null,
         qty:   new Map(),   // order_items.id -> quantity to void
@@ -1727,9 +1546,7 @@ document.addEventListener('DOMContentLoaded', () => {
             this.qty   = new Map();
         },
 
-        // Live numbers for the summary, worked out with the same VAT/Senior-PWD math
-        // the server uses (vatLine above), so what you see is what the new receipt
-        // will total.
+        // Live numbers for the summary, worked out with the same VAT/Senior-PWD math...
         summary() {
             const items = this.order?.items || [];
             const soldUnits = items.reduce((s, i) => s + i.quantity, 0);
@@ -1773,8 +1590,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 warnings += `<div class="pv-warning">This sale was rung up by ${escHtml(order.cashier_name)}, not you.</div>`;
             }
 
-            // when a brand was filled from several batches it has several rows;
-            // show the batch so they can be told apart
+            // when a brand was filled from several batches it has several rows
             const nameCount = items.reduce((m, i) => m.set(i.product_name, (m.get(i.product_name) || 0) + 1), new Map());
 
             const rows = items.map(i => {
@@ -1824,8 +1640,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const newTotalText = Fmt.currency(s.newTotalCents / 100);
             const isCashier    = Auth.getUser()?.role === 'cashier';
 
-            // The two figures that matter -- what goes back to the customer, and what the new
-            // receipt will total -- are the biggest things in the window.
+            // The two figures that matter
             const partialHtml = `
                 <div class="dlg-lead">
                     <div><div class="dlg-label">Refund to customer</div><div class="dlg-big">${refundText}</div></div>
@@ -1912,8 +1727,7 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
 
-        // Show a summary of exactly what's about to be charged before doing
-        // anything irreversible — same principle as the void confirmation.
+        // Show a summary of exactly what's about to be charged before doing anything...
         const itemsList = cart.items
             .map(i => `• ${i.product.name} x${i.quantity} @ ${Fmt.currency(i.product.price)} = ${Fmt.currency(i.product.price * i.quantity)}${(cart.discountEnabled || i.seniorPwd) ? '  [Senior/PWD 20%]' : ''}`)
             .join('\n');
@@ -1928,8 +1742,7 @@ document.addEventListener('DOMContentLoaded', () => {
             `Tendered: ${Fmt.currency(tendered)}\n` +
             `Change: ${Fmt.currency(tendered - cart.total)}`;
 
-        // The same facts as the plain-text summary above, laid out as an item list
-        // and a totals card so it reads at a glance.
+        // The same facts as the plain-text summary above
         const money = (v) => Fmt.currency(v);
         const itemRows = cart.items.map(i => {
             const senior = cart.discountEnabled || i.seniorPwd === true;
@@ -1967,16 +1780,7 @@ document.addEventListener('DOMContentLoaded', () => {
         checkoutBtn.disabled = true;
         checkoutBtn.textContent = 'Processing…';
 
-        // batch_ids lets the backend consume stock FEFO (earliest-expiring
-        // batch first) across whichever batches make up this product's
-        // combined stock count.
-        //
-        // cash_session_id is captured HERE, at the moment Checkout is
-        // clicked — this matters for offline mode: if this sale gets
-        // queued and only syncs later (possibly after this exact shift
-        // has since closed), the server will check THIS specific session
-        // ID is still open, rather than silently attaching the sale to
-        // whatever shift happens to be open at sync time.
+        // batch_ids lets the backend consume stock FEFO
         const payload = {
             items: cart.items.map(i => ({
                 product_id: i.product.id,
@@ -1988,14 +1792,11 @@ document.addEventListener('DOMContentLoaded', () => {
             amount_tendered: tendered,
             senior_pwd_all:  cart.discountEnabled,
             cash_session_id: currentCashSession.id,
-            // A random reference for THIS sale. The server remembers it, so if
-            // this exact sale ever arrives twice (a reply lost on the way back,
-            // or a manual re-sync) it is recognized and recorded only once.
+            // A random reference for THIS sale.
             client_ref:      OfflineAPI.newSaleRef()
         };
 
-        // Details kept with a sale that ends up queued, only so the Pending Sales
-        // list can describe it. Never sent to the server.
+        // Details kept with a sale that ends up queued, only
         const me = Auth.getUser();
         const saleMeta = {
             created_at:   new Date().toISOString(),
@@ -2025,8 +1826,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 loadPOSProducts();
                 PendingPanel.refresh();
             } else if (result.duplicate && !result.receipt) {
-                // The server had already recorded this exact sale (an earlier
-                // attempt got through but its reply was lost) -- nothing to redo.
+                // The server had already recorded this exact sale
                 Toast.show(`This sale was already recorded${result.order_number ? ' as ' + result.order_number : ''}.`, 'info');
                 cart.clear();
                 loadPOSProducts();
@@ -2039,8 +1839,7 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         } else {
             if (result?.blocked && result?.reason === 'no_open_register') {
-                // Our cached state was stale (e.g. register closed in another
-                // tab) — resync so the blocker screen shows correctly.
+                // Our cached state was stale (e.g. register closed in another tab)
                 Toast.show(result.message, 'error');
                 loadCashSession();
             } else if (result?.blocked && result?.reason === 'session_mismatch') {
@@ -2054,24 +1853,19 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    // ── Receipt Modal ─────────────────────────────────────────
+    // Receipt Modal
     function showReceipt(receipt) {
         const receiptBody = document.getElementById('receipt-body');
         if (!receiptBody) return;
 
-        // The receipt layout lives in receipt.js (shared with the Sales Report
-        // reprint and the print-only 80mm output), so what's shown here is
-        // exactly what gets printed.
+        // The receipt layout lives in receipt.js...
         Receipt.current = receipt;
         receiptBody.innerHTML = Receipt.build(receipt);
 
         Modal.open('receipt-modal');
     }
 
-    // ── AI Suggestion (Mock Prototype) ─────────────────────────
-    // AI medicine suggestions are now handled by the JotForm AI Agent
-    // (floating chat widget, loaded directly in pos.html) — the old mock
-    // keyword-lookup endpoint (/pos/ai-suggest) is no longer used here.
+    // AI Suggestion (Mock Prototype) - AI medicine suggestions are now handled...
 });
 
 function escHtml(str) {
