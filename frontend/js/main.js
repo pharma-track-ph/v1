@@ -981,14 +981,17 @@ const EditProfileModal = {
                     <div class="form-group">
                         <label class="form-label">Current Password</label>
                         <input type="password" id="edit-profile-current-pw" class="form-control" autocomplete="current-password">
+                        <p class="error-msg" id="edit-profile-current-pw-error" aria-live="polite" style="min-height:0;margin:4px 0 0;text-align:left;font-size:0.8rem"></p>
                     </div>
                     <div class="form-group">
                         <label class="form-label">New Password</label>
                         <input type="password" id="edit-profile-new-pw" class="form-control" autocomplete="new-password" placeholder="Min. 10 characters">
+                        <p class="error-msg" id="edit-profile-new-pw-error" aria-live="polite" style="min-height:0;margin:4px 0 0;text-align:left;font-size:0.8rem"></p>
                     </div>
                     <div class="form-group">
                         <label class="form-label">Confirm New Password</label>
                         <input type="password" id="edit-profile-confirm-pw" class="form-control" autocomplete="new-password">
+                        <p class="error-msg" id="edit-profile-confirm-pw-error" aria-live="polite" style="min-height:0;margin:4px 0 0;text-align:left;font-size:0.8rem"></p>
                     </div>
                     </div>
 
@@ -1078,6 +1081,7 @@ const EditProfileModal = {
             const btn   = document.getElementById('btn-save-profile');
             const errEl = document.getElementById('edit-profile-error');
             errEl.textContent = '';
+            this.clearPasswordErrors();
 
             const body = {};
             const currentUser = Auth.getUser();
@@ -1111,9 +1115,23 @@ const EditProfileModal = {
             }
 
             if (wantsPasswordChange) {
-                if (!currentPw) { errEl.textContent = 'Enter your current password to set a new one.'; return; }
-                if (!newPw || newPw.length < 10) { errEl.textContent = 'New password must be at least 10 characters.'; return; }
-                if (newPw !== confirmPw) { errEl.textContent = 'New passwords do not match.'; return; }
+                // Every problem is shown at once, each under its own field
+                const problems = {};
+                if (!currentPw) problems['edit-profile-current-pw'] = 'Enter your current password.';
+                const newPwMissing = passwordMissing(newPw);
+                if (newPwMissing) problems['edit-profile-new-pw'] = newPwMissing;
+                if (newPw !== confirmPw) problems['edit-profile-confirm-pw'] = 'New passwords do not match.';
+
+                // Only the server knows whether the current password is right (checkOnly: nothing is emailed or saved)
+                if (currentPw) {
+                    const check = await API.post('/auth/change-password-otp/request', { currentPassword: currentPw, newPassword: newPw || '', checkOnly: true });
+                    if (check?.errors?.currentPassword) problems['edit-profile-current-pw'] = check.errors.currentPassword;
+                }
+
+                if (Object.keys(problems).length) {
+                    Object.entries(problems).forEach(([id, message]) => this.setFieldError(id, message));
+                    return;
+                }
             }
 
             btn.disabled = true;
@@ -1174,6 +1192,16 @@ const EditProfileModal = {
         });
     },
 
+    // One short red line under a password field ('' clears it)
+    setFieldError(inputId, message) {
+        const el = document.getElementById(inputId + '-error');
+        if (el) el.textContent = message || '';
+    },
+
+    clearPasswordErrors() {
+        ['edit-profile-current-pw', 'edit-profile-new-pw', 'edit-profile-confirm-pw'].forEach(id => this.setFieldError(id, ''));
+    },
+
     setPreview(src) {
         const el = document.getElementById('edit-profile-avatar-preview');
         if (!el) return;
@@ -1231,6 +1259,7 @@ const EditProfileModal = {
         if (confirmPwEl) confirmPwEl.value = '';
         const errEl = document.getElementById('edit-profile-error');
         if (errEl) errEl.textContent = '';
+        this.clearPasswordErrors();
 
         const currentEmailEl = document.getElementById('edit-profile-current-email');
         const newEmailEl     = document.getElementById('edit-profile-new-email');

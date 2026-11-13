@@ -395,7 +395,8 @@
             const btn = document.getElementById('fp-reset-password-btn');
             errorEl.textContent = '';
 
-            if (!newPassword || newPassword.length < 10) { errorEl.textContent = 'Password must be at least 10 characters.'; return; }
+            const missingPw = passwordMissing(newPassword);
+            if (missingPw) { errorEl.textContent = missingPw; return; }
             if (newPassword !== confirmPassword)         { errorEl.textContent = 'Passwords do not match.'; return; }
 
             btn.disabled = true;

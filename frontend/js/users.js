@@ -270,7 +270,8 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!editingId && !email) { Toast.show('Email is required.', 'error'); return; }
         if (!role)  { Toast.show('Role is required.', 'error'); return; }
         if (!editingId && !password) { Toast.show('Password is required for new users.', 'error'); return; }
-        if (password && password.length < 10) { Toast.show('Password must be at least 10 characters.', 'error'); return; }
+        const pwMissing = password ? passwordMissing(password) : '';
+        if (pwMissing) { Toast.show(pwMissing, 'error'); return; }
         // Confirm Password only exists/matters in Add mode
         if (!editingId && password !== passwordConfirm) { Toast.show('Passwords do not match.', 'error'); return; }
 
@@ -397,7 +398,8 @@ document.addEventListener('DOMContentLoaded', () => {
         const newPw  = document.getElementById('new-pw')?.value;
         const confPw = document.getElementById('confirm-pw')?.value;
 
-        if (!newPw || newPw.length < 10) { Toast.show('Password must be at least 10 characters.', 'error'); return; }
+        const newPwMissing = passwordMissing(newPw);
+        if (newPwMissing) { Toast.show(newPwMissing, 'error'); return; }
         if (newPw !== confPw)           { Toast.show('Passwords do not match.', 'error'); return; }
 
         const u = allUsers.find(x => x.id === pwTargetId);
@@ -694,7 +696,7 @@ document.addEventListener('DOMContentLoaded', () => {
             ];
             const cfg = configs[score - 1] || configs[0];
             bar.style.cssText  = `width:${cfg.width};background:${cfg.color}`;
-            hint.textContent   = cfg.text;
+            hint.textContent   = passwordMissing(val);   // names ONLY what is still missing; empty once the rule is met
             hint.style.color   = cfg.color;
         });
     }

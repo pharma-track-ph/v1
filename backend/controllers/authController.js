@@ -909,24 +909,40 @@ const updateProfile = async (req, res, next) => {
 /** POST /api/auth/change-password-otp/request [Any authenticated role] Body */
 const requestChangePasswordOtp = async (req, res, next) => {
     try {
-        const { currentPassword, newPassword } = req.body;
+        const { currentPassword, newPassword, checkOnly } = req.body;
 
-        if (!currentPassword || !newPassword) {
-            return res.status(400).json({ success: false, message: 'Current and new password are required.' });
-        }
-        const pwProblem = passwordProblem(newPassword, { email: req.user.email, name: req.user.name });
-        if (pwProblem) {
-            return res.status(400).json({ success: false, message: pwProblem });
-        }
+        // Every problem is reported together, each against its own field, so the screen can show them all at once
+        const errors = {};
+        if (!currentPassword) errors.currentPassword = 'Enter your current password.';
+        const pwProblem = passwordProblem(newPassword);
+        if (pwProblem) errors.newPassword = pwProblem;
 
         const requester = await User.findByIdWithPassword(req.user.id);
         if (!requester) return res.status(404).json({ success: false, message: 'User not found.' });
 
-        const matches = await User.comparePassword(currentPassword, requester.password);
-        if (!matches) {
-            // 400, not 401 - this is a wrong FORM FIELD
-            return res.status(400).json({ success: false, message: 'Current password is incorrect.' });
+        // Wrong current-password guesses are limited like logins: 5 wrong in 15 minutes locks this check for 15 minutes
+        const throttleKey = `password-change:${req.user.id}`;
+        const lock = loginThrottle.check(throttleKey);
+        if (lock.locked) {
+            const message = lockedMessage(lock.retryAfterSeconds);
+            return res.status(429).json({ success: false, message, errors: { ...errors, currentPassword: message } });
         }
+        if (currentPassword) {
+            const matches = await User.comparePassword(currentPassword, requester.password);
+            if (matches) {
+                loginThrottle.clear(throttleKey);
+            } else {
+                const attempt = loginThrottle.fail(throttleKey);
+                errors.currentPassword = attempt.justLocked ? lockedMessage(attempt.retryAfterSeconds) : 'Incorrect password.';
+            }
+        }
+        if (errors.currentPassword || errors.newPassword) {
+            // 400, not 401 - these are wrong FORM FIELDS
+            return res.status(400).json({ success: false, message: errors.currentPassword || errors.newPassword, errors });
+        }
+
+        // checkOnly: the screen only wants to know the fields are right; nothing is emailed or stored
+        if (checkOnly === true) return res.json({ success: true, checkOnly: true });
 
         const otp       = String(crypto.randomInt(100000, 1000000));
         const otpHash   = await bcrypt.hash(otp, 10);

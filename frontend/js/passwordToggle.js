@@ -82,3 +82,23 @@ const PasswordToggle = (() => {
 
     return { enhance, enhanceAll };
 })();
+
+// The classic password rule: at least 10 characters with a capital letter, a number and a special character.
+// passwordMissingList() names ONLY what is missing; passwordMissing() makes it one sentence (empty when nothing is missing).
+// (The server applies the same rule and wording: passwordProblem() in backend/utils/inputGuards.js.)
+function passwordMissingList(pw) {
+    const v = String(pw ?? '');
+    const need = [];
+    if (v.length < 10)               need.push('10 characters');
+    if (!/\p{Lu}/u.test(v))          need.push('1 capital letter');
+    if (!/[0-9]/.test(v))            need.push('1 number');
+    if (!/[^\p{L}\p{N}\s]/u.test(v)) need.push('1 special character');
+    return need;
+}
+
+function passwordMissing(pw) {
+    const need = passwordMissingList(pw);
+    if (!need.length) return '';
+    const list = need.length > 1 ? `${need.slice(0, -1).join(', ')} and ${need[need.length - 1]}` : need[0];
+    return `You need at least ${list}.`;
+}
