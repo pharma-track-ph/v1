@@ -1460,9 +1460,14 @@ const ChangeEmailOtpModal = {
                     </p>
                     <p id="change-email-otp-status" style="font-size:0.8rem;color:var(--secondary);margin-bottom:16px">Sending verification code...</p>
                     <div class="form-group">
-                        <label class="form-label">6-Digit Code *</label>
+                        <label class="form-label">Code 1: sent to your CURRENT email <strong id="change-email-otp-sent-current"></strong> *</label>
                         <input type="text" id="change-email-otp-code" class="form-control" inputmode="numeric" maxlength="6"
                                placeholder="000000" autocomplete="one-time-code" style="letter-spacing:6px;text-align:center;font-size:1.2rem">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Code 2: sent to your NEW email <strong id="change-email-otp-sent-new"></strong> *</label>
+                        <input type="text" id="change-email-otp-code-new" class="form-control" inputmode="numeric" maxlength="6"
+                               placeholder="000000" autocomplete="off" style="letter-spacing:6px;text-align:center;font-size:1.2rem">
                     </div>
                     <p style="font-size:0.78rem;color:var(--secondary);margin-top:10px">
                         Didn't get a code? <button type="button" id="btn-resend-change-email-otp" style="background:none;border:none;color:var(--primary);cursor:pointer;padding:0;font-size:0.78rem;text-decoration:underline">Resend code</button>
@@ -1482,7 +1487,8 @@ const ChangeEmailOtpModal = {
             if (!this.pendingNewEmail) return;
             const result = await API.post('/auth/change-email-otp/request', { newEmail: this.pendingNewEmail });
             if (result?.success) {
-                this.setStatus(result.message || 'A new code has been sent.');
+                ['change-email-otp-code', 'change-email-otp-code-new'].forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
+                this.setStatus('New codes sent.');
                 this.startResendCooldown();
             } else {
                 this.setStatus(result?.message || 'Could not resend code.', true);
@@ -1490,14 +1496,17 @@ const ChangeEmailOtpModal = {
         });
 
         document.getElementById('btn-confirm-change-email-otp')?.addEventListener('click', () => this.confirm());
-        document.getElementById('change-email-otp-code')?.addEventListener('keydown', (e) => {
-            if (e.key === 'Enter') this.confirm();
+        ['change-email-otp-code', 'change-email-otp-code-new'].forEach(id => {
+            document.getElementById(id)?.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter') this.confirm();
+            });
         });
     },
 
     setStatus(message, isError = false) {
         const el = document.getElementById('change-email-otp-status');
         if (!el) return;
+        el.style.display = message ? '' : 'none';   // nothing to say = no empty gap
         el.textContent = message;
         el.style.color = isError ? 'var(--danger)' : 'var(--secondary)';
     },
@@ -1536,8 +1545,14 @@ const ChangeEmailOtpModal = {
         if (newEl) newEl.textContent = newEmail;
         const codeInput = document.getElementById('change-email-otp-code');
         if (codeInput) codeInput.value = '';
+        const newCodeInput = document.getElementById('change-email-otp-code-new');
+        if (newCodeInput) newCodeInput.value = '';
+        const sentCurrent = document.getElementById('change-email-otp-sent-current');
+        if (sentCurrent) sentCurrent.textContent = result.sentTo?.current ? `(${result.sentTo.current})` : '';
+        const sentNew = document.getElementById('change-email-otp-sent-new');
+        if (sentNew) sentNew.textContent = `(${result.sentTo?.newEmail || newEmail})`;
         Modal.open('change-email-otp-modal');
-        this.setStatus(result.message || 'A verification code has been sent.');
+        this.setStatus('');
         this.startResendCooldown();
         codeInput?.focus();
 
@@ -1551,16 +1566,17 @@ const ChangeEmailOtpModal = {
     },
 
     async confirm() {
-        const otp = document.getElementById('change-email-otp-code')?.value.trim();
-        if (!/^\d{6}$/.test(otp)) {
-            this.setStatus('Enter the 6-digit code.', true);
+        const otp    = document.getElementById('change-email-otp-code')?.value.trim();
+        const otpNew = document.getElementById('change-email-otp-code-new')?.value.trim();
+        if (!/^\d{6}$/.test(otp) || !/^\d{6}$/.test(otpNew)) {
+            this.setStatus('Enter both 6-digit codes.', true);
             return;
         }
 
         const btn = document.getElementById('btn-confirm-change-email-otp');
         btn.disabled    = true;
         btn.textContent = 'Verifying...';
-        const result = await API.post('/auth/change-email-otp/confirm', { otp });
+        const result = await API.post('/auth/change-email-otp/confirm', { otp, otpNew });
         btn.disabled    = false;
         btn.textContent = 'Confirm';
 

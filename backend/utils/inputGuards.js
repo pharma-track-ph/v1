@@ -76,7 +76,24 @@ function avatarProblem(value) {
     return null;
 }
 
+// Email address - letters, digits and the usual symbols before the @, a real domain with a dot after it, at most 150 characters.
+// This only checks the SHAPE; a code sent to the address is what proves it is real.
+const EMAIL_LOCAL  = /^[A-Za-z0-9!#$%&'*+/=?^_`{|}~-]+(?:\.[A-Za-z0-9!#$%&'*+/=?^_`{|}~-]+)*$/;
+const EMAIL_DOMAIN = /^(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)+[A-Za-z]{2,24}$/;
+const MAX_EMAIL_LENGTH = 150;
+
+function emailProblem(value) {
+    const email = String(value ?? '').trim();
+    if (!email) return 'Email is required.';
+    const parts = email.split('@');
+    if (email.length > MAX_EMAIL_LENGTH || parts.length !== 2 || parts[0].length > 64
+        || !EMAIL_LOCAL.test(parts[0]) || !EMAIL_DOMAIN.test(parts[1])) {
+        return 'Enter a valid email address.';
+    }
+    return null;
+}
+
 module.exports = {
-    plainTextProblem, passwordProblem, avatarProblem,
-    MIN_PASSWORD_LENGTH, AVATAR_MAX_CHARS
+    plainTextProblem, passwordProblem, avatarProblem, emailProblem,
+    MIN_PASSWORD_LENGTH, AVATAR_MAX_CHARS, MAX_EMAIL_LENGTH
 };

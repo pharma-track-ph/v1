@@ -439,8 +439,14 @@ document.addEventListener('DOMContentLoaded', () => {
         document.getElementById('email-otp-new-email').textContent   = newEmail;
         const codeInput = document.getElementById('email-otp-code');
         if (codeInput) codeInput.value = '';
+        const newCodeInput = document.getElementById('email-otp-code-new');
+        if (newCodeInput) newCodeInput.value = '';
+        const sentCurrent = document.getElementById('email-otp-sent-current');
+        if (sentCurrent) sentCurrent.textContent = result.sentTo?.current || 'the Owner';
+        const sentNew = document.getElementById('email-otp-sent-new');
+        if (sentNew) sentNew.textContent = result.sentTo?.newEmail || newEmail;
         Modal.open('email-otp-modal');
-        setEmailOtpStatus(result.message || 'A verification code has been sent.');
+        setEmailOtpStatus('');
         startEmailOtpResendCooldown();
         codeInput?.focus();
     }
@@ -448,6 +454,7 @@ document.addEventListener('DOMContentLoaded', () => {
     function setEmailOtpStatus(message, isError = false) {
         const el = document.getElementById('email-otp-status');
         if (!el) return;
+        el.style.display = message ? '' : 'none';   // nothing to say = no empty gap
         el.textContent = message;
         el.style.color = isError ? 'var(--danger)' : 'var(--secondary)';
     }
@@ -488,7 +495,8 @@ document.addEventListener('DOMContentLoaded', () => {
             newEmail: pendingEmailOtp.newEmail
         });
         if (result?.success) {
-            setEmailOtpStatus(result.message || 'A new code has been sent.');
+            ['email-otp-code', 'email-otp-code-new'].forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
+            setEmailOtpStatus('New codes sent.');
             startEmailOtpResendCooldown();
         } else {
             setEmailOtpStatus(result?.message || 'Could not resend code.', true);
@@ -497,16 +505,17 @@ document.addEventListener('DOMContentLoaded', () => {
 
     async function confirmEmailOtp() {
         if (!pendingEmailOtp) return;
-        const otp = document.getElementById('email-otp-code')?.value.trim();
-        if (!/^\d{6}$/.test(otp)) {
-            setEmailOtpStatus('Enter the 6-digit code.', true);
+        const otp    = document.getElementById('email-otp-code')?.value.trim();
+        const otpNew = document.getElementById('email-otp-code-new')?.value.trim();
+        if (!/^\d{6}$/.test(otp) || !/^\d{6}$/.test(otpNew)) {
+            setEmailOtpStatus('Enter both 6-digit codes.', true);
             return;
         }
 
         const btn = document.getElementById('btn-confirm-email-otp');
         btn.disabled    = true;
         btn.textContent = 'Verifying…';
-        const result = await API.post(`/auth/users/${pendingEmailOtp.targetId}/email-otp/confirm`, { otp });
+        const result = await API.post(`/auth/users/${pendingEmailOtp.targetId}/email-otp/confirm`, { otp, otpNew });
         btn.disabled    = false;
         btn.textContent = 'Confirm';
 
@@ -522,8 +531,10 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     document.getElementById('btn-confirm-email-otp')?.addEventListener('click', confirmEmailOtp);
-    document.getElementById('email-otp-code')?.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter') confirmEmailOtp();
+    ['email-otp-code', 'email-otp-code-new'].forEach(id => {
+        document.getElementById(id)?.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') confirmEmailOtp();
+        });
     });
 
     // Action Verification (OTP) - Generic version of the Email Change OTP flow above
@@ -546,17 +557,32 @@ document.addEventListener('DOMContentLoaded', () => {
 
         const codeInput = document.getElementById('action-otp-code');
         if (codeInput) codeInput.value = '';
+        showActionNewCode(result);
         Modal.open('action-otp-modal');
-        setActionOtpStatus(result.message || 'A verification code has been sent.');
+        setActionOtpStatus(result.requiresNewCode ? '' : (result.message || 'A verification code has been sent.'));
         startActionOtpResendCooldown();
         codeInput?.focus();
 
         return { success: true };
     }
 
+    // Add User sends a SECOND code to the new person's address: show its box (hidden for every other action)
+    function showActionNewCode(result) {
+        const needsNew = !!result?.requiresNewCode;
+        const group    = document.getElementById('action-otp-new-group');
+        const input    = document.getElementById('action-otp-code-new');
+        const label1   = document.getElementById('action-otp-label-1');
+        const sentNew  = document.getElementById('action-otp-sent-new');
+        if (input) input.value = '';
+        if (group) group.classList.toggle('hidden', !needsNew);
+        if (label1) label1.textContent = needsNew ? `Code 1: sent to ${result.sentTo?.current || 'your email'} *` : '6-Digit Code *';
+        if (sentNew) sentNew.textContent = needsNew ? (result.sentTo?.newEmail || '') : '';
+    }
+
     function setActionOtpStatus(message, isError = false) {
         const el = document.getElementById('action-otp-status');
         if (!el) return;
+        el.style.display = message ? '' : 'none';   // nothing to say = no empty gap
         el.textContent = message;
         el.style.color = isError ? 'var(--danger)' : 'var(--secondary)';
     }
@@ -585,6 +611,7 @@ document.addEventListener('DOMContentLoaded', () => {
         Modal.close('action-otp-modal');
         if (actionOtpResendCooldown) clearInterval(actionOtpResendCooldown);
         pendingAction = null;
+        showActionNewCode(null);
     }
 
     document.querySelectorAll('.btn-close-action-otp').forEach(btn =>
@@ -596,7 +623,8 @@ document.addEventListener('DOMContentLoaded', () => {
         if (result?.success) {
             const descEl = document.getElementById('action-otp-description');
             if (descEl && result.data?.description) descEl.textContent = result.data.description;
-            setActionOtpStatus(result.message || 'A new code has been sent.');
+            showActionNewCode(result);
+            setActionOtpStatus(result.requiresNewCode ? 'New codes sent.' : (result.message || 'A new code has been sent.'));
             startActionOtpResendCooldown();
         } else {
             setActionOtpStatus(result?.message || 'Could not resend code.', true);
@@ -606,21 +634,24 @@ document.addEventListener('DOMContentLoaded', () => {
     async function confirmActionOtp() {
         if (!pendingAction) return;
         const otp = document.getElementById('action-otp-code')?.value.trim();
-        if (!/^\d{6}$/.test(otp)) {
-            setActionOtpStatus('Enter the 6-digit code.', true);
+        const needsNew = !document.getElementById('action-otp-new-group')?.classList.contains('hidden');
+        const otpNew   = needsNew ? document.getElementById('action-otp-code-new')?.value.trim() : undefined;
+        if (!/^\d{6}$/.test(otp) || (needsNew && !/^\d{6}$/.test(otpNew))) {
+            setActionOtpStatus(needsNew ? 'Enter both 6-digit codes.' : 'Enter the 6-digit code.', true);
             return;
         }
 
         const btn = document.getElementById('btn-confirm-action-otp');
         btn.disabled    = true;
         btn.textContent = 'Verifying…';
-        const result = await API.post('/auth/action-otp/confirm', { otp });
+        const result = await API.post('/auth/action-otp/confirm', { otp, ...(needsNew && { otpNew }) });
         btn.disabled    = false;
         btn.textContent = 'Confirm';
 
         if (result?.success) {
             if (actionOtpResendCooldown) clearInterval(actionOtpResendCooldown);
             pendingAction = null;
+            showActionNewCode(null);
             Modal.close('action-otp-modal');
             Toast.show(result.message || 'Action completed.', 'success');
             loadUsers();
@@ -630,8 +661,10 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     document.getElementById('btn-confirm-action-otp')?.addEventListener('click', confirmActionOtp);
-    document.getElementById('action-otp-code')?.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter') confirmActionOtp();
+    ['action-otp-code', 'action-otp-code-new'].forEach(id => {
+        document.getElementById(id)?.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') confirmActionOtp();
+        });
     });
 
     // Password strength meters

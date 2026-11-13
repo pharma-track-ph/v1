@@ -10,7 +10,7 @@ const { exportReport, formatShortDateTime } = require('../utils/reportExporter')
 const EmailChangeOtpStore = require('../utils/emailChangeOtpStore');
 const ActionOtpStore      = require('../utils/actionOtpStore');
 const CashSession         = require('../models/CashSession');
-const { plainTextProblem, passwordProblem, avatarProblem } = require('../utils/inputGuards');
+const { plainTextProblem, passwordProblem, avatarProblem, emailProblem } = require('../utils/inputGuards');
 const { passwordVersion } = require('../utils/passwordVersion');
 const loginThrottle = require('../utils/loginThrottle');
 
@@ -23,6 +23,41 @@ const issueToken = (user) => jwt.sign(
 
 const lockedMessage = (seconds) =>
     `Too many failed attempts. Please try again in ${Math.max(1, Math.ceil(seconds / 60))} minute(s).`;
+
+// ---- Email verification with TWO codes ----
+// Code 1 goes to the person making the change, code 2 to the NEW address (proves it is real).
+const makeCodePair = async () => {
+    const first = String(crypto.randomInt(100000, 1000000));
+    let second = String(crypto.randomInt(100000, 1000000));
+    while (second === first) second = String(crypto.randomInt(100000, 1000000));
+    return { first, second, firstHash: await bcrypt.hash(first, 10), secondHash: await bcrypt.hash(second, 10) };
+};
+
+// Sends both codes. Returns null when both went out, otherwise the message to show.
+const sendCodePair = async (requesterEmail, newEmail, requesterName, description, codes, tag) => {
+    const [toRequester, toNew] = await Promise.allSettled([
+        sendActionOtp(requesterEmail, codes.first, requesterName, description),
+        sendActionOtp(newEmail, codes.second, requesterName, description)
+    ]);
+    for (const r of [toRequester, toNew]) {
+        if (r.status === 'rejected') console.error(`[${tag}] Failed to send OTP email:`, r.reason?.text || r.reason?.message || r.reason);
+    }
+    if (toNew.status === 'rejected') return 'Could not send a code to the new email address. Check the address and try again.';
+    if (toRequester.status === 'rejected') return 'Could not send the verification email. Please try again later.';
+    return null;
+};
+
+// Both codes are always compared, so the time taken never reveals which one was wrong.
+const codesMatch = async (pending, otp, otpNew) => {
+    const first = await bcrypt.compare(String(otp ?? ''), pending.otpHash);
+    if (!pending.otpHashNew) return first;
+    const second = await bcrypt.compare(String(otpNew ?? ''), pending.otpHashNew);
+    return first && second;
+};
+
+const wrongCodeMessage = (pending, remaining) => remaining > 0
+    ? `${pending.otpHashNew ? 'One or both codes are incorrect.' : 'Incorrect code.'} ${remaining} attempt(s) left.`
+    : 'Too many incorrect attempts. Please request a new code.';
 
 /** POST /api/auth/login - Authenticates user and returns a JWT. */
 const login = async (req, res, next) => {
@@ -212,8 +247,13 @@ const requestEmailChangeOtp = async (req, res, next) => {
         const { id } = req.params;
         const { newEmail } = req.body;
 
-        if (!newEmail) {
+        if (!newEmail || typeof newEmail !== 'string') {
             return res.status(400).json({ success: false, message: 'New email is required.' });
+        }
+
+        const emailIssue = emailProblem(newEmail);
+        if (emailIssue) {
+            return res.status(400).json({ success: false, message: emailIssue });
         }
 
         const normalizedEmail = newEmail.toLowerCase().trim();
@@ -232,32 +272,35 @@ const requestEmailChangeOtp = async (req, res, next) => {
             return res.status(400).json({ success: false, message: 'That is already this user\'s email address.' });
         }
 
-        const existing = await User.findByEmail(normalizedEmail);
+        const existing = await User.findByEmailIncludingInactive(normalizedEmail);
         if (existing && parseInt(existing.id) !== parseInt(id)) {
             return res.status(409).json({ success: false, message: 'Email already in use by another account.' });
         }
 
         const requester = await User.findById(req.user.id);
 
-        const otp       = String(crypto.randomInt(100000, 1000000));
-        const otpHash   = await bcrypt.hash(otp, 10);
+        const codes     = await makeCodePair();
         const expiresAt = new Date(Date.now() + OTP_EXPIRY_MINUTES * 60 * 1000);
 
         // In-memory only - see utils/emailChangeOtpStore.js for why this isn't...
         EmailChangeOtpStore.set(req.user.id, {
-            otpHash, expiresAt, targetId: id, newEmail: normalizedEmail
+            otpHash: codes.firstHash, otpHashNew: codes.secondHash, expiresAt, targetId: id, newEmail: normalizedEmail
         });
 
-        try {
-            await sendEmailChangeOtp(requester.email, otp, requester.name, target.name, normalizedEmail);
-        } catch (mailErr) {
-            // See forgotPassword's comment above
-            console.error('[requestEmailChangeOtp] Failed to send OTP email:', mailErr?.text || mailErr?.message || mailErr);
+        // Code 1 to the Owner making the change, code 2 to the NEW address
+        const sendProblem = await sendCodePair(requester.email, normalizedEmail, requester.name,
+            `change ${target.name}'s email`, codes, 'requestEmailChangeOtp');
+        if (sendProblem) {
             EmailChangeOtpStore.clear(req.user.id);
-            return res.status(500).json({ success: false, message: 'Could not send the verification email. Please try again later.' });
+            return res.status(500).json({ success: false, message: sendProblem });
         }
 
-        res.json({ success: true, message: `A verification code has been sent to ${requester.email}.` });
+        res.json({
+            success: true,
+            requiresNewCode: true,
+            sentTo: { current: requester.email, newEmail: normalizedEmail },
+            message: 'Verification codes sent.'
+        });
 
     } catch (err) { next(err); }
 };
@@ -266,7 +309,7 @@ const requestEmailChangeOtp = async (req, res, next) => {
 const confirmEmailChangeOtp = async (req, res, next) => {
     try {
         const { id } = req.params;
-        const { otp } = req.body;
+        const { otp, otpNew } = req.body;
 
         if (!otp) {
             return res.status(400).json({ success: false, message: 'Verification code is required.' });
@@ -292,19 +335,20 @@ const confirmEmailChangeOtp = async (req, res, next) => {
             return res.status(429).json({ success: false, message: 'Too many incorrect attempts. Please request a new code.' });
         }
 
-        const matches = await bcrypt.compare(otp, pending.otpHash);
+        if (pending.otpHashNew && !otpNew) {
+            return res.status(400).json({ success: false, message: 'Enter both verification codes.' });
+        }
+
+        const matches = await codesMatch(pending, otp, otpNew);
 
         if (!matches) {
             EmailChangeOtpStore.incrementAttempts(req.user.id);
             const remaining = MAX_OTP_ATTEMPTS - (pending.attempts + 1);
-            return res.status(400).json({
-                success: false,
-                message: remaining > 0 ? `Incorrect code. ${remaining} attempt(s) left.` : 'Too many incorrect attempts. Please request a new code.'
-            });
+            return res.status(400).json({ success: false, message: wrongCodeMessage(pending, remaining) });
         }
 
         // Re-check the target email hasn't been claimed by someone else
-        const stillAvailable = await User.findByEmail(pending.newEmail);
+        const stillAvailable = await User.findByEmailIncludingInactive(pending.newEmail);
         if (stillAvailable && parseInt(stillAvailable.id) !== parseInt(id)) {
             EmailChangeOtpStore.clear(req.user.id);
             return res.status(409).json({ success: false, message: 'That email was taken by another account while this code was pending. Please start again.' });
@@ -312,7 +356,7 @@ const confirmEmailChangeOtp = async (req, res, next) => {
 
         await User.updateEmail(id, pending.newEmail);
         EmailChangeOtpStore.clear(req.user.id);
-        await logAudit(req.user.id, 'CHANGE_USER_EMAIL', 'users', id, { new_email: pending.newEmail }, req.ip);
+        await logAudit(req.user.id, 'CHANGE_USER_EMAIL', 'users', id, { new_email: pending.newEmail, new_email_verified: !!pending.otpHashNew }, req.ip);
 
         res.json({ success: true, message: 'Email updated successfully.', email: pending.newEmail });
 
@@ -346,6 +390,11 @@ const requestActionOtp = async (req, res, next) => {
             const pwProblem = passwordProblem(password, { email, name });
             if (pwProblem) {
                 return res.status(400).json({ success: false, message: pwProblem });
+            }
+
+            const emailIssue = emailProblem(email);
+            if (emailIssue) {
+                return res.status(400).json({ success: false, message: emailIssue });
             }
 
             const normalizedEmail = email.toLowerCase().trim();
@@ -423,27 +472,48 @@ const requestActionOtp = async (req, res, next) => {
         }
 
         const requester = await User.findById(req.user.id);
-
-        const otp       = String(crypto.randomInt(100000, 1000000));
-        const otpHash   = await bcrypt.hash(otp, 10);
         const expiresAt = new Date(Date.now() + OTP_EXPIRY_MINUTES * 60 * 1000);
 
-        // In-memory only - see utils/actionOtpStore.js for why.
-        ActionOtpStore.set(req.user.id, { otpHash, expiresAt, action, payload });
+        // Add User needs TWO codes: one to the Owner, one to the NEW person's address (proves it is real).
+        // Every other action keeps its single code to the Owner.
+        const needsNewCode = action === 'create_user';
+        const newAddress    = needsNewCode ? String(payload.email).toLowerCase().trim() : null;
 
-        try {
-            await sendActionOtp(requester.email, otp, requester.name, actionDescription);
-        } catch (mailErr) {
-            // See forgotPassword's comment above
-            console.error('[requestActionOtp] Failed to send OTP email:', mailErr?.text || mailErr?.message || mailErr);
-            ActionOtpStore.clear(req.user.id);
-            return res.status(500).json({ success: false, message: 'Could not send the verification email. Please try again later.' });
+        if (needsNewCode) {
+            const codes = await makeCodePair();
+            // In-memory only - see utils/actionOtpStore.js for why.
+            ActionOtpStore.set(req.user.id, { otpHash: codes.firstHash, otpHashNew: codes.secondHash, expiresAt, action, payload });
+
+            const sendProblem = await sendCodePair(requester.email, newAddress, requester.name, actionDescription, codes, 'requestActionOtp');
+            if (sendProblem) {
+                ActionOtpStore.clear(req.user.id);
+                return res.status(500).json({ success: false, message: sendProblem });
+            }
+        } else {
+            const otp     = String(crypto.randomInt(100000, 1000000));
+            const otpHash = await bcrypt.hash(otp, 10);
+
+            // In-memory only - see utils/actionOtpStore.js for why.
+            ActionOtpStore.set(req.user.id, { otpHash, expiresAt, action, payload });
+
+            try {
+                await sendActionOtp(requester.email, otp, requester.name, actionDescription);
+            } catch (mailErr) {
+                // See forgotPassword's comment above
+                console.error('[requestActionOtp] Failed to send OTP email:', mailErr?.text || mailErr?.message || mailErr);
+                ActionOtpStore.clear(req.user.id);
+                return res.status(500).json({ success: false, message: 'Could not send the verification email. Please try again later.' });
+            }
         }
 
         // description included so the frontend can correct its own on-screen wording...
         res.json({
             success: true,
-            message: `A verification code has been sent to ${requester.email}.`,
+            requiresNewCode: needsNewCode,
+            ...(needsNewCode && { sentTo: { current: requester.email, newEmail: newAddress } }),
+            message: needsNewCode
+                ? 'Verification codes sent.'
+                : `A verification code has been sent to ${requester.email}.`,
             data: { description: actionDescription }
         });
 
@@ -453,7 +523,7 @@ const requestActionOtp = async (req, res, next) => {
 /** POST /api/auth/action-otp/confirm [Super Admin only] Body: { otp } Step 2 */
 const confirmActionOtp = async (req, res, next) => {
     try {
-        const { otp } = req.body;
+        const { otp, otpNew } = req.body;
         if (!otp) {
             return res.status(400).json({ success: false, message: 'Verification code is required.' });
         }
@@ -473,14 +543,15 @@ const confirmActionOtp = async (req, res, next) => {
             return res.status(429).json({ success: false, message: 'Too many incorrect attempts. Please request a new code.' });
         }
 
-        const matches = await bcrypt.compare(otp, pending.otpHash);
+        if (pending.otpHashNew && !otpNew) {
+            return res.status(400).json({ success: false, message: 'Enter both verification codes.' });
+        }
+
+        const matches = await codesMatch(pending, otp, otpNew);
         if (!matches) {
             ActionOtpStore.incrementAttempts(req.user.id);
             const remaining = MAX_OTP_ATTEMPTS - (pending.attempts + 1);
-            return res.status(400).json({
-                success: false,
-                message: remaining > 0 ? `Incorrect code. ${remaining} attempt(s) left.` : 'Too many incorrect attempts. Please request a new code.'
-            });
+            return res.status(400).json({ success: false, message: wrongCodeMessage(pending, remaining) });
         }
 
         const { action, payload } = pending;
@@ -501,7 +572,7 @@ const confirmActionOtp = async (req, res, next) => {
                     return res.status(409).json({ success: false, message: 'That account has already been reactivated.' });
                 }
                 await User.reactivate(reactivateUserId, password);
-                await logAudit(req.user.id, 'REACTIVATE_USER', 'users', reactivateUserId, { email }, req.ip);
+                await logAudit(req.user.id, 'REACTIVATE_USER', 'users', reactivateUserId, { email, email_verified: !!pending.otpHashNew }, req.ip);
                 responseMessage = `Account reactivated -- ${target.name}'s previous role and access have been restored.`;
             } else {
                 // Re-check email uniqueness
@@ -511,7 +582,7 @@ const confirmActionOtp = async (req, res, next) => {
                     return res.status(409).json({ success: false, message: 'That email was taken by another account while this code was pending. Please start again.' });
                 }
                 const id = await User.create({ name, email: email.toLowerCase().trim(), password, role });
-                await logAudit(req.user.id, 'CREATE_USER', 'users', id, { name, email, role }, req.ip);
+                await logAudit(req.user.id, 'CREATE_USER', 'users', id, { name, email, role, email_verified: !!pending.otpHashNew }, req.ip);
                 responseMessage = 'User created successfully.';
             }
 
@@ -929,7 +1000,7 @@ const confirmChangePasswordOtp = async (req, res, next) => {
 };
 
 // Self-service email change (any authenticated role) Each person changes THEIR OWN...
-const EMAIL_FORMAT = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+// (the email format check is emailProblem() in utils/inputGuards.js)
 
 /** POST /api/auth/change-email-otp/request [Any authenticated role] Body */
 const requestChangeEmailOtp = async (req, res, next) => {
@@ -939,10 +1010,11 @@ const requestChangeEmailOtp = async (req, res, next) => {
             return res.status(400).json({ success: false, message: 'New email is required.' });
         }
 
-        const normalizedEmail = newEmail.toLowerCase().trim();
-        if (!EMAIL_FORMAT.test(normalizedEmail) || normalizedEmail.length > 150) {
-            return res.status(400).json({ success: false, message: 'Enter a valid email address.' });
+        const emailIssue = emailProblem(newEmail);
+        if (emailIssue) {
+            return res.status(400).json({ success: false, message: emailIssue });
         }
+        const normalizedEmail = newEmail.toLowerCase().trim();
 
         const requester = await User.findById(req.user.id);
         if (!requester) return res.status(404).json({ success: false, message: 'User not found.' });
@@ -956,23 +1028,28 @@ const requestChangeEmailOtp = async (req, res, next) => {
             return res.status(409).json({ success: false, message: 'That email is already used by another account.' });
         }
 
-        const otp       = String(crypto.randomInt(100000, 1000000));
-        const otpHash   = await bcrypt.hash(otp, 10);
+        const codes     = await makeCodePair();
         const expiresAt = new Date(Date.now() + OTP_EXPIRY_MINUTES * 60 * 1000);
 
         ActionOtpStore.set(req.user.id, {
-            otpHash, expiresAt, action: 'self_change_email', payload: { newEmail: normalizedEmail }
+            otpHash: codes.firstHash, otpHashNew: codes.secondHash, expiresAt,
+            action: 'self_change_email', payload: { newEmail: normalizedEmail }
         });
 
-        try {
-            await sendActionOtp(requester.email, otp, requester.name, 'change your own account email');
-        } catch (mailErr) {
-            console.error('[requestChangeEmailOtp] Failed to send OTP email:', mailErr?.text || mailErr?.message || mailErr);
+        // Code 1 to your CURRENT email (proves it is you), code 2 to the NEW address (proves it is real)
+        const sendProblem = await sendCodePair(requester.email, normalizedEmail, requester.name,
+            'change your own account email', codes, 'requestChangeEmailOtp');
+        if (sendProblem) {
             ActionOtpStore.clear(req.user.id);
-            return res.status(500).json({ success: false, message: 'Could not send the verification email. Please try again later.' });
+            return res.status(500).json({ success: false, message: sendProblem });
         }
 
-        res.json({ success: true, message: `A verification code has been sent to ${requester.email}.` });
+        res.json({
+            success: true,
+            requiresNewCode: true,
+            sentTo: { current: requester.email, newEmail: normalizedEmail },
+            message: 'Verification codes sent.'
+        });
 
     } catch (err) { next(err); }
 };
@@ -980,7 +1057,7 @@ const requestChangeEmailOtp = async (req, res, next) => {
 /** POST /api/auth/change-email-otp/confirm [Any authenticated role] Body: { otp } */
 const confirmChangeEmailOtp = async (req, res, next) => {
     try {
-        const { otp } = req.body;
+        const { otp, otpNew } = req.body;
         if (!otp) {
             return res.status(400).json({ success: false, message: 'Verification code is required.' });
         }
@@ -1000,14 +1077,15 @@ const confirmChangeEmailOtp = async (req, res, next) => {
             return res.status(429).json({ success: false, message: 'Too many incorrect attempts. Please request a new code.' });
         }
 
-        const matches = await bcrypt.compare(otp, pending.otpHash);
+        if (pending.otpHashNew && !otpNew) {
+            return res.status(400).json({ success: false, message: 'Enter both verification codes.' });
+        }
+
+        const matches = await codesMatch(pending, otp, otpNew);
         if (!matches) {
             ActionOtpStore.incrementAttempts(req.user.id);
             const remaining = MAX_OTP_ATTEMPTS - (pending.attempts + 1);
-            return res.status(400).json({
-                success: false,
-                message: remaining > 0 ? `Incorrect code. ${remaining} attempt(s) left.` : 'Too many incorrect attempts. Please request a new code.'
-            });
+            return res.status(400).json({ success: false, message: wrongCodeMessage(pending, remaining) });
         }
 
         const newEmail = pending.payload.newEmail;
@@ -1033,7 +1111,7 @@ const confirmChangeEmailOtp = async (req, res, next) => {
         }
 
         ActionOtpStore.clear(req.user.id);
-        await logAudit(req.user.id, 'CHANGE_OWN_EMAIL', 'users', req.user.id, { old_email: oldEmail, new_email: newEmail }, req.ip);
+        await logAudit(req.user.id, 'CHANGE_OWN_EMAIL', 'users', req.user.id, { old_email: oldEmail, new_email: newEmail, new_email_verified: !!pending.otpHashNew }, req.ip);
 
         res.json({ success: true, message: 'Email updated successfully.', email: newEmail });
 

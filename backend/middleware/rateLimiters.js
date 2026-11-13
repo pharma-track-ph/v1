@@ -25,4 +25,17 @@ const resetStepLimiter = rateLimit({
     message: { success: false, message: 'Too many attempts. Please wait 15 minutes and try again.' }
 });
 
-module.exports = { loginLimiter, forgotPasswordLimiter, resetStepLimiter };
+// Verification codes sent to a NEW email address (own email change, Owner changing an email, Add User).
+// Each request emails an address chosen by the user, so it is limited per person: 5 per 15 minutes.
+// Only requests that really sent codes count (failed checks do not), and the other action codes
+// (change password, delete user) are not limited here.
+const emailCodeLimiter = rateLimit({
+    ...common,
+    max: 5,
+    skipFailedRequests: true,
+    keyGenerator: (req) => `user-${req.user && req.user.id !== undefined ? req.user.id : 'unknown'}`,
+    skip: (req) => req.path.includes('action-otp') && !(req.body && req.body.action === 'create_user'),
+    message: { success: false, message: 'Too many verification codes were requested. Please wait 15 minutes and try again.' }
+});
+
+module.exports = { loginLimiter, forgotPasswordLimiter, resetStepLimiter, emailCodeLimiter };

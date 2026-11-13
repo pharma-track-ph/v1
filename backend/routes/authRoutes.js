@@ -10,7 +10,7 @@ const {
     requestChangeEmailOtp, confirmChangeEmailOtp
 } = require('../controllers/authController');
 const { verifyToken, requireRole } = require('../middleware/authMiddleware');
-const { loginLimiter, forgotPasswordLimiter, resetStepLimiter } = require('../middleware/rateLimiters');
+const { loginLimiter, forgotPasswordLimiter, resetStepLimiter, emailCodeLimiter } = require('../middleware/rateLimiters');
 
 // Login: 15 FAILED attempts per 15 minutes per IP (a successful login never counts)
 router.post('/login', loginLimiter, login);
@@ -28,7 +28,7 @@ router.post('/change-password-otp/request', verifyToken, requestChangePasswordOt
 router.post('/change-password-otp/confirm', verifyToken, confirmChangePasswordOtp);
 
 // Self-service email change (OTP)
-router.post('/change-email-otp/request', verifyToken, requestChangeEmailOtp);
+router.post('/change-email-otp/request', verifyToken, emailCodeLimiter, requestChangeEmailOtp);
 router.post('/change-email-otp/confirm', verifyToken, confirmChangeEmailOtp);
 
 // Forgot Password (OTP via email) - public, no login required.
@@ -42,11 +42,11 @@ router.get('/users',      verifyToken, requireRole('super_admin'), getAllUsers);
 router.put('/users/:id',  verifyToken, requireRole('super_admin'), updateUser);
 
 // Email change (OTP)
-router.post('/users/:id/email-otp/request', verifyToken, requireRole('super_admin'), requestEmailChangeOtp);
+router.post('/users/:id/email-otp/request', verifyToken, requireRole('super_admin'), emailCodeLimiter, requestEmailChangeOtp);
 router.post('/users/:id/email-otp/confirm', verifyToken, requireRole('super_admin'), confirmEmailChangeOtp);
 
 // Action verification (OTP)
-router.post('/action-otp/request', verifyToken, requireRole('super_admin'), requestActionOtp);
+router.post('/action-otp/request', verifyToken, requireRole('super_admin'), emailCodeLimiter, requestActionOtp);
 router.post('/action-otp/confirm', verifyToken, requireRole('super_admin'), confirmActionOtp);
 
 // Audit logs - Owner (every entry) and Admin...
